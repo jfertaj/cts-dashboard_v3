@@ -1,0 +1,48 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    env_file:
+      - .env
+    environment:
+      AI_CHAT_DEBUG: 1
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DATABASE_URL: ${DATABASE_URL}
+      FRONTEND_BASE: ${FRONTEND_BASE}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      GOOGLE_REGION_BIAS: ${GOOGLE_REGION_BIAS}
+      SF_CLIENT_ID: ${SF_CLIENT_ID}
+      SF_CLIENT_SECRET: ${SF_CLIENT_SECRET}
+      SF_REDIRECT_URI: ${SF_REDIRECT_URI}
+      SF_DOMAIN: ${SF_DOMAIN}
+      SALESFORCE_API_VERSION: ${SALESFORCE_API_VERSION}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      QUAL_DEBUG: "1"              # <-- en formato mapa, no como item de lista
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY}
+        VITE_API_BASE: ""           # mismo origen (proxied por nginx)
+        NGINX_CONF: nginx.local.conf
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    restart: unless-stopped

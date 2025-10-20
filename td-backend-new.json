@@ -1,0 +1,112 @@
+{
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "745854319016.dkr.ecr.eu-west-1.amazonaws.com/cts-dashboard-backend:20251010-151147",
+      "cpu": 0,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp",
+          "name": "backend-8000-tcp",
+          "appProtocol": "http"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "LOG_LEVEL",
+          "value": "INFO"
+        },
+        {
+          "name": "SF_SCOPES",
+          "value": "refresh_token api id web"
+        },
+        {
+          "name": "GOOGLE_REGION_BIAS",
+          "value": "es"
+        }
+      ],
+      "environmentFiles": [],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/backend-oshxLi:DATABASE_URL::"
+        },
+        {
+          "name": "FRONTEND_BASE",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/backend-oshxLi:FRONTEND_BASE::"
+        },
+        {
+          "name": "FRONTEND_ORIGINS",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/backend-oshxLi:FRONTEND_ORIGINS::"
+        },
+        {
+          "name": "GOOGLE_MAPS_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/backend-oshxLi:GOOGLE_MAPS_API_KEY::"
+        },
+        {
+          "name": "SALESFORCE_API_VERSION",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/backend-oshxLi:SALESFORCE_API_VERSION::"
+        },
+        {
+          "name": "SF_CLIENT_ID",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/salesforce-kkVxPr:SF_CLIENT_ID::"
+        },
+        {
+          "name": "SF_CLIENT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/salesforce-kkVxPr:SF_CLIENT_SECRET::"
+        },
+        {
+          "name": "SF_DOMAIN",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/salesforce-kkVxPr:SF_DOMAIN::"
+        },
+        {
+          "name": "SF_REDIRECT_URI",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-1:745854319016:secret:prod/cts-dashboard/salesforce-kkVxPr:SF_REDIRECT_URI::"
+        }
+      ],
+      "ulimits": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/cts-dashboard-backend",
+          "awslogs-create-group": "true",
+          "awslogs-region": "eu-west-1",
+          "awslogs-stream-prefix": "ecs"
+        },
+        "secretOptions": []
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -fsS http://localhost:8000/healthz || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "systemControls": []
+    }
+  ],
+  "family": "cts-dashboard-backend",
+  "taskRoleArn": "arn:aws:iam::745854319016:role/ecsTaskRole-cts-dashboard",
+  "executionRoleArn": "arn:aws:iam::745854319016:role/ecsTaskExecutionRole-cts-dashboard",
+  "networkMode": "awsvpc",
+  "volumes": [],
+  "placementConstraints": [],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "512",
+  "memory": "2048",
+  "enableFaultInjection": false
+}

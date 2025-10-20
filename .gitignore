@@ -1,0 +1,17 @@
+# Node.js / React / Vite
+node_modules/
+dist/
+.env
+.env.*
+.DS_Store
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+
+# Docker
+*.log
+*.pid
+*.sock
+/tmp
+/build

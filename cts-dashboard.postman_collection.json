@@ -1,0 +1,98 @@
+{
+  "info": {
+    "name": "CTS Dashboard API",
+    "description": "Collection to test Salesforce explorer endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Salesforce Login",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/api/salesforce/oauth/login?next=/",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["api", "salesforce", "oauth", "login"],
+          "query": [
+            { "key": "next", "value": "/" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Explorer Bootstrap",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/api/salesforce/map/bootstrap",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["api", "salesforce", "map", "bootstrap"]
+        }
+      }
+    },
+    {
+      "name": "3. Explorer Fields",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/api/explorer/fields",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["api", "explorer", "fields"]
+        }
+      }
+    },
+    {
+      "name": "4. Explorer Search",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"filters\": {\n    \"logic\": \"AND\",\n    \"rules\": [\n      { \"field\": \"Account.BillingCountry\", \"operator\": \"equals\", \"value\": \"Austria\" }\n    ]\n  },\n  \"columns\": [\"Account.Id\", \"Account.Name\", \"Account.BillingCountry\", \"Type\"]\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/api/explorer/search",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["api", "explorer", "search"]
+        }
+      }
+    }
+    {
+    "name": "5. Explorer Search (with sf. prefix)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"filters\": {\n    \"logic\": \"AND\",\n    \"rules\": [\n      { \"field\": \"sf.Account.BillingCountry\", \"operator\": \"equals\", \"value\": \"Austria\" }\n    ]\n  },\n  \"columns\": [\"sf.Account.Id\", \"sf.Account.Name\", \"sf.Account.BillingCountry\", \"sf.Type\"]\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/api/explorer/search",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["api", "explorer", "search"]
+        }
+      }
+    }
+  ]
+}

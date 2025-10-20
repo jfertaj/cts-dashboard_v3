@@ -1,0 +1,2518 @@
+// src/pages/ExplorerView.tsx
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  ExplorerPoint,
+  ExplorerRow,
+  explorerSearch,
+  explorerBootstrap,
+  salesforceMe,
+  FieldDef,
+  getExplorerFields,
+  FilterGroup,
+  explorerFillColumns,
+} from "../lib/api";
+import FilterBuilder from "../components/FilterBuilder";
+import MapView from "../components/MapView";
+import ColumnPicker from "../components/ColumnPicker";
+import ChartModal from "../components/ChartModal";
+
+import {
+  ColumnDef,
+  SortingState,
+  ColumnFiltersState,
+  getCoreRowModel,
+  getSortedRowModel,
+  getPaginationRowModel,
+  getFilteredRowModel,
+  useReactTable,
+  flexRender,
+} from "@tanstack/react-table";
+
+import useSWR, { useSWRConfig } from "swr";
+import { EXPLORER_BOOT_KEY } from "../lib/cacheKeys";
+import { listenExplorerChange } from "../lib/events";
+import { sfLoginRedirect } from "../lib/salesforce";
+import { askAI, ChatResponse } from "../lib/ai";
+
+
+// import { explorerFillColumns } from "../lib/api";
+
+// ========== Colores ==========
+const COLOR_PROFILING = "#2563eb";
+const COLOR_QUALIF = "#059669";
+const COLOR_BOTH = "#7c3aed";
+const COLOR_NEUTRAL = "#9ca3af";
+
+// ========== Columnas visibles por defecto ==========
+const DEFAULT_VISIBLE_COLUMNS: string[] = [
+  "sf.Account.Name"
+];
+
+// ========== PRESETS base (SF) ==========
+const PRESETS = {
+  Basic: [
+    "sf.Account.Name",
+    "sf.Account.ShippingCountry",
+    "sf.Account.ShippingCity",
+    "sf.Name",
+    "sf.StageName",
+    "sf.CloseDate",
+  ],
+  OpportunityCore: [
+    "sf.Name",
+    "sf.StageName",
+    "sf.Amount",
+    "sf.CloseDate",
+    "sf.CreatedDate",
+    "sf.LastModifiedDate",
+    "sf.LastActivityDate",
+    "sf.RecordTypeId",
+  ],
+  AccountBasics: [
+    "sf.Account.Id",
+    "sf.Account.Name",
+    "sf.Account.ShippingCountry",
+    "sf.Account.ShippingCity",
+    "sf.Account.ShippingLatitude",
+    "sf.Account.ShippingLongitude",
+  ],
+  QualificationDates: [
+    "sf.C_Profiling_Complete__c",
+    "sf.Qualification_Close_Date__c",
+  ],
+  PatientPopulation: [
+    "sf.C_Number_of_T1D_Patients_currently_U_18__c",
+    "sf.C_Number_of_T1D_Patients_currently_O_18__c",
+    "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
+    "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+    "sf.C_Number_of_Individuals_screened_intotal__c",
+    "sf.C_Number_of_Stage1_Individuals_followed__c",
+    "sf.C_Number_of_Stage2_Individuals_followed__c",
+  ],
+  StaffTraining: [
+    "sf.C_All_Research_Staff_Needed_for_GCP__c",
+    "sf.C_Lead_Study_Nurse_Dedicated_to_the_cent__c",
+    "sf.C_Lead_Study_Nurse__c",
+    "sf.C_Lead_Study_Coordinator_SC__c",
+    "sf.C_Study_Nurse_Specialities__c",
+    "sf.C_Study_Nurse_Situation_Explanation__c",
+    "sf.C_SC_Situation_Explanation__c",
+  ],
+  ScreeningPrograms: [
+    "sf.C_Aware_of_any_Screening_Program__c",
+    "sf.C_Center_for_Running_Early_Diagnosis__c",
+    "sf.C_The_Funding_for_the_screening_program__c",
+    "sf.C_Under_Which_Program__c",
+    "sf.C_Send_patients_to_other_CTS_nearby__c",
+    "sf.C_List_of_nearby_CTS__c",
+  ],
+  ClinicalCapacity: [
+    "sf.C_Has_facility_to_conduct__c",
+    "sf.C_Centralized_Clinical_Trial_Facility__c",
+    "sf.C_Centralized_Facility_Contact_Person__c",
+    "sf.C_Services_Provided_by_Centralized_Unit__c",
+    "sf.C_Primarily_Caring_for_all_study__c",
+    "sf.C_Site_Linked_with_Patient_Org_or_PAC__c",
+    "sf.C_List_of_Organization_or_PAC_names__c",
+  ],
+  TrialPhases: [
+    "sf.C_Phase_I_Type1__c",
+    "sf.C_Phase_I_NonType1__c",
+    "sf.C_Phase_II_Type1__c",
+    "sf.C_Phase_II_NonType1__c",
+    "sf.C_Phase_III_Type1__c",
+    "sf.C_Phase_III_NonType1__c",
+    "sf.C_Immuno_Medi_trial_names_or_sponsors__c",
+    "sf.C_List_of_trial_name_or_sponsors_Type1__c",
+    "sf.C_List_of_trial_name_or_sponsors_NonTyp1__c",
+  ],
+  NotesAndVerification: [
+    "sf.C_Comments__c",
+    "sf.C_Additional_Comments__c",
+    "sf.Certification_Output__c",
+    "sf.C_Account_Verified__c",
+    "sf.C_Contact_Verified__c",
+  ],
+};
+
+// ========== Mapa preset -> lista de keys SF ==========
+const SF_GROUPS: Record<string, string[]> = {
+  Basic: PRESETS.Basic,
+  "Opportunity Core": PRESETS.OpportunityCore,
+  "Account Basics": PRESETS.AccountBasics,
+  "Qualification (SF dates)": PRESETS.QualificationDates,
+  "Clinical Details": PRESETS.ClinicalCapacity,
+  "Notes & Verification": PRESETS.NotesAndVerification,
+  "Trial Phases": PRESETS.TrialPhases,
+  "Screening Programs": PRESETS.ScreeningPrograms,
+  "Staff Training": PRESETS.StaffTraining,
+  "Patient Population": PRESETS.PatientPopulation,
+};
+
+type LocalFieldDef = FieldDef & { group?: string };
+
+const STORAGE_NS = "explorer";
+const LS_KEYS = {
+  visibleColumns: `${STORAGE_NS}:visibleColumns`,
+  sorting: `${STORAGE_NS}:sorting`,
+  columnFilters: `${STORAGE_NS}:columnFilters`,
+  globalFilter: `${STORAGE_NS}:globalFilter`,
+  pageSize: `${STORAGE_NS}:pageSize`,
+  columnOrder: `${STORAGE_NS}:columnOrder`,
+  nearbyLayout: `${STORAGE_NS}:nearbyLayout`,
+  nearbySideWidth: `${STORAGE_NS}:nearbySideWidth`,
+};
+
+// Debug flag (puedes apagarlo luego)
+const DEBUG = true; // o lee de localStorage si prefieres
+const dbg = (...args: any[]) => { if (DEBUG) console.log(...args); };
+const dbgwarn = (...args: any[]) => { if (DEBUG) console.warn(...args); };
+// helper para detectar timeouts/abort
+const isTimeoutErr = (e: any) => {
+  const name = String(e?.name || "");
+  const msg  = String(e?.message || "");
+  return name === "AbortError" || /timeout/i.test(msg);
+};
+
+
+function safeParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T; } catch { return fallback; }
+}
+
+// --- Columnas que NUNCA deben pedirse a /columns/fill (vienen de otro sitio) ---
+// En concreto, Account Name lo tienes en row.account_name / points.account_name
+const UNFILLABLE_COLUMNS = new Set<string>([
+  "sf.Account.Name",
+]);
+
+// --- Columnas que NO queremos en "visibleColumns" porque ya están como fijas ---
+// Evita duplicados con las columnas fijas "country"/"city" de la tabla
+const EXCLUDED_VISIBLE_COLUMNS = new Set<string>([
+  "sf.Account.ShippingCountry",
+  "sf.Account.ShippingCity",
+]);
+
+function useDebouncedEffect(fn: () => void, deps: any[], delay = 250) {
+  const t = useRef<number | null>(null);
+  useEffect(() => {
+    if (t.current) window.clearTimeout(t.current);
+    t.current = window.setTimeout(() => fn(), delay);
+    return () => { if (t.current) window.clearTimeout(t.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+function LoadingOverlay({ text }: { text: string }) {
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-white/70 backdrop-blur-sm">
+      <div className="flex items-center gap-3 rounded-xl border bg-white shadow-lg px-4 py-3">
+        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+        </svg>
+        <span className="text-sm font-medium">{text}</span>
+      </div>
+    </div>
+  );
+}
+
+function getAccountNameByIdSafe(
+  id: string,
+  rowsList: ExplorerRow[],
+  pointsList: ExplorerPoint[]
+): string | "" {
+  const r = rowsList.find(r => r.account_id === id);
+  if (r?.account_name) return r.account_name;
+  const p = pointsList.find(p => p.account_id === id);
+  return p?.account_name || "";
+}
+
+/* ===================== Details Modal (NEW: usa backend extras) ===================== */
+
+function DetailsModal({
+  open,
+  onClose,
+  accountId,
+  accountName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  accountId: string | null;
+  accountName?: string | null;
+}) {
+  type AccountExtras = {
+    account_id: string;
+    member?: { account_id: string; name: string } | null;
+    pi?: { contact_id?: string; name?: string; email?: string; phone?: string; role__c?: string } | null;
+    opportunity?: { id?: string; name?: string; new_dx_u18?: number | null; new_dx_o18?: number | null } | null;
+    newDxUnder18?: number | null;
+    newDxOver18?: number | null;
+    csContribution?: {
+      Clinical_Site_CS__c?: boolean | null;
+      Referral_Outreach_Site_Non_CTS__c?: boolean | null;
+      Elegible_for_DETECT_Site__c?: boolean | null;
+    } | null;
+    assignments?: Array<{
+      id: string;
+      name: string;
+      stage?: string | null;
+      type?: string | null;
+      opportunity_id?: string | null;
+      opportunity_name?: string | null;
+      created?: string | null;
+    }> | null;
+  };
+  const [loading, setLoading] = React.useState(false);
+  const [extras, setExtras] = React.useState<AccountExtras | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [raw, setRaw] = React.useState<any>(null); // debug: payload crudo
+
+  React.useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      if (!open || !accountId) { setExtras(null); setError(null); return; }
+      setLoading(true); setError(null);
+      try {
+        const res = await fetch(`/api/salesforce/explorer/account-extras/${accountId}`, { credentials: "include" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // parseo defensivo: primero como texto, luego intenta JSON
+        const txt = await res.text();
+        let json: any = null;
+        try {
+          json = txt ? JSON.parse(txt) : {};
+        } catch (e) {
+          json = { _parse_error: String(e), _body: txt };
+        }
+        if (alive) {
+          setRaw(json);
+          // normaliza a objeto con las claves esperadas
+          const normalized: AccountExtras = {
+            account_id: json?.account_id ?? accountId,
+            member: json?.member ?? null,
+            pi: json?.pi ?? null,
+            opportunity: json?.opportunity ?? null,
+            newDxUnder18: json?.newDxUnder18 ?? json?.opportunity?.new_dx_u18 ?? null,
+            newDxOver18: json?.newDxOver18 ?? json?.opportunity?.new_dx_o18 ?? null,
+            csContribution: json?.csContribution ?? { Clinical_Site_CS__c: null, Referral_Outreach_Site_Non_CTS__c: null, Elegible_for_DETECT_Site__c: null },
+            assignments: Array.isArray(json?.assignments) ? json.assignments : [],
+          };
+          setExtras(normalized);
+          console.debug("[DetailsModal] extras payload:", normalized, "(raw:", json, ")");
+          if (json?.error) {
+            setError(String(json.error));
+          }
+        }     
+      } catch (e: any) {
+        if (alive) {
+          console.warn("[DetailsModal] fetch error:", e);
+          setError(e?.message || "Failed to load details");
+          setRaw({ _fetch_error: String(e) });
+        }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    run();
+    return () => { alive = false; };
+  }, [open, accountId]);
+
+  if (!open || !accountId) return null;
+
+  const line = (label: string, value?: string | number | null) => (
+    <div className="flex items-start gap-2 text-sm">
+      <span className="w-48 text-gray-600">{label}</span>
+      <span className="font-medium text-gray-900 break-all">
+        {value !== undefined && value !== null && String(value).trim() !== "" ? String(value) : "—"}
+      </span>
+    </div>
+  );
+
+  const bool = (v?: boolean | null) => (v ? "✓" : "—");
+
+  const memberName = extras?.member?.name ?? "—";
+  const piName = extras?.pi?.name ?? "—";
+  const piEmail = extras?.pi?.email ?? "—";
+  const piPhone = extras?.pi?.phone ?? "—";
+  const oppName = extras?.opportunity?.name ?? "—";
+  const newU18 = extras?.opportunity?.new_dx_u18 ?? extras?.newDxUnder18 ?? null;
+  const newO18 = extras?.opportunity?.new_dx_o18 ?? extras?.newDxOver18 ?? null;
+  const cs = extras?.csContribution;
+
+  return (
+    <div
+      className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="details-modal-title"
+    >
+      {/* Contenedor del modal con altura máxima de viewport y layout en columna */}
+      <div className="w-full max-w-xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+        {/* Header sticky para que el botón Close siempre sea accesible */}
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+          <div className="min-w-0">
+            <div id="details-modal-title" className="text-sm text-gray-600">Details</div>
+            <div className="font-semibold truncate" title={accountName || accountId}>
+              {accountName || "—"}
+            </div>
+          </div>
+          <button className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {/* Body scrollable: ocupa el resto del alto */}
+        <div className="p-5 space-y-3 overflow-y-auto flex-1 min-h-0">
+          {line("Account Id", accountId)}
+          <hr className="my-2" />
+          {loading && <div className="text-sm text-gray-600">Loading extra info…</div>}
+          {error && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900 text-sm">
+              ⚠️ Could not load some details — {error}
+            </div>
+          )}
+
+          {/* Member & PI */}
+          {line("Member", memberName)}
+          <hr className="my-2" />
+          {line("PI Name", piName)}
+          {line("PI Email", piEmail)}
+          {line("PI Phone", piPhone)}
+
+          {/* Opportunity */}
+          <hr className="my-2" />
+          <div className="text-sm font-semibold text-gray-800">Opportunity</div>
+          {line("Opportunity Name", oppName)}
+          {line("New T1D diagnosed U<18 (last year)", newU18)}
+          {line("New T1D diagnosed O≥18 (last year)", newO18)}
+
+          {/* CS Contribution to INNODIA */}
+          <hr className="my-2" />
+          <div className="text-sm font-semibold text-gray-800">CS Contribution to INNODIA</div>
+          {line("INNODIA Clinical Trial Site", bool(cs?.Clinical_Site_CS__c))}
+          {line("Referral & Outreach Site (Non-CTS)", bool(cs?.Referral_Outreach_Site_Non_CTS__c))}
+          {line("Eligible for DETECT Site", bool(cs?.Elegible_for_DETECT_Site__c))}
+          {/* Assignments */}
+          <hr className="my-2" />
+          <div className="text-sm font-semibold text-gray-800">Assignments</div>
+          {Array.isArray(extras?.assignments) && extras.assignments.length > 0 ? (
+            <ul className="space-y-2">
+              {extras.assignments.map((a) => (
+                <li key={a.id} className="text-sm">
+                  <div className="font-medium">
+                    {a.name}
+                    {a.stage ? <span className="text-gray-600"> · {a.stage}</span> : null}
+                  </div>
+                  <div className="text-gray-700">{a.opportunity_name ?? "—"}</div>
+                  {/* Si quieres link a SF: 
+                     <a href={`https://INNODIA.my.salesforce.com/${a.id}`} target="_blank" rel="noreferrer" className="text-blue-600 underline">Open</a>
+                  */}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-sm text-gray-600">—</div>
+          )}
+          {/* DEBUG: muestra el JSON crudo cuando haya algo raro */}
+          {raw ? (
+            <details className="mt-3">
+              <summary className="text-xs text-gray-500 cursor-pointer">Debug payload</summary>
+              <pre className="mt-2 text-[11px] text-gray-700 bg-gray-50 rounded-md p-2 overflow-auto max-h-64">
+                {JSON.stringify(raw, null, 2)}
+              </pre>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Modal Nearby (reworked) ================= */
+type NearbyLayout = "side" | "bottom";
+
+function NearbyModal({
+  open,
+  baseAccountId,
+  baseAccountName,
+  defaultKm = 120,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  baseAccountId: string;
+  baseAccountName?: string | null;
+  defaultKm?: number;
+  onClose: () => void;
+  onConfirm: (opts: { baseAccountId: string; maxKm: number }) => void;
+}) {
+  const [km, setKm] = useState<number>(defaultKm);
+  useEffect(() => { if (open) setKm(defaultKm); }, [open, defaultKm]);
+  if (!open) return null;
+
+  const apply = () =>
+    onConfirm({ baseAccountId, maxKm: Math.max(1, Number.isFinite(km) ? km : defaultKm) });
+
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+        <div className="px-6 pt-5 pb-2 border-b">
+          <div className="flex items-center gap-2 text-gray-800">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z" stroke="currentColor" strokeWidth="1.5"/>
+            </svg>
+            <h3 className="text-lg font-semibold tracking-tight">Find nearby sites</h3>
+          </div>
+          <div className="mt-1 text-xs text-gray-600">
+            Base:{" "}
+            <span className="font-semibold text-gray-900" title={baseAccountName || baseAccountId}>
+              {baseAccountName || baseAccountId}
+            </span>{" "}
+            <code className="text-gray-500 ml-1">({baseAccountId})</code>
+          </div>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <label className="block text-sm font-medium text-gray-900">
+            Max driving distance (km)
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={1}
+              max={1000}
+              step={1}
+              value={km}
+              onChange={(e) => setKm(Number(e.target.value))}
+              className="flex-1 accent-[#0072CE]"
+            />
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={km}
+              onChange={(e) => setKm(Math.max(1, Number(e.target.value || 1)))}
+              onKeyDown={(e) => { if (e.key === "Enter") apply(); }}
+              className="w-24 rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-[#0072CE]"
+            />
+          </div>
+          <p className="text-xs text-gray-500">
+            Uses Google Distance Matrix (driving distance).
+          </p>
+        </div>
+
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 px-6 py-3 bg-gray-50 rounded-b-2xl border-t">
+          <button
+            onClick={onClose}
+            className="rounded-lg px-4 py-2 text-sm text-gray-700 hover:bg-white border"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={apply}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-[#0072CE] hover:opacity-90"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Drawer Nearby (reworked) ================= */
+function NearbyDrawer({
+  open,
+  baseAccountId,
+  baseAccountName,
+  maxKm,
+  useSeparateNearbyFilters,
+  filtersNearby,
+  fields,
+  layout,
+  sideWidth,
+  onSetLayout,
+  onSetSideWidth,
+  onHidePanel,
+  onExitNearby,
+  onToggleSeparate,
+  onChangeFiltersNearby,
+  onApplyFilters,
+  onApplyKm,
+  onClear,
+  closeOnBackdrop = false,
+}: {
+  open: boolean;
+  baseAccountId?: string | null;
+  baseAccountName?: string | null;
+  maxKm?: number | null;
+  useSeparateNearbyFilters: boolean;
+  filtersNearby: FilterGroup;
+  fields: FieldDef[];
+  layout: NearbyLayout;
+  sideWidth: number;
+  onSetLayout: (l: NearbyLayout) => void;
+  onSetSideWidth: (w: number) => void;
+  onHidePanel: () => void;
+  onExitNearby: () => void;
+  onToggleSeparate: (v: boolean) => void;
+  onChangeFiltersNearby: (fg: FilterGroup) => void;
+  onApplyFilters: () => void;
+  onApplyKm: (nextKm: number) => void;
+  onClear: () => void;
+  closeOnBackdrop?: boolean;
+}) {
+  const [localKm, setLocalKm] = useState<number>(Math.max(1, Number(maxKm || 120)));
+  useEffect(() => setLocalKm(Math.max(1, Number(maxKm || 120))), [maxKm]);
+
+  const clampedWidth = Math.max(480, Math.min(980, Math.round(sideWidth)));
+
+  const handleBackdropClick = useCallback(() => { if (closeOnBackdrop) onHidePanel(); }, [closeOnBackdrop, onHidePanel]);
+
+  const applyKm = () => onApplyKm(localKm);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 z-[9000] bg-black/30 backdrop-blur-[1px] transition-opacity ${open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
+        onClick={handleBackdropClick}
+        aria-hidden={!open}
+      />
+
+      {/* Drawer */}
+      <aside
+        className={
+          layout === "side"
+            ? `fixed right-0 top-0 z-[9010] h-full transform bg-white/95 backdrop-saturate-150 shadow-2xl transition-transform border-l ${open ? "translate-x-0" : "translate-x-full"}`
+            : `fixed left-0 right-0 bottom-0 z-[9010] w-full transform bg-white/95 backdrop-saturate-150 shadow-2xl transition-transform border-t ${open ? "translate-y-0" : "translate-y-full"}`
+        }
+        style={layout === "side" ? { width: clampedWidth } : { height: 420 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="nearby-drawer-title"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-3 bg-white/70">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-gray-800">
+              <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold tracking-wide bg-blue-50 text-blue-700 border-blue-200">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Z" stroke="currentColor" strokeWidth="1.5"/>
+                </svg>
+                NEARBY
+              </span>
+              <div id="nearby-drawer-title" className="truncate text-sm" title={baseAccountName || baseAccountId || "—"}>
+                Base:&nbsp;
+                <span className="font-semibold text-gray-900 truncate align-middle">
+                  {baseAccountName || "—"}
+                </span>
+                {baseAccountId ? (
+                  <code className="text-gray-500 ml-2 whitespace-nowrap">({baseAccountId})</code>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Layout switch */}
+            <div className="hidden sm:flex items-center border rounded-md overflow-hidden">
+              <button
+                className={`px-2 py-1 text-xs ${layout==="side"?"bg-gray-100 font-medium":""}`}
+                onClick={() => onSetLayout("side")}
+                title="Dock right"
+              >
+                Side
+              </button>
+              <button
+                className={`px-2 py-1 text-xs ${layout==="bottom"?"bg-gray-100 font-medium":""}`}
+                onClick={() => onSetLayout("bottom")}
+                title="Dock bottom"
+              >
+                Bottom
+              </button>
+            </div>
+
+            {/* Width control (solo side) */}
+            {layout === "side" && (
+              <div className="hidden md:flex items-center gap-1">
+                <button
+                  className="rounded-md border px-2 py-1 text-xs hover:bg-gray-50"
+                  onClick={() => onSetSideWidth(Math.max(480, clampedWidth - 60))}
+                  title="Narrow"
+                >−</button>
+                <span className="text-xs text-gray-600 w-16 text-center">{clampedWidth}px</span>
+                <button
+                  className="rounded-md border px-2 py-1 text-xs hover:bg-gray-50"
+                  onClick={() => onSetSideWidth(Math.min(980, clampedWidth + 60))}
+                  title="Widen"
+                >+</button>
+              </div>
+            )}
+
+            <button onClick={onHidePanel} className="rounded-md border px-2 py-1 text-sm hover:bg-gray-50" title="Hide panel">Hide</button>
+            <button onClick={onExitNearby} className="rounded-md border px-2 py-1 text-sm hover:bg-gray-50" title="Close nearby (exit)">Close</button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="h-[calc(100%-56px-56px)] overflow-auto p-4 space-y-4">
+          {/* Card: Distance */}
+          <div className="rounded-xl border bg-white shadow-sm">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="text-sm font-medium text-gray-800">Max driving distance (km)</span>
+              <span className="inline-flex items-center text-xs rounded-full bg-gray-100 text-gray-700 px-2 py-0.5 border">
+                Current: <b className="ml-1">{localKm}</b>
+              </span>
+            </div>
+            <div className="p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={1000}
+                  step={1}
+                  value={localKm}
+                  onChange={(e) => setLocalKm(Math.max(1, Number(e.target.value)))}
+                  className="flex-1 accent-[#0072CE]"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={localKm}
+                  onChange={(e) => setLocalKm(Math.max(1, Number(e.target.value || 1)))}
+                  onKeyDown={(e) => { if (e.key === "Enter") applyKm(); }}
+                  className="w-24 rounded-md border px-2 py-1.5 text-sm focus:ring-2 focus:ring-[#0072CE]"
+                />
+                <button
+                  className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+                  onClick={applyKm}
+                  title="Re-run nearby with this distance"
+                >
+                  Apply km
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">Re-applies the nearby search using Google Distance Matrix.</p>
+            </div>
+          </div>
+
+          {/* Card: Filters */}
+          <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="text-sm font-medium text-gray-800">Nearby filters</span>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700 select-none">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={useSeparateNearbyFilters}
+                  onChange={(e) => onToggleSeparate(e.target.checked)}
+                />
+                Use different filters
+              </label>
+            </div>
+
+            {useSeparateNearbyFilters ? (
+              <div className="p-3">
+                <FilterBuilder value={filtersNearby} onChange={onChangeFiltersNearby} fields={fields} />
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700"
+                    onClick={onApplyFilters}
+                  >
+                    Apply to nearby
+                  </button>
+                  <button
+                    className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+                    onClick={() => {
+                      onChangeFiltersNearby({ logic: "AND", rules: [] });
+                      setTimeout(() => onApplyFilters(), 0);
+                    }}
+                    title="Clear and re-run nearby with no extra filters"
+                  >
+                    Clear nearby filters
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="px-3 py-2 text-xs text-gray-600">
+                Using the same filter set as the global Filters panel.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sticky action bar */}
+        <div className="h-14 flex items-center justify-between gap-3 px-4 border-t bg-white/80 backdrop-blur-sm">
+          <div className="text-xs text-gray-600">
+            <span className="inline-block mr-2">Layout:</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 border text-gray-700">
+              {layout === "side" ? "Side" : "Bottom"}
+            </span>
+            {typeof maxKm === "number" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 border border-blue-200 text-blue-700 ml-2">
+                ≤ {maxKm} km
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+              onClick={onClear}
+              title="Exit nearby mode and clear results"
+            >
+              Clear nearby
+            </button>
+            <button
+              className="rounded-md bg-[#0072CE] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+              onClick={applyKm}
+              title="Re-run nearby now"
+            >
+              Re-run
+            </button>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// Badge (si lo necesitas)
+function TypeBadge({ type }: { type?: string | null }) {
+  const t = (type || "").toLowerCase();
+  let label = "—";
+  let dot = COLOR_NEUTRAL;
+  let pill = "bg-gray-100 text-gray-700 border-gray-200";
+
+  if (t === "qualification") { label = "Qualification"; dot = COLOR_QUALIF; pill = "bg-emerald-100 text-emerald-700 border-emerald-200"; }
+  else if (t === "profiling"){ label = "Profiling";     dot = COLOR_PROFILING; pill = "bg-blue-100 text-blue-700 border-blue-200"; }
+  else if (t === "both")     { label = "Both";          dot = COLOR_BOTH; pill = "bg-violet-100 text-violet-700 border-violet-200"; }
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${pill}`}>
+      <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dot }} />
+      {label}
+    </span>
+  );
+}
+
+function readDataCell(row: any, key: string) {
+  const d = row?.data ?? {};
+
+  // 1) clave exacta tal cual viene del backend (p.ej. "sf.C_Number_of_T1D_Patients_currently_U_18__c")
+  if (d[key] !== undefined && d[key] !== null && String(d[key]).trim() !== "") return d[key];
+
+  // 2) misma clave sin el prefijo "sf."
+  const base = key.replace(/^sf\./, "");
+  if (d[base] !== undefined && d[base] !== null && String(d[base]).trim() !== "") return d[base];
+
+  // 3) variantes con underscores (por si acaso)
+  const k2 = key.replace(/\./g, "_");
+  if (d[k2] !== undefined && d[k2] !== null && String(d[k2]).trim() !== "") return d[k2];
+
+  const k3 = base.replace(/\./g, "_");
+  if (d[k3] !== undefined && d[k3] !== null && String(d[k3]).trim() !== "") return d[k3];
+
+  // ⚠️ Importante: devolver undefined para que TanStack Table pueda aplicar sortUndefined: 'last'
+  return undefined;
+}
+
+function shallowEqual(a: any, b: any) {
+  // Para strings/números/bools/null/undefined vale con ===
+  if (a === b) return true;
+  // Caso raro de object/array (p.ej. si backend manda algo compuesto)
+  if (typeof a === "object" && typeof b === "object" && a && b) {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function mergeFilledCells(
+  baseRows: ExplorerRow[],
+  filled: Array<{ account_id: string; data: Record<string, any> }>
+): { rows: ExplorerRow[]; changed: boolean } {
+  if (!Array.isArray(baseRows) || !Array.isArray(filled) || filled.length === 0) {
+    dbg("[mergeFilledCells] no-op", { baseRows: baseRows?.length ?? 0, filled: filled?.length ?? 0 });
+    return { rows: baseRows, changed: false };
+  }
+
+  // Agrupa patches por account_id
+  const patches = new Map<string, Record<string, any>>();
+  for (const fr of filled) {
+    if (!fr?.account_id || !fr?.data) continue;
+    const prev = patches.get(fr.account_id) || {};
+    patches.set(fr.account_id, { ...prev, ...fr.data });
+  }
+
+  let anyChanged = false;
+
+  const nextRows = baseRows.map((row) => {
+    const patch = patches.get(row.account_id);
+    if (!patch) return row;
+
+    const prevData = row.data || {};
+    let rowChanged = false;
+    // Construye newData solo si algo cambia
+    let newData: Record<string, any> | null = null;
+
+    for (const [k, v] of Object.entries(patch)) {
+      const prev = prevData[k];
+      if (!shallowEqual(prev, v)) {
+        if (!newData) newData = { ...prevData };
+        newData[k] = v;
+        rowChanged = true;
+      }
+    }
+
+    if (!rowChanged) return row;
+
+    anyChanged = true;
+    return { ...row, data: newData! };
+  });
+
+  dbg("[mergeFilledCells] done", { changed: anyChanged });
+  return { rows: nextRows, changed: anyChanged };
+}
+
+const containsCI = (row: any, columnId: string, filterValue: string) => {
+  const v = row.getValue<any>(columnId);
+  if (v === null || v === undefined) return false;
+  const s = String(v).toLowerCase();
+  return s.includes(String(filterValue ?? "").toLowerCase());
+};
+
+type Preset = { id: string; label: string; keys: string[] };
+function orderKeysByPresets(allKeys: string[], presets: Preset[]): string[] {
+  const rank = new Map<string, number>();
+  const HUGE = 1e9;
+  presets.forEach((p, pi) => {
+    p.keys.forEach((k, ki) => {
+      if (!rank.has(k)) rank.set(k, pi * 10000 + ki);
+    });
+  });
+  return [...allKeys].sort((a, b) => (rank.get(a) ?? HUGE) - (rank.get(b) ?? HUGE));
+}
+
+function enrichFieldsWithGroups(fields: FieldDef[], sfKeyToGroupMap: Map<string,string>): LocalFieldDef[] {
+  return fields.map((f) => {
+    const out: LocalFieldDef = { ...f };
+    if (out.group && out.group.trim()) return out;
+    const src = (f.source || "").toLowerCase();
+    if (src === "site") out.group = "Site";
+    else if (src === "sf") out.group = sfKeyToGroupMap.get(f.key) || "Salesforce (other)";
+    else if (src === "qual") out.group = "Qualification";
+    else out.group = "Other";
+    return out;
+  });
+}
+
+function hasCell(d: Record<string, any> | undefined, key: string) {
+  if (!d) return false;
+  // valor directo
+  const v0 = d[key];
+  if (v0 !== undefined && v0 !== null && v0 !== "") return true;
+
+  // variantes típicas (con/sin 'sf.' y con underscores)
+  const base = key.replace(/^sf\./, "");
+  const variants = [key, `sf.${base}`, base, key.replace(/\./g, "_"), base.replace(/\./g, "_"), `sf.${base.replace(/\./g, "_")}`];
+  for (const k of variants) {
+    const v = (d as any)[k];
+    if (v !== undefined && v !== null && v !== "") return true;
+  }
+  return false;
+}
+
+// ¿Hace falta pedir fill para estas filas/columnas?
+function needsFill(rows: ExplorerRow[], cols: string[]): boolean {
+  if (!rows?.length || !cols?.length) return false;
+  // ignora columnas no rellenables
+  const colsEff = cols.filter(c => !UNFILLABLE_COLUMNS.has(c));
+  if (!colsEff.length) return false;
+  for (const r of rows) {
+    for (const c of colsEff) {
+      const v = readDataCell(r as any, c);
+      if (v === null || v === undefined || String(v).trim() === "") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+
+function getAccountNameFromRow(r: ExplorerRow): string {
+  const v = readDataCell(r as any, "sf.Account.Name");
+  return (v !== undefined && v !== null && String(v).trim() !== "") ? String(v) : (r.account_name || "");
+}
+
+
+/* ================= Nearby API ================= */
+type NearbyResult = {
+  base: { account_id: string; lat: number; lng: number };
+  neighbors_all: ExplorerPoint[];
+  points: ExplorerPoint[];
+  rows: ExplorerRow[];
+  meta: { mode: "drive_km"; max_km: number };
+};
+
+async function fetchNearbyDriveKm(opts: {
+  baseAccountId: string;
+  maxKm: number;
+  filters: FilterGroup;
+  columns: string[];
+}): Promise<NearbyResult> {
+  const res = await fetch("/api/explorer/search/within-drive-km", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      base_account_id: opts.baseAccountId,
+      max_km: opts.maxKm,
+      filters: opts.filters,
+      columns: opts.columns,
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+
+/* ================= Página principal ================= */
+export default function ExplorerView() {
+  const [bootDone, setBootDone] = useState(false);
+  const [bootLoading, setBootLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // NUEVO: estado de sesión Salesforce
+  const [sfAuthOk, setSfAuthOk] = useState<boolean | null>(null);
+
+  const [fieldDefs, setFieldDefs] = useState<FieldDef[] | any>([]);
+  const [allColumnKeys, setAllColumnKeys] = useState<string[]>([]);
+
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(
+    safeParse<string[]>(localStorage.getItem(LS_KEYS.visibleColumns), DEFAULT_VISIBLE_COLUMNS)
+  );
+  const [sorting, setSorting] = useState<SortingState>(
+    safeParse<SortingState>(localStorage.getItem(LS_KEYS.sorting), [{ id: "country", desc: false }])
+  );
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
+    safeParse<ColumnFiltersState>(localStorage.getItem(LS_KEYS.columnFilters), [])
+  );
+  const [globalFilter, setGlobalFilter] = useState<string>(
+    safeParse<string>(localStorage.getItem(LS_KEYS.globalFilter), "")
+  );
+  const [pageSize, setPageSize] = useState<number>(
+    safeParse<number>(localStorage.getItem(LS_KEYS.pageSize), 10)
+  );
+  const [pageIndex, setPageIndex] = useState<number>(0);
+  const [columnOrder, setColumnOrder] = useState<string[]>(
+    safeParse<string[]>(localStorage.getItem(LS_KEYS.columnOrder), [])
+  );
+
+  const [points, setPoints] = useState<ExplorerPoint[]>([]);
+  const [rows, setRows] = useState<ExplorerRow[]>([]);
+  const [filters, setFilters] = useState<FilterGroup>({ logic: "AND", rules: [] });
+  // NUEVO: caché con TODAS las columnas
+  const [fullPoints, setFullPoints] = useState<ExplorerPoint[]>([]);
+  const [fullRows, setFullRows] = useState<ExplorerRow[]>([]);
+  // NUEVO: caché nearby con TODAS las columnas
+  const [fullNearbyPoints, setFullNearbyPoints] = useState<ExplorerPoint[]>([]);
+  const [fullNearbyRows, setFullNearbyRows] = useState<ExplorerRow[]>([]);
+  
+  // Refs para controlar autofill (evita loops y reentradas)
+  const fillBusyRef = useRef(false);
+  const lastFillSigRef = useRef<string>("");
+  // Cooldown si el último fill no trajo cambios
+  const lastNoChangeAtRef = useRef<number>(0);
+
+  // ===== Nearby =====
+  const [nearbyBaseName, setNearbyBaseName] = useState<string | null>(null);
+  const [lastNearbyBaseName, setLastNearbyBaseName] = useState<string | null>(null);
+  const [nearbyActive, setNearbyActive] = useState(false);
+  const [nearbyPanelOpen, setNearbyPanelOpen] = useState(false);
+  const [nearbyLayout, setNearbyLayout] = useState<NearbyLayout>(
+    safeParse<NearbyLayout>(localStorage.getItem(LS_KEYS.nearbyLayout), "side")
+  );
+  
+  // === NEW: highlight desde Chat (ids de cuentas resaltadas) ===
+  const [highlightIds, setHighlightIds] = useState<string[]>([]);
+  // Para autoscroll al primer resaltado
+  const firstHighlightRef = useRef<string | null>(null);
+
+  const [nearbySideWidth, setNearbySideWidth] = useState<number>(
+    safeParse<number>(localStorage.getItem(LS_KEYS.nearbySideWidth), 520)
+  );
+
+  const [nearbyPoints, setNearbyPoints] = useState<ExplorerPoint[]>([]);
+  const [nearbyRows, setNearbyRows] = useState<ExplorerRow[]>([]);
+  const [neighborsAll, setNeighborsAll] = useState<ExplorerPoint[]>([]);
+  const [nearbyMeta, setNearbyMeta] = useState<{ max_km: number } | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+
+  const [useSeparateNearbyFilters, setUseSeparateNearbyFilters] = useState(false);
+  const [filtersNearby, setFiltersNearby] = useState<FilterGroup>({ logic: "AND", rules: [] });
+  const [lastNearbyParams, setLastNearbyParams] = useState<{ baseAccountId: string; maxKm: number } | null>(null);
+
+  // ===== Details state (NEW) =====
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // ====== AI output (texto + tabla opcional) ======
+  type AITable = { columns: Array<{ key: string; label?: string }>; rows: Array<Record<string, any>> };
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  const [aiTable, setAiTable] = useState<AITable | null>(null);
+
+  // Persistencia
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.visibleColumns, JSON.stringify(visibleColumns)); }, [visibleColumns]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.sorting, JSON.stringify(sorting)); }, [sorting]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnFilters, JSON.stringify(columnFilters)); }, [columnFilters]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.globalFilter, JSON.stringify(globalFilter)); }, [globalFilter]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.pageSize, JSON.stringify(pageSize)); }, [pageSize]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnOrder, JSON.stringify(columnOrder)); }, [columnOrder]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbyLayout, JSON.stringify(nearbyLayout)); }, [nearbyLayout]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbySideWidth, JSON.stringify(nearbySideWidth)); }, [nearbySideWidth]);
+  
+  const idsSig = useMemo(() => {
+    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+    const ids = Array.from(new Set((currentRows || []).map(r => r.account_id).filter(Boolean)));
+    ids.sort();
+    return ids.join(",");
+  }, [nearbyActive, fullNearbyRows, fullRows]);
+
+  const colsSig = useMemo(() => {
+    const cols = Array.from(new Set(visibleColumns || []));
+    cols.sort();
+    return cols.join("|");
+  }, [visibleColumns]);
+
+  // Preguntar al agente y abrir Chart si manda visualization
+  const askAIAndMaybeShowChart = async (prompt: string) => {
+    try {
+      setBusy(true);
+      const resp: ChatResponse = await askAI(prompt);
+      // Mostrar respuesta textual
+      setAiAnswer(resp.answer?.trim() ? resp.answer.trim() : null);
+      // Tabla opcional del agente
+      if (resp.table?.rows && resp.table?.columns) {
+        setAiTable({
+          columns: resp.table.columns.map((c: any) => ({
+            key: String(c.key ?? c.id ?? c.name ?? "").trim(),
+            label: String(c.label ?? c.title ?? c.key ?? "").trim() || undefined,
+          })),
+          rows: resp.table.rows as any[],
+        });
+      } else {
+        setAiTable(null);
+      }
+      if (resp.visualization) {
+        const v = resp.visualization;
+        setChartType(v.type === "line" ? "line" : "bar");
+        setChartXKey(v.xKey);
+        setChartYKeys(Array.isArray(v.yKeys) ? v.yKeys : []);
+        setChartData(Array.isArray(v.data) ? v.data : []);
+        setChartTitle(v.meta?.title || "Explorer Chart");
+        setChartOpen(true);
+      }
+      // Si además quieres inyectar la tabla devuelta en la tabla de Explorer:
+      // if (resp.table?.rows?.length) { ... }  // opcional
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "AI error");
+    } finally {
+      setBusy(false);
+    }
+  };
+ 
+
+  // === NEW: autoscroll a primera fila resaltada cuando cambien datos o resaltados ===
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const targetId = firstHighlightRef.current;
+    if (!targetId) return;
+    // ¿existe en filas actuales?
+    const vr = (nearbyActive ? fullNearbyRows : fullRows) || [];
+    const idx = vr.findIndex(r => r.account_id === targetId);
+    if (idx === -1) return;
+    // hace scroll suave a esa posición (aprox.)
+    const rowHeight = 40; // aprox. altura de fila
+    const top = Math.max(0, idx * rowHeight - 120);
+    try {
+      tableContainerRef.current?.scrollTo({ top, behavior: "smooth" });
+    } catch {}
+    // sólo la primera vez
+    firstHighlightRef.current = null;
+  }, [highlightIds, nearbyActive, fullNearbyRows, fullRows]);
+
+  // Utilidad: limpiar highlight
+  const clearHighlight = useCallback(() => {
+    setHighlightIds([]);
+  }, []);
+
+  // AUTO-FILL
+  useDebouncedEffect(() => {
+    if (!bootDone || bootLoading) {
+      dbg("fill skipped: boot not ready", { bootDone, bootLoading });
+      return;
+    }
+
+    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+
+    // Columnas rellenables (excluye UNFILLABLE_COLUMNS)
+    const reqCols = Array.from(new Set((visibleColumns || []).filter(c => !UNFILLABLE_COLUMNS.has(c))));
+    if (!reqCols.length || !needsFill(currentRows, reqCols)) {
+      dbg("fill skipped: no missing visible cells");
+      return;
+    }
+
+    const colsReqSig = reqCols.slice().sort().join("|");
+    const sig = `${nearbyActive ? "nearby" : "global"}::${idsSig}::${colsReqSig}`;
+    if (fillBusyRef.current) { dbg("fill skipped: busy"); return; }
+    if (lastFillSigRef.current === sig) { dbg("fill skipped: same signature", sig); return; }
+
+    // Cooldown si la última vez no hubo cambios
+    const now = Date.now();
+    if (now - lastNoChangeAtRef.current < 5000) {
+      dbg("fill skipped: cooldown (no-change last run)");
+      return;
+    }
+
+    fillBusyRef.current = true;
+    lastFillSigRef.current = sig;
+    dbg("fill start", sig);
+
+    (async () => {
+      try {
+        const ids = idsSig ? idsSig.split(",") : [];
+        if (!ids.length) return;
+
+        const resp = await explorerFillColumns({ account_ids: ids, columns: reqCols });
+        const filled = Array.isArray(resp?.rows) ? resp.rows : [];
+
+        const { rows: merged, changed } = mergeFilledCells(currentRows, filled);
+        dbg("fill done", { changed, filledRows: filled.length });
+
+        if (changed) {
+          if (nearbyActive) {
+            setFullNearbyRows(merged);
+            setNearbyRows(prev => mergeFilledCells(prev, filled).rows);   // opcional, si lo usas en otros sitios
+          } else {
+            setFullRows(merged);
+            setRows(prev => mergeFilledCells(prev, filled).rows);         // opcional
+          }
+          lastNoChangeAtRef.current = 0;          // hubo cambios → sin cooldown
+        } else {
+          lastNoChangeAtRef.current = Date.now(); // marca cooldown
+        }
+      } catch (e) {
+        dbgwarn("columns/fill failed:", e);
+      } finally {
+        fillBusyRef.current = false;
+      }
+    })();
+  }, [
+    bootDone,
+    bootLoading,
+    nearbyActive,
+    idsSig,
+    colsSig,
+  ], 250);
+
+  // Bootstrap
+  const { mutate } = useSWRConfig();
+  const { data: bootData, isLoading: bootIsLoading } = useSWR(
+    EXPLORER_BOOT_KEY,
+    async () => {
+      // 0) Comprobar sesión SF antes de bootstrap
+      try {
+        const me = await salesforceMe();
+        if (!me || me.authenticated === false) {
+          // ❌ NO redirigir automáticamente
+          setSfAuthOk(false);
+          window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
+          // Forzamos un error controlado para que entre al onError con 401
+          const err: any = new Error("HTTP 401");
+          err.status = 401;
+          throw err;
+        }
+      } catch (e) {
+        // si salesforceMe() lanza error → tratamos igual
+        const err: any = new Error("HTTP 401");
+        err.status = 401;
+        throw err;
+      }
+
+      const fldsResp = await getExplorerFields();
+      const flds: FieldDef[] = Array.isArray((fldsResp as any)?.fields)
+        ? (fldsResp as any).fields
+        : Array.isArray(fldsResp)
+        ? (fldsResp as any)
+        : [];
+      const allKeys = flds.map((f) => f.key);
+
+      await explorerBootstrap();
+
+      // SIEMPRE pedimos TODAS las columnas
+      const resp = await explorerSearch({
+        filters: { logic: "AND", rules: [] },
+        columns: allKeys,
+      } as any);
+
+      // sesión válida
+      setSfAuthOk(true);
+      window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: true } }));
+
+      return { flds, allKeys, resp };
+    },
+    {
+      revalidateOnFocus: false,
+      revalidateIfStale: false,
+      revalidateOnReconnect: false,
+      revalidateOnMount: true,
+      onError: (e: any) => {
+        // Si simplemente fue un timeout/abort del fetch, no ensuciamos la UI con "Timeout"
+        if (isTimeoutErr(e)) {
+          console.warn("Bootstrap/init timeout — ignoring UI error", e);
+          setBootLoading(false);
+          return;
+        }
+        const status =
+          e?.status ??
+          e?.response?.status ??
+          Number(
+            String(e?.message || "").match(/HTTP\s+(\d{3})/)?.[1] || NaN
+          );
+
+        if (status === 401 || status === 403) {
+          // ✅ No auto-redirect: solo estado y banner
+          setSfAuthOk(false);
+          window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
+          setErr(null);
+          setBootLoading(false);
+        } else {
+          console.error("Bootstrap/init error:", e);
+          setErr(e?.message ?? "Bootstrap error");
+          setBootLoading(false);
+        }
+
+        setPoints([]);
+        setRows([]);
+      },
+    }
+  );
+
+  useEffect(() => {
+    const off = listenExplorerChange(() => mutate(EXPLORER_BOOT_KEY));
+    return off;
+  }, [mutate]);
+
+  // Mapas y fields
+  const sfKeyToGroupMap = useMemo(() => {
+    const m = new Map<string, string>();
+    Object.entries(SF_GROUPS).forEach(([groupName, keys]) => {
+      keys.forEach((k) => { if (!m.has(k)) m.set(k, groupName); });
+    });
+    return m;
+  }, []);
+
+  useEffect(() => {
+    setBootLoading(bootIsLoading);
+    if (!bootData) return;
+
+    const { flds, allKeys, resp } = bootData;
+    const fldsWithGroup = enrichFieldsWithGroups(flds, sfKeyToGroupMap);
+    setFieldDefs(fldsWithGroup as any);
+    setAllColumnKeys(allKeys);
+
+    setVisibleColumns((prev) => {
+      const allowed = new Set(allKeys);
+      const base = prev && Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS;
+      // No excluimos a la fuerza ShippingCity/ShippingCountry aquí;
+      // si no deseas mostrarlas, ocúltalas en la lista de `fields` del ColumnPicker.
+      const cleaned = base.filter((k) => allowed.has(k));
+      if (!cleaned.includes("sf.Account.Name") && allowed.has("sf.Account.Name")) {
+        cleaned.unshift("sf.Account.Name");
+      }
+      return cleaned.length ? cleaned : DEFAULT_VISIBLE_COLUMNS.filter((k) => allowed.has(k));
+    });
+
+    // Rellena caché completa y la vista actual
+    const pts = Array.isArray(resp?.points) ? resp.points : [];
+    const rws = Array.isArray(resp?.rows) ? resp.rows : [];
+    setFullPoints(pts); 
+    setFullRows(rws);
+    // ⬇️ DEBUG
+    ;(window as any).__rows_search = rws;
+    console.log("[CTS][DEBUG] onSearch rows sample:", rws?.[0]);
+    setPoints(pts); 
+    setRows(rws);
+    setBootDone(true);
+    setBootLoading(false);
+  }, [bootData, bootIsLoading, sfKeyToGroupMap]);
+
+
+  // // ⬇️ AQUI pega el useEffect opcional (justo después del anterior)
+  // useEffect(() => {
+  //   if (!bootDone || bootLoading) return;
+  //   const currentRows = nearbyActive ? nearbyRows : rows;
+  //   const ids = (currentRows || []).map(r => r.account_id).filter(Boolean);
+  //   const cols = (visibleColumns || []);
+  //   if (!ids.length || !cols.length) return;
+
+  //   explorerFillColumns({ account_ids: ids, columns: cols })
+  //     .then(resp => {
+  //       const filled = Array.isArray(resp?.rows) ? resp.rows : [];
+  //       const { rows: merged, changed } = mergeFilledCells(currentRows, filled);
+  //       if (!changed) return;
+  //       if (nearbyActive) setNearbyRows(merged); else setRows(merged);
+  //     })
+  //     .catch(() => {});
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [bootDone]);
+
+
+  // Etiquetas
+  const labelByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    const arr = Array.isArray(fieldDefs) ? (fieldDefs as any[]) : [];
+    arr.forEach((f: any) => { if (f && typeof f.key === "string") m.set(f.key, f.label ?? f.key.replace(/^sf\./, "")); });
+    return m;
+  }, [fieldDefs]);
+
+  const qualPresetKeys = useMemo(
+    () => (Array.isArray(fieldDefs) ? (fieldDefs as FieldDef[]).filter(f => String(f.key).startsWith("qual.")).map(f => f.key) : []),
+    [fieldDefs]
+  );
+
+  // const presetsForUI = useMemo(() => {
+  //   const base: { id: string; label: string; keys: string[] }[] = [
+  //     { id: "basic",   label: "Basic",                    keys: PRESETS.Basic },
+  //     { id: "opp",     label: "Opportunity Core",         keys: PRESETS.OpportunityCore },
+  //     { id: "acc",     label: "Account Basics",           keys: PRESETS.AccountBasics },
+  //     { id: "qual_sf", label: "Qualification (SF dates)", keys: PRESETS.QualificationDates },
+  //     { id: "clin",    label: "Clinical Details",         keys: PRESETS.ClinicalCapacity },
+  //     { id: "audit",   label: "Audit/Timeline",           keys: PRESETS.NotesAndVerification },
+  //   ];
+  //   if (qualPresetKeys.length) base.push({ id: "qual_dyn", label: "Qualification (qual.* from Excel)", keys: qualPresetKeys });
+  //   return base;
+  // }, [qualPresetKeys]);
+
+
+  // Re-busca usando las columnas visibles actuales (optimiza payload)
+  const refreshForVisibleColumns = async () => {
+    // No molestes si no está el bootstrap listo
+    if (!bootDone) return;
+      // ⟵ Ya tenemos fullRows/fullNearbyRows con TODAS las columnas.
+      // Cambiar columnas visibles NO requiere pedir nada: solo re-render.
+      return;
+  };
+
+  // Buscar con filtros (no cerramos nearby)
+  const onSearch = async () => {
+    setBusy(true); setErr(null);
+    try {
+      // Pedimos SIEMPRE TODAS las columnas
+      const resp = await explorerSearch({
+        filters,
+        columns: allColumnKeys,
+      } as any);
+      setSfAuthOk(true);
+      window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: true } }));
+      const pts = Array.isArray(resp?.points) ? resp.points : [];
+      const rws = Array.isArray(resp?.rows) ? resp.rows : [];
+      setFullPoints(pts); 
+      setFullRows(rws);
+      // ⬇️ DEBUG
+      ;(window as any).__rows_search = rws;
+      console.log("[CTS][DEBUG] onSearch rows sample:", rws?.[0]);
+      setPoints(pts); setRows(rws);
+    } catch (e: any) {
+      // Silencia errores de timeout para no mostrar "Timeout" en rojo
+      if (isTimeoutErr(e)) {
+        console.warn("Search timeout — ignoring UI error", e);
+        // mantenemos rows/points como estén
+        setBusy(false);
+        return;
+      }
+      const status = e?.status ?? e?.response?.status ?? Number(String(e?.message || "").match(/HTTP\s+(\d{3})/)?.[1] || NaN);
+      if (status === 401 || status === 403) {
+    
+        setSfAuthOk(false);
+        window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
+        setErr(null);
+      } else {
+        console.error(e); setErr(e?.message || "Refresh error");
+      }
+    
+      setPoints([]); setRows([]); setPageIndex(0);
+    } finally { setBusy(false); }
+  };
+
+  // Reset (sí cerramos nearby)
+  const onReset = async () => {
+    setFilters({ logic: "AND", rules: [] });
+    setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+    setSorting([{ id: "country", desc: false }]);
+    setColumnFilters([]);
+    setGlobalFilter("");
+    setPageIndex(0);
+    setPageSize(10);
+    setBusy(true);
+    try {
+      // Traemos TODO otra vez
+      const resp = await explorerSearch({
+        filters: { logic: "AND", rules: [] },
+        columns: allColumnKeys,
+      } as any);
+      setSfAuthOk(true);
+      window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: true } }));
+      const pts = Array.isArray(resp?.points) ? resp.points : [];
+      const rws = Array.isArray(resp?.rows) ? resp.rows : [];
+      setFullPoints(pts); 
+      setFullRows(rws);
+      ;(window as any).__rows_search = rws;
+      console.log("[CTS][DEBUG] onSearch rows sample:", rws?.[0]);
+      setPoints(pts); setRows(rws);
+      setNearbyActive(false);
+      setNearbyPanelOpen(false);
+      setNearbyPoints([]); setNearbyRows([]); setNeighborsAll([]); setNearbyMeta(null);
+      setSelectedAccountId(null);
+      setLastNearbyParams(null);
+    } catch (e: any) {
+      if (isTimeoutErr(e)) {
+        console.warn("Reset timeout — ignoring UI error", e);
+        setBusy(false);
+        return;
+      }
+      const status = e?.status ?? e?.response?.status ?? Number(String(e?.message || "").match(/HTTP\s+(\d{3})/)?.[1] || NaN);
+      if (status === 401 || status === 403) {
+        setSfAuthOk(false);
+        window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
+        setErr(null);
+      } else {
+        console.error(e); setErr(e?.message || "Reset error");
+      }
+      setPoints([]); setRows([]);
+    } finally { setBusy(false); }
+  };
+
+  // ===== Nearby actions =====
+  const [nearbyModalOpen, setNearbyModalOpen] = useState(false);
+  const [nearbyBaseAccount, setNearbyBaseAccount] = useState<string | null>(null);
+
+  const openNearbyFor = (accountId: string) => {
+    const name = getAccountNameByIdSafe(accountId, rows, points);
+    setNearbyBaseAccount(accountId);
+    setNearbyBaseName(name || null);
+    setNearbyModalOpen(true);
+  };
+
+  const applyNearby = async ({ baseAccountId, maxKm }: { baseAccountId: string; maxKm: number }) => {
+    setNearbyModalOpen(false);
+    if (!baseAccountId) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetchNearbyDriveKm({
+        baseAccountId,
+        maxKm,
+        filters: useSeparateNearbyFilters ? filtersNearby : filters,
+        // SIEMPRE todas las columnas
+        columns: allColumnKeys,
+      });
+      setNearbyActive(true);
+      setNearbyPanelOpen(true);
+      const npts = Array.isArray(r.points) ? r.points : [];
+      const nrws = Array.isArray(r.rows) ? r.rows : [];
+      setFullNearbyPoints(npts);
+      setFullNearbyRows(nrws);
+      ;(window as any).__rows_nearby = nrws;
+      console.log("[CTS][DEBUG] nearby rows sample:", nrws?.[0]);
+      // Las vistas usan directamente los "full" (o puedes dejar copias en los no-full)
+      setNearbyPoints(npts);
+      setNearbyRows(nrws);
+      setNeighborsAll(Array.isArray(r.neighbors_all) ? r.neighbors_all : []);
+      setNearbyMeta({ max_km: r?.meta?.max_km ?? maxKm });
+      setSelectedAccountId(null);
+      setLastNearbyParams({ baseAccountId, maxKm });
+      setLastNearbyBaseName(nearbyBaseName || getAccountNameByIdSafe(baseAccountId, rows, points));
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || "Nearby search error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reapplyNearbyWithFilters = async () => {
+    if (!nearbyActive || !lastNearbyParams) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetchNearbyDriveKm({
+        baseAccountId: lastNearbyParams.baseAccountId,
+        maxKm: lastNearbyParams.maxKm,
+        filters: useSeparateNearbyFilters ? filtersNearby : filters,
+        columns: allColumnKeys,
+      });
+      const npts = Array.isArray(r.points) ? r.points : [];
+      const nrws = Array.isArray(r.rows) ? r.rows : [];
+      setFullNearbyPoints(npts);
+      setFullNearbyRows(nrws);
+      setNearbyPoints(npts);
+      setNearbyRows(nrws);
+      setNeighborsAll(Array.isArray(r.neighbors_all) ? r.neighbors_all : []);
+      setNearbyMeta({ max_km: r?.meta?.max_km ?? lastNearbyParams.maxKm });
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || "Nearby (apply filters) error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reapplyNearbyWithKm = async (nextKm: number) => {
+    if (!nearbyActive || !lastNearbyParams) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetchNearbyDriveKm({
+        baseAccountId: lastNearbyParams.baseAccountId,
+        maxKm: nextKm,
+        filters: useSeparateNearbyFilters ? filtersNearby : filters,
+        columns: allColumnKeys,
+      });
+      const npts = Array.isArray(r.points) ? r.points : [];
+      const nrws = Array.isArray(r.rows) ? r.rows : [];
+      setFullNearbyPoints(npts);
+      setFullNearbyRows(nrws);
+      setNearbyPoints(npts);
+      setNearbyRows(nrws);
+      setNeighborsAll(Array.isArray(r.neighbors_all) ? r.neighbors_all : []);
+      setNearbyMeta({ max_km: r?.meta?.max_km ?? nextKm });
+      setLastNearbyParams({ baseAccountId: lastNearbyParams.baseAccountId, maxKm: nextKm });
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || "Nearby (apply km) error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearNearby = useCallback(() => {
+    setNearbyActive(false);
+    setNearbyPanelOpen(false);
+    setNearbyPoints([]); setNearbyRows([]); setNeighborsAll([]); setNearbyMeta(null);
+    setSelectedAccountId(null);
+    setLastNearbyParams(null);
+  }, []);
+
+  const showNearbyPanel = () => setNearbyPanelOpen(true);
+  const hideNearbyPanel = () => setNearbyPanelOpen(false);
+
+  // ---------- Column defs ----------
+  const fixedDefs = useMemo<ColumnDef<ExplorerRow>[]>(() => ([
+    { id: "country", header: "Country",
+      accessorFn: (r) => (r.country === null || r.country === undefined || String(r.country).trim()==="" ? undefined : r.country),
+      enableSorting: true, enableColumnFilter: true, filterFn: containsCI,
+      // Siempre mandar los undefined al final
+      sortUndefined: 'last',
+      sortingFn: 'alphanumeric',
+    },
+    { id: "city", header: "City",
+      accessorFn: (r) => (r.city === null || r.city === undefined || String(r.city).trim()==="" ? undefined : r.city),
+      enableSorting: true, enableColumnFilter: true, filterFn: containsCI,
+      sortUndefined: 'last',
+      sortingFn: 'alphanumeric',
+    },
+    // NUEVO: Opportunity type (concatenado del backend)
+    // { id: "opportunity_types", header: "Opportunity type",
+    //   accessorFn: (r) => (r as any)?.opportunity_types ?? "",
+    //   enableSorting: true, enableColumnFilter: true, filterFn: containsCI,
+    //   cell: ({ getValue }) => {
+    //     const v = String(getValue() ?? "");
+    //     if (!v) return "—";
+    //     // Pequeña “píldora” visual con múltiples tipos separados por coma
+    //     return (
+    //       <div className="flex flex-wrap gap-1">
+    //         {v.split(",").map(s => s.trim()).filter(Boolean).map((t) => {
+    //           const tl = t.toLowerCase();
+    //           const pill =
+    //             tl === "profiling" ? "bg-blue-100 text-blue-700 border-blue-200" :
+    //             tl === "qualification" ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
+    //             "bg-gray-100 text-gray-700 border-gray-200";
+    //           return (
+    //             <span key={t} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${pill}`}>
+    //               {t}
+    //             </span>
+    //           );
+    //         })}
+    //       </div>
+    //     );
+    //   },
+    // },
+  ]), []);
+
+  const dynamicDefs = useMemo<ColumnDef<ExplorerRow>[]>(() =>
+    (Array.isArray(visibleColumns) ? visibleColumns : []).map((k) => {
+      // Dentro de dynamicDefs, en el caso especial de "sf.Account.Name"
+      if (k === "sf.Account.Name") {
+        return {
+          id: k,
+          header: labelByKey.get(k) ?? "Account Name",
+          accessorFn: (r: any) => readDataCell(r, k),
+          enableSorting: true,
+          enableColumnFilter: true,
+          filterFn: containsCI,
+          // También aquí, por coherencia
+          sortUndefined: 'last',
+          cell: ({ row }) => {
+            const name  = getAccountNameFromRow(row.original as any);
+            const accId = (row.original as ExplorerRow).account_id;
+
+            return (
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{name}</span>
+
+                {/* Nearby (como ya tenías) */}
+                <button
+                  className="inline-flex items-center gap-1 rounded-full border border-blue-300 text-blue-700 px-2 py-0.5 text-xs hover:bg-blue-50 hover:border-blue-400"
+                  title="Find nearby (driving km)"
+                  onClick={(e) => { e.stopPropagation(); openNearbyFor(accId); }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z"
+                          stroke="currentColor" strokeWidth="1.5"/>
+                  </svg>
+                  Nearby
+                </button>
+
+                {/* NUEVO: Details — abre el mismo modal de detalles */}
+                <button
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-300 text-gray-700 px-2 py-0.5 text-xs hover:bg-gray-50 hover:border-gray-400"
+                  title="Show details"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Igual que en el mapa: abrimos el DetailsModal
+                    setSelectedAccountId(accId);
+                    setDetailsOpen(true);
+                    // (equivale a onShowDetails(accId), pero evitamos problema de orden/hoisting)
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M12 8.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm1 7h-2v-6h2v6Z"
+                          fill="currentColor"/>
+                    <path d="M12 3a9 9 0 1 0 .001 18.001A9 9 0 0 0 12 3Z" stroke="currentColor" strokeWidth="1.4"/>
+                  </svg>
+                  Details
+                </button>
+              </div>
+            );
+          },
+          sortingFn: (rowA, rowB) => {
+            const a = getAccountNameFromRow(rowA.original as any).toLowerCase();
+            const b = getAccountNameFromRow(rowB.original as any).toLowerCase();
+            return a.localeCompare(b);
+          },
+        } as ColumnDef<ExplorerRow>;
+      }
+      return {
+        id: k,
+        header: labelByKey.get(k) ?? k.replace(/^sf\./, ""),
+        accessorFn: (r: any) => readDataCell(r, k),
+        enableSorting: true,
+        enableColumnFilter: true,
+        filterFn: containsCI,
+        // Delega el orden a TanStack: alphanumeric + sortUndefined:'last' asegura que los vacíos
+        // se queden SIEMPRE al final tanto en asc como en desc.
+        sortingFn: 'alphanumeric',
+        sortUndefined: 'last'
+      } as ColumnDef<ExplorerRow>;
+    })
+  , [visibleColumns, labelByKey]);
+
+  const columns = useMemo<ColumnDef<ExplorerRow>[]>(() => [...fixedDefs, ...dynamicDefs], [fixedDefs, dynamicDefs]);
+
+  // ColumnPicker groupBy
+  const groupByField = (f: FieldDef): string | undefined => {
+    const gf = f as LocalFieldDef;
+    return gf.group || undefined;
+  };
+
+  // Tabla
+  // 🔑 FUENTE ÚNICA DE VERDAD: los datasets "full*" de la primera carga
+  const viewRows = useMemo(
+    () => (nearbyActive ? fullNearbyRows : fullRows),
+    [nearbyActive, fullNearbyRows, fullRows]
+  );
+
+  const table = useReactTable({
+    data: Array.isArray(viewRows) ? viewRows : [],
+    columns,
+    state: {
+      sorting,
+      columnFilters,
+      globalFilter,
+      pagination: { pageIndex, pageSize },
+      columnOrder,
+    },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onGlobalFilterChange: setGlobalFilter,
+    onPaginationChange: (updater) => {
+      const next = typeof updater === "function" ? updater({ pageIndex, pageSize }) : updater;
+      if (typeof next?.pageIndex === "number") setPageIndex(next.pageIndex);
+      if (typeof next?.pageSize === "number") setPageSize(next.pageSize);
+    },
+    onColumnOrderChange: setColumnOrder,
+    globalFilterFn: containsCI,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+  });
+
+  // ==== Chart State (mover hooks DENTRO del componente) ====
+  type ChartType = "bar" | "line";
+  const [chartOpen, setChartOpen] = useState(false);
+  const [chartType, setChartType] = useState<ChartType>("bar");
+  const [chartTitle, setChartTitle] = useState<string>("Chart");
+  const [chartXKey, setChartXKey] = useState<string>("sf.Account.Name");
+  const [chartYKeys, setChartYKeys] = useState<string[]>([]);
+  const [chartData, setChartData] = useState<Array<Record<string, any>>>([]);
+  const [chartYCandidates, setChartYCandidates] = useState<string[]>([]);
+  const [chartXCandidates, setChartXCandidates] = useState<string[]>([]);
+
+  // Detecta si una columna parece numérica (mirando filas visibles)
+  const isNumericColumn = useCallback((key: string, sampleRows: ExplorerRow[]) => {
+    let seen = 0, numeric = 0;
+    for (const r of sampleRows.slice(0, 50)) {
+      const v = readDataCell(r as any, key);
+      if (v === null || v === undefined || v === "") continue;
+      seen++;
+      const n = Number(v);
+      if (Number.isFinite(n)) numeric++;
+    }
+    return seen > 0 && numeric / seen >= 0.8;
+  }, []);
+
+  // Construye el dataset plano para Recharts
+  const buildChartDataset = useCallback((
+    rowsIn: ExplorerRow[],
+    xKey: string,
+    yKeys: string[]
+  ) => {
+    const arr: Array<Record<string, any>> = [];
+    for (const r of rowsIn) {
+      const row: Record<string, any> = {};
+      row[xKey] = readDataCell(r as any, xKey) ?? "";
+      for (const y of yKeys) {
+        const raw = readDataCell(r as any, y);
+        const n = Number(raw);
+        row[y] = Number.isFinite(n) ? n : null;
+      }
+      arr.push(row);
+    }
+    return arr;
+  }, []);
+
+  // Abre el modal con defaults razonables
+  const openChartWizard = useCallback(() => {
+    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+    if (!currentRows?.length) {
+      alert("No hay datos para graficar.");
+      return;
+    }
+
+    // X por defecto: Account Name si existe, si no country/city
+    const defaultX =
+      (visibleColumns.includes("sf.Account.Name") && "sf.Account.Name") ||
+      (table.getAllLeafColumns().some(c => c.id === "country") && "country") ||
+      (table.getAllLeafColumns().some(c => c.id === "city") && "city") ||
+      visibleColumns[0];
+
+    // Sugerir Y numéricas a partir de columnas visibles
+    const numericKeys = visibleColumns.filter(k => isNumericColumn(k, currentRows));
+    const suggestedY = numericKeys.slice(0, 3); // hasta 3 series por defecto
+
+    // candidatos
+    const xCands = [
+      ...(visibleColumns.includes("sf.Account.Name") ? ["sf.Account.Name"] : []),
+      ...["country","city"].filter(k => table.getAllLeafColumns().some(c => c.id === k)),
+      ...visibleColumns.filter(k => k !== "sf.Account.Name")
+    ].filter((v, i, a) => a.indexOf(v) === i);
+
+    setChartXCandidates(xCands);
+    setChartYCandidates(numericKeys);
+
+    setChartXKey(defaultX);
+    setChartYKeys(suggestedY.length ? suggestedY : []);
+    setChartType("bar");
+    setChartTitle("Explorer Chart");
+    setChartData(buildChartDataset(currentRows, defaultX, suggestedY));
+    setChartOpen(true);
+  }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn, buildChartDataset]);
+
+  // ====== Export TSV (toda la tabla filtrada) ======
+  const sanitizeTSV = (val: any): string => {
+    if (val === null || val === undefined) return "";
+    if (typeof val === "object") {
+      try {
+        return JSON.stringify(val).replace(/\t/g, " ").replace(/\r?\n/g, " ");
+      } catch {
+        return String(val).replace(/\t/g, " ").replace(/\r?\n/g, " ");
+      }
+    }
+    return String(val).replace(/\t/g, " ").replace(/\r?\n/g, " ");
+  };
+
+  const downloadFilteredTSV = () => {
+    // Columnas visibles y en el orden actual de la tabla
+    const visibleCols = table.getAllLeafColumns().filter(c => c.getIsVisible());
+
+    const headerCells = visibleCols.map((c) => {
+      const rawHeader =
+        typeof c.columnDef.header === "string"
+          ? c.columnDef.header
+          : (labelByKey.get(c.id) ??
+             (c.id === "country" ? "Country" :
+              c.id === "city"    ? "City"    :
+              c.id.replace(/^sf\./, "")));
+      return sanitizeTSV(rawHeader);
+    });
+    const headerLine = headerCells.join("\t");
+
+    // Filas: todas las filtradas + ordenadas (sin paginación)
+    const allRows = table.getSortedRowModel().rows; // ya respeta filtros y orden
+    const dataLines = allRows.map(r => {
+      const cells = visibleCols.map(c => sanitizeTSV(r.getValue<any>(c.id)));
+      return cells.join("\t");
+    });
+
+    const txt = [headerLine, ...dataLines].join("\n");
+    const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `explorer_filtered_${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Orden inicial: Account.Name primero
+  const ensureInitialOrder = () => {
+    const base = ["sf.Account.Name", "country", "city", ...visibleColumns.filter(k => k !== "sf.Account.Name")];
+    const present = new Set(table.getAllLeafColumns().map(c => c.id));
+    const next: string[] = [];
+    base.forEach(id => { if (present.has(id) && !next.includes(id)) next.push(id); });
+    table.getAllLeafColumns().forEach(c => { if (!next.includes(c.id)) next.push(c.id); });
+    return next;
+  };
+
+  useEffect(() => {
+    const next = ensureInitialOrder();
+    if (JSON.stringify(next) !== JSON.stringify(columnOrder)) setColumnOrder(next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearbyActive ? nearbyRows : rows, visibleColumns]);
+
+  const applyVisibleColumns = (nextKeys: string[]) => {
+    // Evita meter columnas que duplican fijas
+    const filtered = nextKeys.filter(k => !EXCLUDED_VISIBLE_COLUMNS.has(k));
+    setVisibleColumns(filtered);
+    setColumnOrder((prev) => {
+      const start = prev.length ? [...prev] : ensureInitialOrder();
+      const keepFixed = new Set(["sf.Account.Name","country","city"]);
+      const out = start.filter(id => keepFixed.has(id) || filtered.includes(id));
+      filtered.forEach(k => { if (!out.includes(k)) out.push(k); });
+      const i = out.indexOf("sf.Account.Name");
+      if (i > 0) { out.splice(i, 1); out.unshift("sf.Account.Name"); }
+      return out;
+    });
+  };
+
+  // === NEW: listeners para eventos del Chat ===
+  useEffect(() => {
+    function onHighlight(e: Event) {
+      const ev = e as CustomEvent<{ account_ids?: string[] }>;
+      const ids = (ev.detail?.account_ids || []).map(String).filter(Boolean);
+      if (!ids.length) return;
+      setHighlightIds(ids);
+      // selecciona y recuerda la primera para autoscroll
+      firstHighlightRef.current = ids[0];
+      setSelectedAccountId(ids[0]);
+      // Si tienes un MapView que escucha un evento propio, puedes propagar:
+      // window.dispatchEvent(new CustomEvent("cts:explorer:highlight", { detail: { account_ids: ids } }));
+    }
+    function onSetFilters(e: Event) {
+      const ev = e as CustomEvent<{ filters?: FilterGroup }>;
+      if (ev.detail?.filters) {
+        setFilters(ev.detail.filters);
+        // buscamos con TODO el set actual de columnas
+        setTimeout(() => { void onSearch(); }, 0);
+      }
+    }
+    function onColumnsAdd(e: Event) {
+      const ev = e as CustomEvent<{ columns?: string[] }>;
+      const cols = (ev.detail?.columns || []).map(String).filter(Boolean);
+      if (!cols.length) return;
+      // Sólo añadir si existen en catálogo
+      const allowed = new Set(allColumnKeys);
+      const next = [...visibleColumns];
+      for (const k of cols) {
+        if (allowed.has(k) && !next.includes(k)) next.push(k);
+      }
+      if (next.length !== visibleColumns.length) {
+        applyVisibleColumns(next);
+      }
+    }
+    window.addEventListener("cts:chat:explorer:highlight", onHighlight as EventListener);
+    window.addEventListener("cts:chat:explorer:set", onSetFilters as EventListener);
+    window.addEventListener("cts:chat:explorer:columns:add", onColumnsAdd as EventListener);
+    return () => {
+      window.removeEventListener("cts:chat:explorer:highlight", onHighlight as EventListener);
+      window.removeEventListener("cts:chat:explorer:set", onSetFilters as EventListener);
+      window.removeEventListener("cts:chat:explorer:columns:add", onColumnsAdd as EventListener);
+    };
+  }, [allColumnKeys, visibleColumns, applyVisibleColumns, onSearch, setFilters]);
+
+  const visiblePoints = nearbyActive ? fullNearbyPoints : fullPoints;
+
+  // ⟵ NUEVO: acción para re-login preservando la ruta / tab actual
+  const loginAgain = () => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.get("tab")) url.searchParams.set("tab", "explorer");
+    const next = url.pathname + url.search;
+    sfLoginRedirect(next || "/");
+  };
+
+  // ===== onShowDetails handler (NEW) =====
+  const onShowDetails = (accountId: string) => {
+    setSelectedAccountId(accountId);
+    setDetailsOpen(true);
+  };
+
+  const selectedAccountName = selectedAccountId
+    ? getAccountNameByIdSafe(
+        selectedAccountId,
+        nearbyActive ? fullNearbyRows : fullRows,
+        nearbyActive ? fullNearbyPoints : fullPoints
+      )
+    : null;
+
+  return (
+    <div className="space-y-4">
+      {bootLoading && <LoadingOverlay text="Loading initial data…" />}
+      {!bootLoading && busy && <LoadingOverlay text="Searching…" />}
+
+      {/* AVISO DE SESIÓN SALESFORCE */}
+      {sfAuthOk === false && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <strong>Salesforce session expired.</strong> Please login again to load data.
+            </div>
+            <button
+              onClick={loginAgain}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-white hover:bg-blue-700"
+            >
+              Login Salesforce
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Header filtros */}
+      <div className="rounded-xl border bg-white shadow-sm">
+        <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
+          <h2 className="font-semibold text-gray-800">Filters (nested AND/OR)</h2>
+          <div className="flex gap-2 items-center">
+            {nearbyActive && (
+              <span className="hidden md:inline-flex items-center gap-2 mr-2 text-sm rounded-full border px-3 py-1 bg-emerald-50 text-emerald-700">
+                Nearby ON · ≤ <b>{nearbyMeta?.max_km ?? "—"}</b> km
+                <button className="rounded border px-2 py-0.5 text-xs hover:bg-white" onClick={() => setNearbyPanelOpen(v => !v)}>
+                  Toggle panel
+                </button>
+                <button className="rounded border px-2 py-0.5 text-xs hover:bg-white" onClick={clearNearby}>
+                  Close nearby
+                </button>
+              </span>
+            )}
+            {highlightIds.length > 0 && (
+              <span className="hidden md:inline-flex items-center gap-2 mr-2 text-sm rounded-full border px-3 py-1 bg-amber-50 text-amber-800">
+                Highlight: <b>{highlightIds.length}</b> site{highlightIds.length===1?"":"s"}
+                <button
+                  className="rounded border px-2 py-0.5 text-xs hover:bg-white"
+                  onClick={clearHighlight}
+                  title="Clear highlighted rows"
+                >
+                  Clear highlight
+                </button>
+              </span>
+            )}
+            <button
+              onClick={() => {
+                localStorage.removeItem(LS_KEYS.visibleColumns);
+                localStorage.removeItem(LS_KEYS.sorting);
+                localStorage.removeItem(LS_KEYS.columnFilters);
+                localStorage.removeItem(LS_KEYS.globalFilter);
+                localStorage.removeItem(LS_KEYS.pageSize);
+                localStorage.removeItem(LS_KEYS.columnOrder);
+                setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
+                setSorting([{ id: "country", desc: false }]);
+                setColumnFilters([]);
+                setGlobalFilter("");
+                setPageSize(10);
+                setPageIndex(0);
+                setColumnOrder([]);
+              }}
+              className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
+              disabled={busy || bootLoading}
+              title="Reset table layout (columns, sorting, filters, page size)"
+            >
+              Reset layout
+            </button>
+            <button
+              onClick={onReset}
+              className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
+              disabled={busy || bootLoading}
+              title="Clear filters and show all"
+            >
+              Reset data
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4">
+          <FilterBuilder
+            value={filters}
+            onChange={setFilters}
+            fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : []}
+          />
+          <div className="flex flex-wrap gap-2 items-center">
+            <button
+              onClick={onSearch}
+              className="mt-3 inline-flex items-center gap-2 rounded-md bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-60"
+              disabled={busy || bootLoading}
+            >
+              {busy ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  Searching…
+                </>
+              ) : ("Search")}
+            </button>
+            {nearbyActive && (
+              <div className="md:hidden inline-flex items-center gap-2 text-sm mt-3">
+                <span>Nearby ≤ <b>{nearbyMeta?.max_km ?? "—"}</b> km</span>
+                <button className="rounded-md border px-3 py-1 hover:bg-gray-50" onClick={() => setNearbyPanelOpen(v => !v)}>
+                  Panel
+                </button>
+                <button className="rounded-md border px-3 py-1 hover:bg-gray-50" onClick={clearNearby}>
+                  Close
+                </button>
+              </div>
+            )}
+            {err ? <div className="text-red-600 mt-3 text-sm">{err}</div> : null}
+          </div>
+        </div>
+      </div>
+
+      
+      {/* ===== AI Answer panel (texto + tabla opcional) ===== */}
+      {aiAnswer && (
+        <div className="rounded-xl border bg-white shadow-sm relative">
+          <div className="px-4 py-2 border-b flex items-center justify-between">
+            <div className="font-medium text-gray-800">AI Answer</div>
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded-md border px-2 py-1 text-xs hover:bg-gray-50"
+                onClick={() => { setAiAnswer(null); setAiTable(null); }}
+                title="Clear answer"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            {/* Renderiza el HTML ya saneado que devuelve el backend (evita ver tags crudos como <table>) */}
+            <div
+              className="prose prose-sm max-w-none text-gray-900"
+              dangerouslySetInnerHTML={{ __html: aiAnswer }}
+            />
+            {/* Tabla opcional que envía el agente */}
+            {aiTable && aiTable.rows?.length > 0 && (
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-[640px] w-full text-sm border rounded-md overflow-hidden">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {aiTable.columns.map((c) => (
+                        <th key={c.key} className="px-3 py-2 text-left font-semibold text-gray-700 border-b">
+                          {c.label || c.key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aiTable.rows.map((r, idx) => (
+                      <tr key={idx} className="border-b last:border-0">
+                        {aiTable.columns.map((c) => (
+                          <td key={c.key} className="px-3 py-2 whitespace-nowrap">
+                            {r[c.key] ?? ""}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+
+      {/* Column Picker */}
+      <div className="rounded-xl border bg-white shadow-sm">
+        <div className="px-4 py-2 bg-blue-50 border-b">
+          <span className="text-sm font-medium text-blue-700">Columns</span>
+        </div>
+        <ColumnPicker
+          fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : []}
+          value={visibleColumns}
+          onChange={(next) => {
+            const allowed = new Set((fieldDefs as any[]).map((f: any) => f.key));
+            // Limpia: solo claves válidas y sin las que duplican columnas fijas (Country/City)
+            const cleaned = next
+              .filter((k) => allowed.has(k))
+              .filter((k) => !EXCLUDED_VISIBLE_COLUMNS.has(k));
+            applyVisibleColumns(cleaned);
+          }}
+          presets={useMemo(() => {
+            const base: { id: string; label: string; keys: string[] }[] = [
+              { id: "basic",   label: "Basic",                    keys: PRESETS.Basic },
+              { id: "opp",     label: "Opportunity Core",         keys: PRESETS.OpportunityCore },
+              { id: "acc",     label: "Account Basics",           keys: PRESETS.AccountBasics },
+              { id: "qual_sf", label: "Qualification (SF dates)", keys: PRESETS.QualificationDates },
+              { id: "clin",    label: "Clinical Details",         keys: PRESETS.ClinicalCapacity },
+              { id: "audit",   label: "Audit/Timeline",           keys: PRESETS.NotesAndVerification },
+            ];
+            const qualKeys = (Array.isArray(fieldDefs) ? (fieldDefs as FieldDef[]) : [])
+              .filter(f => String(f.key).startsWith("qual."))
+              .map(f => f.key);
+            if (qualKeys.length) base.push({ id: "qual_dyn", label: "Qualification (qual.* from Excel)", keys: qualKeys });
+            return base;
+          }, [fieldDefs])}
+          defaultOpen={false}
+          showPresets={true}
+          sortKeys={(allKeys, presets) => orderKeysByPresets(allKeys, presets as any)}
+          renderPresetHeader={(preset) => {
+            if (preset.id === "qual_dyn") {
+              return (
+                <div className="px-3 py-1.5 bg-emerald-50 text-emerald-700 font-medium text-sm rounded-t">
+                  {preset.label}
+                </div>
+              );
+            }
+            return (
+              <div className="px-3 py-1.5 bg-gray-50 text-gray-700 font-medium text-sm rounded-t">
+                {preset.label}
+              </div>
+            );
+          }}
+          groupBy={groupByField}
+        />
+      </div>
+
+      {/* Mapa */}
+      {bootDone ? (
+        <MapView
+          {...({} as any)}
+          points={Array.isArray(visiblePoints) ? visiblePoints : []}
+          neighborsAll={neighborsAll as any}
+          selectedAccountId={selectedAccountId as any}
+          onSelectAccount={(id: string | null) => setSelectedAccountId(id)}
+          onNearbyRequest={(id: string) => openNearbyFor(id)}
+          onShowDetails={(id: string) => onShowDetails(id)}  // sigue abriendo modal
+          highlightedAccountIds={highlightIds}
+        />
+      ) : (
+        <div className="p-3 text-sm text-gray-600">Map not ready.</div>
+      )}
+
+      {/* Barra superior tabla */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mt-2">
+        <div className="text-sm text-gray-600">
+          {table.getFilteredRowModel().rows.length.toLocaleString()} result
+          {table.getFilteredRowModel().rows.length === 1 ? "" : "s"}
+          {sorting[0] ? (
+            <> · sorted by <strong>{sorting[0].id}</strong> ({sorting[0].desc ? "desc" : "asc"})</>
+          ) : null}
+          {nearbyActive ? <> · Nearby ≤ <strong>{nearbyMeta?.max_km ?? "—"}</strong> km</> : null}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            className="border rounded-md px-3 py-1.5 text-sm w-64"
+            placeholder="Search in all columns…"
+            value={globalFilter ?? ""}
+            onChange={(e) => setGlobalFilter(e.target.value)}
+          />
+          <label className="text-sm text-gray-600">Rows per page</label>
+          <select
+            className="border rounded-md px-2 py-1 text-sm"
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setPageIndex(0); }}
+          >
+            {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+
+          <button
+            className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+            onClick={downloadFilteredTSV}
+            disabled={table.getFilteredRowModel().rows.length === 0}
+            title="Download all filtered rows as tab-delimited .txt"
+          >
+            Export filtered (TSV)
+          </button>
+          {/* … dentro de la barra superior (junto a Export filtered) … */}
+          <div className="relative">
+            <button
+              className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+              onClick={openChartWizard}
+              title="Visualize current table as chart"
+            >
+              Chart…
+            </button>
+            <button
+            className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+            onClick={() =>
+              askAIAndMaybeShowChart(
+                "Dime los 5 centros con más pacientes al año y muéstralo en una tabla y gráfico de barras"
+              )
+            }
+            title="Pedir al agente y abrir el gráfico si procede"
+          >
+            Ask AI →
+          </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <div ref={tableContainerRef} className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id}>
+                {hg.headers.map((header) => {
+                  const canSort = header.column.getCanSort();
+                  const dir = header.column.getIsSorted() as false | "asc" | "desc";
+                  return (
+                    <th
+                      key={header.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/plain", header.column.id);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const from = e.dataTransfer.getData("text/plain");
+                        const to = header.column.id;
+                        if (!from || from === to) return;
+                        setColumnOrder((prev) => {
+                          const base = prev.length ? [...prev] : table.getAllLeafColumns().map(c=>c.id);
+                          const fi = base.indexOf(from), ti = base.indexOf(to);
+                          if (fi === -1 || ti === -1) return base;
+                          base.splice(fi, 1);
+                          base.splice(ti, 0, from);
+                          return base;
+                        });
+                      }}
+                      className="px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap select-none align-bottom"
+                      title="Drag to reorder"
+                    >
+                      <button
+                        className={`inline-flex items-center gap-1 ${canSort ? "cursor-pointer" : "cursor-default"}`}
+                        onClick={header.column.getToggleSortingHandler()}
+                        disabled={!canSort}
+                        title={canSort ? "Click to sort" : undefined}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {dir ? (dir === "asc" ? " ▲" : " ▼") : ""}
+                      </button>
+                      {header.column.getCanFilter() ? (
+                        <div className="mt-1">
+                          <input
+                            className="border rounded-md px-2 py-1 text-xs w-48"
+                            placeholder="filter…"
+                            value={(header.column.getFilterValue() as string) ?? ""}
+                            onChange={(e) => header.column.setFilterValue(e.target.value)}
+                          />
+                        </div>
+                      ) : null}
+                    </th>
+                  );
+                })}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.length === 0 ? (
+              <tr>
+                <td className="px-3 py-6 text-center text-gray-500" colSpan={table.getAllLeafColumns().length}>
+                  {busy || bootLoading ? "Loading…" : "No results"}
+                </td>
+              </tr>
+            ) : (
+              table.getRowModel().rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className={[
+                    "border-t hover:bg-gray-50",
+                    selectedAccountId && (row.original as ExplorerRow).account_id === selectedAccountId ? "bg-blue-50/40" : "",
+                    // NEW: estilo de resaltado (coincide con eventos del chat)
+                    highlightIds.includes((row.original as ExplorerRow).account_id)
+                      ? "bg-amber-50 ring-1 ring-amber-300"
+                      : ""
+                  ].join(" ")}
+                  onClick={() => setSelectedAccountId((row.original as ExplorerRow).account_id)}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="px-3 py-2 whitespace-nowrap">
+                      {flexRender(
+                        cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
+                        cell.getContext()
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Paginación */}
+      <div className="flex items-center justify-between mt-3">
+        <div className="text-sm text-gray-600">
+          Showing{" "}
+          <strong>
+            {table.getRowModel().rows.length === 0
+              ? 0
+              : table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1}
+          </strong>
+          –
+          <strong>
+            {Math.min(
+              (table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize,
+              table.getFilteredRowModel().rows.length
+            )}
+          </strong>{" "}
+          of <strong>{table.getFilteredRowModel().rows.length}</strong>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+            onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}>« First</button>
+          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+            onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>‹ Prev</button>
+          <span className="text-sm text-gray-700">
+            Page <strong>{table.getState().pagination.pageIndex + 1}</strong> / {table.getPageCount()}
+          </span>
+          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+            onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next ›</button>
+          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+            onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()}>Last »</button>
+        </div>
+      </div>
+
+      {/* Botón flotante Nearby */}
+      {nearbyActive && !nearbyPanelOpen && (
+        <button
+          className="fixed bottom-5 right-5 z-[9050] inline-flex items-center gap-2 rounded-full shadow-xl border border-blue-600 bg-blue-600 text-white px-5 py-3 text-sm font-medium hover:opacity-90"
+          onClick={showNearbyPanel}
+          title="Show Nearby panel"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Z" stroke="currentColor" strokeWidth="1.8" />
+            <circle cx="12" cy="9" r="2.5" fill="currentColor"/>
+          </svg>
+          Nearby panel
+        </button>
+      )}
+
+      {/* Modal Nearby */}
+      <NearbyModal
+        open={nearbyModalOpen}
+        baseAccountId={nearbyBaseAccount || ""}
+        baseAccountName={nearbyBaseName || ""}
+        onClose={() => setNearbyModalOpen(false)}
+        onConfirm={applyNearby}
+      />
+
+      {/* Drawer Nearby */}
+      <NearbyDrawer
+        open={nearbyActive && nearbyPanelOpen}
+        baseAccountId={lastNearbyParams?.baseAccountId}
+        baseAccountName={lastNearbyBaseName}
+        maxKm={nearbyMeta?.max_km ?? lastNearbyParams?.maxKm ?? null}
+        useSeparateNearbyFilters={useSeparateNearbyFilters}
+        filtersNearby={filtersNearby}
+        fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : []}
+        layout={nearbyLayout}
+        sideWidth={nearbySideWidth}
+        onSetLayout={setNearbyLayout}
+        onSetSideWidth={setNearbySideWidth}
+        onHidePanel={hideNearbyPanel}
+        onExitNearby={clearNearby}
+        onToggleSeparate={setUseSeparateNearbyFilters}
+        onChangeFiltersNearby={setFiltersNearby}
+        onApplyFilters={reapplyNearbyWithFilters}
+        onApplyKm={reapplyNearbyWithKm}
+        onClear={clearNearby}
+      />
+
+      {/* Details Modal (NEW: con datos reales de backend) */}
+      <DetailsModal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        accountId={selectedAccountId}
+        accountName={selectedAccountName || undefined}
+      />
+
+      <ChartModal
+        open={chartOpen}
+        onClose={() => setChartOpen(false)}
+        title={chartTitle}
+        data={chartData}
+        xKey={chartXKey}
+        yKeys={chartYKeys}
+        type={chartType}
+        xCandidates={chartXCandidates}
+        yCandidates={chartYCandidates}
+        labelByKey={labelByKey}
+        onChangeTitle={(t) => setChartTitle(t)}
+        onChangeType={(t) => setChartType(t)}
+        onChangeXKey={(x) => {
+          setChartXKey(x);
+          const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+          setChartData(buildChartDataset(currentRows, x, chartYKeys));
+        }}
+        onToggleYKey={(y) => {
+          const next = chartYKeys.includes(y)
+            ? chartYKeys.filter(k => k !== y)
+            : [...chartYKeys, y];
+          setChartYKeys(next);
+          const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+          setChartData(buildChartDataset(currentRows, chartXKey, next));
+        }}
+      />
+    </div>
+  );
+}

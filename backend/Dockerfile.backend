@@ -1,0 +1,36 @@
+# backend/Dockerfile.backend
+FROM mirror.gcr.io/library/python:3.11-slim
+#FROM python:3.11-slim
+# FROM public.ecr.aws/docker/library/python:3.11-slim
+
+WORKDIR /app
+
+# Paquetes del sistema (psycopg necesita libpq-dev; curl para healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev curl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Dependencias de Python
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Código de la app
+COPY ./app ./app
+
+# Alembic desde la raíz de backend
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
+
+# Variables de entorno útiles
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+# Producción: sin --reload (más estable en contenedor)
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# (Opcional) Si prefieres healthcheck en la imagen en vez de docker-compose:
+# HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
+#   CMD curl -fsS http://localhost:8000/healthz || exit 1

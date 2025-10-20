@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+psycopg[binary]
+pydantic>=2
+pandas
+openpyxl
+python-multipart
+alembic
+pycountry
+requests
+simple-salesforce
+httpx
+itsdangerous
+openai>=1.35.0
+# typing  <-- sobra, quítalo (es parte de la stdlib en Python 3.11)
