@@ -96,6 +96,15 @@ def explorer_search(payload: Dict[str, Any], request: Request):
     account_ids: Set[str] = set()
     for b in bootstrap:
         account_ids.add(b["account_id"])
+        # Preserve CS flags in the points payload so the frontend can color
+        # markers at bootstrap/search time without extra fetches.
+        meta = b.get("meta") or {}
+        cs_from_meta = (meta.get("csContribution") or {})
+        bs_cs = b.get("cs") or {
+            "clinical": bool(cs_from_meta.get("INNODIA_Clinical_Trial_Site__c")),
+            "referral": bool(cs_from_meta.get("Referral_Outreach_Site_Non_CTS__c")),
+            "detect": bool(cs_from_meta.get("Elegible_for_DETECT_Site__c")),
+        }
         points.append({
             "lat": b.get("latitude"),
             "lng": b.get("longitude"),
@@ -106,6 +115,11 @@ def explorer_search(payload: Dict[str, Any], request: Request):
             "badges": {
                 "profiling":     bool(b.get("hasProfiling")),
                 "qualification": bool(b.get("hasQualification")),
+            },
+            "cs": {
+                "clinical": bool(bs_cs.get("clinical")),
+                "referral": bool(bs_cs.get("referral")),
+                "detect": bool(bs_cs.get("detect")),
             },
         })
 

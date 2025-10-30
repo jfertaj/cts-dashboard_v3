@@ -7,6 +7,7 @@ export type FieldDef = {
   type?: string;
   source?: "sf" | "site" | "qual" | string;
   group?: string;
+  qual_section?: string;
 };
 
 export type Rule = {
@@ -81,7 +82,13 @@ function groupName(f: FieldDef): string {
   const s = (f.source || "").toLowerCase();
   if (s === "site") return "Site";
   if (s === "sf") return "Salesforce";
-  if (s === "qual") return "Qualification";
+  if (s === "qual") {
+    const section = f.qual_section?.trim();
+    const group = f.group?.trim();
+    if (section && group) return `${section} › ${group}`;
+    if (section) return section;
+    return group || "Qualification";
+  }
   return "Other";
 }
 

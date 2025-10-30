@@ -47,7 +47,7 @@ from app.routers.salesforce_explorer import (
 from app.routers import salesforce_extras
 
 # --- OpenAI
-from app.routers import ai_chat
+from app.routers import ai_chat, explorer_bridge
 #from app.api.ai import router as ai_router
 
 
@@ -143,6 +143,7 @@ app.include_router(salesforce_extras.router)  # /api/salesforce/...
 
 # OpenAI
 app.include_router(ai_chat.router)
+app.include_router(explorer_bridge.router)
 #app.include_router(ai_router)
 
 # --- Health sencillo ---

@@ -1,6 +1,7 @@
 # backend/app/parser/qualification.py
 import pandas as pd, re, os, sys
 from typing import Dict, Any, List, Optional, Tuple
+from collections import defaultdict
 
 # ========= DEBUG =========
 QUAL_DEBUG = os.getenv("QUAL_DEBUG", "0") not in ("0", "", "false", "False")
@@ -194,6 +195,85 @@ def _slugify(s: str) -> str:
 # Secciones que tratamos como "con dispositivos"
 DEVICE_SECTIONS = {"3.5.4", "3.6.4", "3.7.1", "3.6.5", "3.7.2"}
 
+# Overrides específicos por subcódigo y slug base
+COMMENT_LABEL_OVERRIDES = {
+    "2.1": {
+        "comments": "Comments on SOPs or general",
+    },
+    "2.2": {
+        "comments": "Comments on consent process or age of enrollment",
+    },
+    "2.4": {
+        "comments": "Comments on Contracting Process",
+    },
+    "3.8": {
+        "comments": [
+            "Comments on the site lab resources or accreditation",
+            "Comments on the lab capability",
+        ],
+    },
+}
+
+DESCRIBE_LABEL_OVERRIDES = {
+    "3.4": {
+        "describe": [
+            "Describe the site's experience Managing serious AEs",
+            "Describe the site's experience with Phase 1 or Islet Transplant",
+        ],
+    },
+    "3.5.1": {
+        "describe": "Description of how source data is captured",
+    },
+}
+
+GENERIC_LABEL_OVERRIDES: Dict[str, Dict[str, List[str] | str]] = {
+    "3.7.2": {
+        "how_often": "How often are regular device checks conducted?",
+        "by_whom": "Who conducts regular device checks?",
+        "certificate_label_provided_by_vendor_to_site": "Are certificates provided after routine device checks?",
+    },
+    "3.8": {
+        "availability": "Is the lab available centrally or locally?",
+        "certificate_available": "Do you have a local or external lab certificate available?",
+        "is_there_an_sop": "Is there an SOP for preparing blood samples?",
+        "describe_process": "Describe process for preparing blood samples",
+        "fbc": "Are FBC tests available?",
+        "hba1c": "Is HbA1c testing available?",
+        "c_peptide": "Is C-peptide testing available?",
+        "glucose": "Is glucose testing available?",
+        "insulin": "Are insulin tests available?",
+        "insulin_2": "Are insulin autoantibody tests available?",
+        "peripheral_blood_mononuclear_cells": "Are PBMC tests available?",
+        "autoantibodies": "Are autoantibody tests available?",
+        "gad65": "Are GAD65 tests available?",
+        "znt8": "Are ZnT8 tests available?",
+        "ia_2": "Are IA-2 tests available?",
+    },
+}
+
+SPECIFIC_LABEL_OVERRIDES: Dict[str, str] = {
+    "3_7_1__fridge__available": "Fridge — available (2-8ºC)",
+    "3_7_1__fridge__backup_plan_for_fridge_failure": "Fridge — Backup plan for fridge failure (2-8ºC)",
+}
+
+IMP_SECTION_PREFIXES = {
+    "3.5.4": "IMP ",
+}
+
+DEVICE_TEMPERATURE_SUFFIX = {
+    "3.5.4": {
+        "room_temperature": " (RT)",
+        "fridge": " (2-8ºC)",
+        "standard_freezer": " (-20 - -10ºC)",
+        "medication_freezer": " (-69ºC)",
+    },
+    "3.7.1": {
+        "fridge": " (2-8ºC)",
+        "standard_freezer": " (-20 - -10ºC)",
+        "specimen_freezer": " (-69ºC)",
+    },
+}
+
 # Patrones de detección de cabecera de dispositivo en la columna B
 # (para 3.6.5 / 3.7.2 añadimos dispositivos de monitorización/equipamiento general)
 DEVICE_PATTERNS = [
@@ -300,6 +380,7 @@ def parse_qualification_checklist(flike, filename: str = "") -> Dict[str, Any]:
     # Contexto especial para devices y para sub-preguntas condicionales
     current_device: Optional[str] = None
     last_main_qkey: Optional[str] = None  # para "If no, explain" etc.
+    label_counters = defaultdict(int)
 
     def _is_conditional_follow_up(qtext: str) -> bool:
         t = (qtext or "").strip().lower()
@@ -409,6 +490,9 @@ def parse_qualification_checklist(flike, filename: str = "") -> Dict[str, Any]:
         # Tipado y clave
         a_type, a_norm, unit = _detect_and_coerce_answer(answer)
         sub_code_safe = current_sub_code or "x"
+        base_slug = _slugify(qtext_canon)
+        occ_index = label_counters[(sub_code_safe, base_slug)]
+        label_counters[(sub_code_safe, base_slug)] = occ_index + 1
 
         # follow-up condicional vinculado
         is_follow_up = _is_conditional_follow_up(qtext_canon)
@@ -420,6 +504,50 @@ def parse_qualification_checklist(flike, filename: str = "") -> Dict[str, Any]:
             display_text = f"{pretty} — {qtext_canon}"
 
         qkey = _mk_key(sub_code_safe, qtext_canon, current_device)
+
+        # Overrides para Comments / Describe / genéricas
+        if base_slug == "comments":
+            overrides = COMMENT_LABEL_OVERRIDES.get(sub_code_safe)
+            if overrides:
+                mapped = overrides.get("comments")
+                if isinstance(mapped, list):
+                    if occ_index < len(mapped):
+                        display_text = mapped[occ_index]
+                elif isinstance(mapped, str):
+                    display_text = mapped
+        elif base_slug == "describe":
+            overrides = DESCRIBE_LABEL_OVERRIDES.get(sub_code_safe)
+            if overrides:
+                entry = overrides.get("describe") if isinstance(overrides, dict) else overrides
+                if isinstance(entry, list):
+                    if occ_index < len(entry):
+                        display_text = entry[occ_index]
+                elif isinstance(entry, str):
+                    display_text = entry
+
+        generic_map = GENERIC_LABEL_OVERRIDES.get(sub_code_safe)
+        if generic_map and base_slug in generic_map:
+            mapped = generic_map[base_slug]
+            if isinstance(mapped, list):
+                if occ_index < len(mapped):
+                    display_text = mapped[occ_index]
+            else:
+                display_text = mapped
+
+        # Prefijo IMP en 3.5.4
+        if sub_code_safe in IMP_SECTION_PREFIXES and not display_text.lower().startswith("imp "):
+            display_text = f"{IMP_SECTION_PREFIXES[sub_code_safe]}{display_text}"
+
+        # Sufijos de temperatura en subsecciones con devices
+        if current_sub_code in DEVICE_SECTIONS and current_device:
+            temp_suffix_map = DEVICE_TEMPERATURE_SUFFIX.get(current_sub_code, {})
+            suffix = temp_suffix_map.get(current_device)
+            if suffix and not display_text.endswith(suffix):
+                display_text = f"{display_text}{suffix}"
+
+        specific_label = SPECIFIC_LABEL_OVERRIDES.get(qkey)
+        if specific_label:
+            display_text = specific_label
 
         parent_key = None
         if is_follow_up and last_main_qkey:

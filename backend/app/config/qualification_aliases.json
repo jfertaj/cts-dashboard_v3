@@ -1,0 +1,1328 @@
+{
+  "aliases": [
+    {
+      "alias": "screening program",
+      "key": "C_Aware_of_any_Screening_Program__c"
+    },
+    {
+      "alias": "early diagnosis center",
+      "key": "C_Center_for_Running_Early_Diagnosis__c"
+    },
+    {
+      "alias": "stage 1 followed",
+      "key": "C_Number_of_Stage1_Individuals_followed__c"
+    },
+    {
+      "alias": "stage 2 followed",
+      "key": "C_Number_of_Stage2_Individuals_followed__c"
+    },
+    {
+      "alias": "current patients under 18",
+      "key": "C_Number_of_T1D_Patients_currently_U_18__c"
+    },
+    {
+      "alias": "current patients over 18",
+      "key": "C_Number_of_T1D_Patients_currently_O_18__c"
+    },
+    {
+      "alias": "newly diagnosed under 18",
+      "key": "C_Number_of_new_T1D_diagnosed_U_18__c"
+    },
+    {
+      "alias": "newly diagnosed over 18",
+      "key": "C_Number_of_new_T1D_diagnosed_O_18__c"
+    },
+    {
+      "alias": "onsite pharmacy",
+      "key": "onsite_pharmacy"
+    },
+    {
+      "alias": "overnight stay",
+      "key": "overnight_stay"
+    },
+    {
+      "alias": "hla typing",
+      "key": "C_Is_HLA_typing_performed__c"
+    },
+    {
+      "alias": "Acceptable Process",
+      "key": "3.3__acceptable_process"
+    },
+    {
+      "alias": "Acceptable Process?",
+      "key": "3.3__acceptable_process"
+    },
+    {
+      "alias": "Age range for enrolment",
+      "key": "2.2__age_range_for_enrolment"
+    },
+    {
+      "alias": "Are FBC tests available",
+      "key": "3.8__fbc"
+    },
+    {
+      "alias": "Are FBC tests available?",
+      "key": "3.8__fbc"
+    },
+    {
+      "alias": "Are GAD65 tests available",
+      "key": "3.8__gad65"
+    },
+    {
+      "alias": "Are GAD65 tests available?",
+      "key": "3.8__gad65"
+    },
+    {
+      "alias": "Are IA-2 tests available",
+      "key": "3.8__ia_2"
+    },
+    {
+      "alias": "Are IA-2 tests available?",
+      "key": "3.8__ia_2"
+    },
+    {
+      "alias": "Are ZnT8 tests available",
+      "key": "3.8__znt8"
+    },
+    {
+      "alias": "Are ZnT8 tests available?",
+      "key": "3.8__znt8"
+    },
+    {
+      "alias": "Are all staff GCP Certified before participating in Study Activity",
+      "key": "3.2__are_all_staff_gcp_certified_before_participating_in_study_activity"
+    },
+    {
+      "alias": "Are all staff GCP Certified before participating in Study Activity?",
+      "key": "3.2__are_all_staff_gcp_certified_before_participating_in_study_activity"
+    },
+    {
+      "alias": "Are certificates provided after routine device checks",
+      "key": "3.7.2__certificate_label_provided_by_vendor_to_site"
+    },
+    {
+      "alias": "Are certificates provided after routine device checks?",
+      "key": "3.7.2__certificate_label_provided_by_vendor_to_site"
+    },
+    {
+      "alias": "Are dedicated examination rooms available ",
+      "key": "3.5.2__are_dedicated_examination_rooms_available"
+    },
+    {
+      "alias": "Are dedicated examination rooms available ?",
+      "key": "3.5.2__are_dedicated_examination_rooms_available"
+    },
+    {
+      "alias": "Are documents archived in a locked and secured area",
+      "key": "3.5.1__are_documents_archived_in_a_locked_and_secured_area"
+    },
+    {
+      "alias": "Are documents archived in a locked and secured area?",
+      "key": "3.5.1__are_documents_archived_in_a_locked_and_secured_area"
+    },
+    {
+      "alias": "Are insulin tests available",
+      "key": "3.8__insulin"
+    },
+    {
+      "alias": "Are insulin tests available?",
+      "key": "3.8__insulin"
+    },
+    {
+      "alias": "Are there any other regulatory hurdles for your institution or country that we should be aware of",
+      "key": "2.3__are_there_any_other_regulatory_hurdles_for_your_institution_or_country_that_we_should_be_aware_of"
+    },
+    {
+      "alias": "Are there any other regulatory hurdles for your institution or country that we should be aware of?",
+      "key": "2.3__are_there_any_other_regulatory_hurdles_for_your_institution_or_country_that_we_should_be_aware_of"
+    },
+    {
+      "alias": "Autoantibodies (AAb)",
+      "key": "3.8__autoantibodies_aab"
+    },
+    {
+      "alias": "Availability of local experienced physicians or emergency department",
+      "key": "3.3__availability_of_local_experienced_physicians_or_emergency_department"
+    },
+    {
+      "alias": "Blood pressure monitor Certificate/label available?",
+      "key": "3.7.2__blood_pressure_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Blood pressure monitor available",
+      "key": "3.7.2__blood_pressure_monitor__device_available"
+    },
+    {
+      "alias": "Blood pressure monitor — Certificate/label available",
+      "key": "3.7.2__blood_pressure_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Blood pressure monitor — Certificate/label available?",
+      "key": "3.7.2__blood_pressure_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Blood pressure monitor — available",
+      "key": "3.7.2__blood_pressure_monitor__device_available"
+    },
+    {
+      "alias": "Brief description of pharmacy role during CTS and location",
+      "key": "3.6__brief_description_of_pharmacy_role_during_cts_and_location"
+    },
+    {
+      "alias": "Briefly explain how IMP enters your facility, is maintained, how it is prepared for patients, and where/by whom it is administered",
+      "key": "3.6__briefly_explain_how_imp_enters_your_facility_is_maintained_how_it_is_prepared_for_patients_and_where_by_whom_it_is_administered"
+    },
+    {
+      "alias": "Briefly explain how IMP enters your facility, is maintained, how it is prepared for patients, and where/by whom it is administered?",
+      "key": "3.6__briefly_explain_how_imp_enters_your_facility_is_maintained_how_it_is_prepared_for_patients_and_where_by_whom_it_is_administered"
+    },
+    {
+      "alias": "C-peptide testing available?",
+      "key": "3.8__c_peptide"
+    },
+    {
+      "alias": "Can this be extended based on the trial needs? (New regulation requires 25 years)",
+      "key": "3.5.1__can_this_be_extended_based_on_the_trial_needs_new_regulation_requires_25_years"
+    },
+    {
+      "alias": "Can you do HLA Typing",
+      "key": "3.8__can_you_do_hla_typing"
+    },
+    {
+      "alias": "Can you do HLA Typing?",
+      "key": "3.8__can_you_do_hla_typing"
+    },
+    {
+      "alias": "Can you work with a centralized Ethics for non-interventional studies",
+      "key": "2.3__can_you_work_with_a_centralized_ethics_for_non_interventional_studies"
+    },
+    {
+      "alias": "Can you work with a centralized Ethics for non-interventional studies?",
+      "key": "2.3__can_you_work_with_a_centralized_ethics_for_non_interventional_studies"
+    },
+    {
+      "alias": "Centrifuge Certificate/label available?",
+      "key": "3.7.2__centrifuge__certificate_label_available"
+    },
+    {
+      "alias": "Centrifuge Temperature range",
+      "key": "3.7.2__centrifuge__temperature_range"
+    },
+    {
+      "alias": "Centrifuge available",
+      "key": "3.7.2__centrifuge__device_available"
+    },
+    {
+      "alias": "Centrifuge — Certificate/label available",
+      "key": "3.7.2__centrifuge__certificate_label_available"
+    },
+    {
+      "alias": "Centrifuge — Certificate/label available?",
+      "key": "3.7.2__centrifuge__certificate_label_available"
+    },
+    {
+      "alias": "Centrifuge — Temperature range",
+      "key": "3.7.2__centrifuge__temperature_range"
+    },
+    {
+      "alias": "Centrifuge — available",
+      "key": "3.7.2__centrifuge__device_available"
+    },
+    {
+      "alias": "Comments on Contracting Process",
+      "key": "2.4__comments"
+    },
+    {
+      "alias": "Comments on SOPs or general",
+      "key": "2.1__comments"
+    },
+    {
+      "alias": "Comments on consent process or age of enrollment",
+      "key": "2.2__comments"
+    },
+    {
+      "alias": "Comments on the lab capability",
+      "key": "3.8__comments"
+    },
+    {
+      "alias": "Comments on the site lab resources or accreditation",
+      "key": "3.8__comments"
+    },
+    {
+      "alias": "Describe details of site’s process for handling an emergency (or via SOP, national standard, internal availability)",
+      "key": "3.3__describe_details_of_site_s_process_for_handling_an_emergency_or_via_sop_national_standard_internal_availability"
+    },
+    {
+      "alias": "Describe local ethics committee",
+      "key": "2.3__describe_local_ethics_committee"
+    },
+    {
+      "alias": "Describe process for preparing blood samples",
+      "key": "3.8__describe_process"
+    },
+    {
+      "alias": "Describe space where patients are administered IV infusions",
+      "key": "3.5.2__describe_space_where_patients_are_administered_iv_infusions"
+    },
+    {
+      "alias": "Describe the site's experience Managing serious AEs",
+      "key": "3.4__describe"
+    },
+    {
+      "alias": "Describe the site's experience with Phase 1 or Islet Transplant",
+      "key": "3.4__describe"
+    },
+    {
+      "alias": "Description of consent process (who, when, etc)",
+      "key": "2.2__description_of_consent_process_who_when_etc"
+    },
+    {
+      "alias": "Description of how source data is captured",
+      "key": "3.5.1__describe"
+    },
+    {
+      "alias": "Description of location",
+      "key": "3.5.3__description_of_location"
+    },
+    {
+      "alias": "Description of recruitment process/ strategies",
+      "key": "2.2__description_of_recruitment_process_strategies"
+    },
+    {
+      "alias": "Do you have a certified diabetes educator? If yes certified by whom",
+      "key": "3.2__do_you_have_a_certified_diabetes_educator_if_yes_certified_by_whom"
+    },
+    {
+      "alias": "Do you have a certified diabetes educator? If yes certified by whom?",
+      "key": "3.2__do_you_have_a_certified_diabetes_educator_if_yes_certified_by_whom"
+    },
+    {
+      "alias": "Do you have a local or external lab certificate available",
+      "key": "3.8__certificate_available"
+    },
+    {
+      "alias": "Do you have a local or external lab certificate available?",
+      "key": "3.8__certificate_available"
+    },
+    {
+      "alias": "Do you have a national template available for Sponsor clinical trial agreement ",
+      "key": "2.4__do_you_have_a_national_template_available_for_sponsor_clinical_trial_agreement"
+    },
+    {
+      "alias": "Do you have a national template available for Sponsor clinical trial agreement ?",
+      "key": "2.4__do_you_have_a_national_template_available_for_sponsor_clinical_trial_agreement"
+    },
+    {
+      "alias": "Does you center have access to emergency medications (epinephrine, diphenhydramine, etc)",
+      "key": "3.3__does_you_center_have_access_to_emergency_medications_epinephrine_diphenhydramine_etc"
+    },
+    {
+      "alias": "Does you center have access to emergency medications (epinephrine, diphenhydramine, etc)?",
+      "key": "3.3__does_you_center_have_access_to_emergency_medications_epinephrine_diphenhydramine_etc"
+    },
+    {
+      "alias": "Does your center fall under an accredited institution",
+      "key": "2.1__does_your_center_fall_under_an_accredited_institution"
+    },
+    {
+      "alias": "Does your center fall under an accredited institution?",
+      "key": "2.1__does_your_center_fall_under_an_accredited_institution"
+    },
+    {
+      "alias": "Does your center have the ability to administer IV Infusions (infusion pumps and trained staff?)",
+      "key": "3.5.2__does_your_center_have_the_ability_to_administer_iv_infusions_infusion_pumps_and_trained_staff"
+    },
+    {
+      "alias": "Does your local or external lab have the capability to do",
+      "key": "3.8__does_your_local_or_external_lab_have_the_capability_to_do"
+    },
+    {
+      "alias": "Does your site have an IT help desk for any clinical trial related internet or interface issues",
+      "key": "3.5.1__does_your_site_have_an_it_help_desk_for_any_clinical_trial_related_internet_or_interface_issues"
+    },
+    {
+      "alias": "Does your site have an IT help desk for any clinical trial related internet or interface issues?",
+      "key": "3.5.1__does_your_site_have_an_it_help_desk_for_any_clinical_trial_related_internet_or_interface_issues"
+    },
+    {
+      "alias": "Does your site have experience with Phase 1 Trials",
+      "key": "3.4__does_your_site_have_experience_with_phase_1_trials"
+    },
+    {
+      "alias": "Does your site have experience with Phase 1 Trials?",
+      "key": "3.4__does_your_site_have_experience_with_phase_1_trials"
+    },
+    {
+      "alias": "Does your site have experience with pancreatic or Islet Transplant",
+      "key": "3.4__does_your_site_have_experience_with_pancreatic_or_islet_transplant"
+    },
+    {
+      "alias": "Does your site have experience with pancreatic or Islet Transplant?",
+      "key": "3.4__does_your_site_have_experience_with_pancreatic_or_islet_transplant"
+    },
+    {
+      "alias": "ECG device Certificate/label available?",
+      "key": "3.7.2__ecg__certificate_label_available"
+    },
+    {
+      "alias": "ECG device Who interprets the ECGs at your institution?",
+      "key": "3.7.2__ecg__who_interprets_the_ecgs_at_your_institution"
+    },
+    {
+      "alias": "ECG device available",
+      "key": "3.7.2__ecg__device_available"
+    },
+    {
+      "alias": "ECG device — Certificate/label available",
+      "key": "3.7.2__ecg__certificate_label_available"
+    },
+    {
+      "alias": "ECG device — Certificate/label available?",
+      "key": "3.7.2__ecg__certificate_label_available"
+    },
+    {
+      "alias": "ECG device — Who interprets the ECGs at your institution",
+      "key": "3.7.2__ecg__who_interprets_the_ecgs_at_your_institution"
+    },
+    {
+      "alias": "ECG device — Who interprets the ECGs at your institution?",
+      "key": "3.7.2__ecg__who_interprets_the_ecgs_at_your_institution"
+    },
+    {
+      "alias": "ECG device — available",
+      "key": "3.7.2__ecg__device_available"
+    },
+    {
+      "alias": "Estimate arrival time of Emergency Personnel (min)",
+      "key": "3.3__estimate_arrival_time_of_emergency_personnel_min"
+    },
+    {
+      "alias": "Estimated time from submission to approval",
+      "key": "2.3__estimated_time_from_submission_to_approval"
+    },
+    {
+      "alias": "Estimated time from submission to approval?",
+      "key": "2.3__estimated_time_from_submission_to_approval"
+    },
+    {
+      "alias": "Explanation",
+      "key": "3.2__explanation"
+    },
+    {
+      "alias": "FBC tests available?",
+      "key": "3.8__fbc"
+    },
+    {
+      "alias": "Fridge Automated alarm system? (2-8ºC)",
+      "key": "3.7.1__fridge__automated_alarm_system"
+    },
+    {
+      "alias": "Fridge Certificate/label available? (2-8ºC)",
+      "key": "3.7.1__fridge__certificate_label_available"
+    },
+    {
+      "alias": "Fridge Temperature log (2-8ºC)",
+      "key": "3.7.1__fridge__temperature_log"
+    },
+    {
+      "alias": "Fridge available",
+      "key": "3.7.1__fridge__device_available"
+    },
+    {
+      "alias": "Fridge — Automated alarm system? (2-8ºC)",
+      "key": "3.7.1__fridge__automated_alarm_system"
+    },
+    {
+      "alias": "Fridge — Certificate/label available? (2-8ºC)",
+      "key": "3.7.1__fridge__certificate_label_available"
+    },
+    {
+      "alias": "Fridge — Temperature log (2-8ºC)",
+      "key": "3.7.1__fridge__temperature_log"
+    },
+    {
+      "alias": "Fridge — available",
+      "key": "3.7.1__fridge__device_available"
+    },
+    {
+      "alias": "GAD65 tests available?",
+      "key": "3.8__gad65"
+    },
+    {
+      "alias": "HbA1c testing available?",
+      "key": "3.8__hba1c"
+    },
+    {
+      "alias": "Hospital based",
+      "key": "3.1__hospital_based"
+    },
+    {
+      "alias": "How is it resolved",
+      "key": "3.5.3__how_is_it_resolved"
+    },
+    {
+      "alias": "How is it resolved?",
+      "key": "3.5.3__how_is_it_resolved"
+    },
+    {
+      "alias": "How is source data for each trial captured",
+      "key": "3.5.1__how_is_source_data_for_each_trial_captured"
+    },
+    {
+      "alias": "How is source data for each trial captured?",
+      "key": "3.5.1__how_is_source_data_for_each_trial_captured"
+    },
+    {
+      "alias": "How long are documents retained? (Years)",
+      "key": "3.5.1__how_long_are_documents_retained_years"
+    },
+    {
+      "alias": "How many beds",
+      "key": "3.5.2__how_many_beds"
+    },
+    {
+      "alias": "How many beds?",
+      "key": "3.5.2__how_many_beds"
+    },
+    {
+      "alias": "How often are regular device checks conducted",
+      "key": "3.7.2__how_often"
+    },
+    {
+      "alias": "How often are regular device checks conducted?",
+      "key": "3.7.2__how_often"
+    },
+    {
+      "alias": "How often do they meet",
+      "key": "2.3__how_often_do_they_meet"
+    },
+    {
+      "alias": "How often do they meet?",
+      "key": "2.3__how_often_do_they_meet"
+    },
+    {
+      "alias": "IA-2 tests available?",
+      "key": "3.8__ia_2"
+    },
+    {
+      "alias": "IMP Fridge Automated alarm system? (2-8ºC)",
+      "key": "3.5.4__fridge__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Fridge Backup plan for device failure (2-8ºC)",
+      "key": "3.5.4__fridge__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Fridge Certificate/label available? (2-8ºC)",
+      "key": "3.5.4__fridge__certificate_label_available"
+    },
+    {
+      "alias": "IMP Fridge Lockable? (2-8ºC)",
+      "key": "3.5.4__fridge__lockable"
+    },
+    {
+      "alias": "IMP Fridge Temperature log (2-8ºC)",
+      "key": "3.5.4__fridge__temperature_log"
+    },
+    {
+      "alias": "IMP Fridge — Automated alarm system? (2-8ºC)",
+      "key": "3.5.4__fridge__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Fridge — Backup plan for device failure (2-8ºC)",
+      "key": "3.5.4__fridge__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Fridge — Certificate/label available? (2-8ºC)",
+      "key": "3.5.4__fridge__certificate_label_available"
+    },
+    {
+      "alias": "IMP Fridge — Lockable? (2-8ºC)",
+      "key": "3.5.4__fridge__lockable"
+    },
+    {
+      "alias": "IMP Fridge — Temperature log (2-8ºC)",
+      "key": "3.5.4__fridge__temperature_log"
+    },
+    {
+      "alias": "IMP Medication Freezer Automated alarm system? (-69ºC)",
+      "key": "3.5.4__medication_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Medication Freezer Backup plan for device failure (-69ºC)",
+      "key": "3.5.4__medication_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Medication Freezer Certificate/label available? (-69ºC)",
+      "key": "3.5.4__medication_freezer__certificate_label_available"
+    },
+    {
+      "alias": "IMP Medication Freezer Lockable? (-69ºC)",
+      "key": "3.5.4__medication_freezer__lockable"
+    },
+    {
+      "alias": "IMP Medication Freezer Temperature log (-69ºC)",
+      "key": "3.5.4__medication_freezer__temperature_log"
+    },
+    {
+      "alias": "IMP Medication Freezer — Automated alarm system? (-69ºC)",
+      "key": "3.5.4__medication_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Medication Freezer — Backup plan for device failure (-69ºC)",
+      "key": "3.5.4__medication_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Medication Freezer — Certificate/label available? (-69ºC)",
+      "key": "3.5.4__medication_freezer__certificate_label_available"
+    },
+    {
+      "alias": "IMP Medication Freezer — Lockable? (-69ºC)",
+      "key": "3.5.4__medication_freezer__lockable"
+    },
+    {
+      "alias": "IMP Medication Freezer — Temperature log (-69ºC)",
+      "key": "3.5.4__medication_freezer__temperature_log"
+    },
+    {
+      "alias": "IMP Room Temperature Automated alarm system? (RT)",
+      "key": "3.5.4__room_temperature__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Room Temperature Backup plan for device failure (RT)",
+      "key": "3.5.4__room_temperature__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Room Temperature Certificate/label available? (RT)",
+      "key": "3.5.4__room_temperature__certificate_label_available"
+    },
+    {
+      "alias": "IMP Room Temperature Lockable? (RT)",
+      "key": "3.5.4__room_temperature__lockable"
+    },
+    {
+      "alias": "IMP Room Temperature Temperature log (RT)",
+      "key": "3.5.4__room_temperature__temperature_log"
+    },
+    {
+      "alias": "IMP Room Temperature — Automated alarm system? (RT)",
+      "key": "3.5.4__room_temperature__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Room Temperature — Backup plan for device failure (RT)",
+      "key": "3.5.4__room_temperature__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Room Temperature — Certificate/label available? (RT)",
+      "key": "3.5.4__room_temperature__certificate_label_available"
+    },
+    {
+      "alias": "IMP Room Temperature — Lockable? (RT)",
+      "key": "3.5.4__room_temperature__lockable"
+    },
+    {
+      "alias": "IMP Room Temperature — Temperature log (RT)",
+      "key": "3.5.4__room_temperature__temperature_log"
+    },
+    {
+      "alias": "IMP Standard Freezer Automated alarm system? (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Standard Freezer Backup plan for device failure (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Standard Freezer Certificate/label available? (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__certificate_label_available"
+    },
+    {
+      "alias": "IMP Standard Freezer Lockable? (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__lockable"
+    },
+    {
+      "alias": "IMP Standard Freezer Temperature log (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__temperature_log"
+    },
+    {
+      "alias": "IMP Standard Freezer — Automated alarm system? (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "IMP Standard Freezer — Backup plan for device failure (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "IMP Standard Freezer — Certificate/label available? (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__certificate_label_available"
+    },
+    {
+      "alias": "IMP Standard Freezer — Lockable? (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__lockable"
+    },
+    {
+      "alias": "IMP Standard Freezer — Temperature log (-20 - -10ºC)",
+      "key": "3.5.4__standard_freezer__temperature_log"
+    },
+    {
+      "alias": "If no, explain",
+      "key": "3.5.1__if_no_explain"
+    },
+    {
+      "alias": "If other, please specify",
+      "key": "3.6__if_other_please_specify"
+    },
+    {
+      "alias": "If sterile compounding is completed by non-pharmacy staff-> what is your SOP for sterile preparation",
+      "key": "3.6__if_sterile_compounding_is_completed_by_non_pharmacy_staff_what_is_your_sop_for_sterile_preparation"
+    },
+    {
+      "alias": "If sterile compounding is completed by non-pharmacy staff-> what is your SOP for sterile preparation?",
+      "key": "3.6__if_sterile_compounding_is_completed_by_non_pharmacy_staff_what_is_your_sop_for_sterile_preparation"
+    },
+    {
+      "alias": "If yes, how many",
+      "key": "3.5.2__if_yes_how_many"
+    },
+    {
+      "alias": "If yes, how many?",
+      "key": "3.5.2__if_yes_how_many"
+    },
+    {
+      "alias": "If yes, is the use of this template mandatory in your institution ",
+      "key": "2.4__if_yes_is_the_use_of_this_template_mandatory_in_your_institution"
+    },
+    {
+      "alias": "If yes, is the use of this template mandatory in your institution ?",
+      "key": "2.4__if_yes_is_the_use_of_this_template_mandatory_in_your_institution"
+    },
+    {
+      "alias": "If yes, what accreditation program",
+      "key": "2.1__if_yes_what_accreditation_program"
+    },
+    {
+      "alias": "If yes, where is this located",
+      "key": "3.5.1__if_yes_where_is_this_located"
+    },
+    {
+      "alias": "If yes, where is this located?",
+      "key": "3.5.1__if_yes_where_is_this_located"
+    },
+    {
+      "alias": "If yes, who",
+      "key": "3.2__if_yes_who"
+    },
+    {
+      "alias": "If yes, who?",
+      "key": "3.2__if_yes_who"
+    },
+    {
+      "alias": "Is C-peptide testing available",
+      "key": "3.8__c_peptide"
+    },
+    {
+      "alias": "Is C-peptide testing available?",
+      "key": "3.8__c_peptide"
+    },
+    {
+      "alias": "Is HbA1c testing available",
+      "key": "3.8__hba1c"
+    },
+    {
+      "alias": "Is HbA1c testing available?",
+      "key": "3.8__hba1c"
+    },
+    {
+      "alias": "Is glucose testing available",
+      "key": "3.8__glucose"
+    },
+    {
+      "alias": "Is glucose testing available?",
+      "key": "3.8__glucose"
+    },
+    {
+      "alias": "Is laminar Flow hood for sterile preparation available",
+      "key": "3.6__is_laminar_flow_hood_for_sterile_preparation_available"
+    },
+    {
+      "alias": "Is laminar Flow hood for sterile preparation available?",
+      "key": "3.6__is_laminar_flow_hood_for_sterile_preparation_available"
+    },
+    {
+      "alias": "Is the PI experienced in managing Serum Sickness, cytokine release syndrome, leukopenia and other serious AEs",
+      "key": "3.4__is_the_pi_experienced_in_managing_serum_sickness_cytokine_release_syndrome_leukopenia_and_other_serious_aes"
+    },
+    {
+      "alias": "Is the PI experienced in managing Serum Sickness, cytokine release syndrome, leukopenia and other serious AEs?",
+      "key": "3.4__is_the_pi_experienced_in_managing_serum_sickness_cytokine_release_syndrome_leukopenia_and_other_serious_aes"
+    },
+    {
+      "alias": "Is the lab available centrally or locally",
+      "key": "3.8__availability"
+    },
+    {
+      "alias": "Is the lab available centrally or locally?",
+      "key": "3.8__availability"
+    },
+    {
+      "alias": "Is the local/external lab certificated / accredited",
+      "key": "3.8__is_the_local_external_lab_certificated_accredited"
+    },
+    {
+      "alias": "Is the site personnel experienced and qualified in emergency care",
+      "key": "3.3__is_the_site_personnel_experienced_and_qualified_in_emergency_care"
+    },
+    {
+      "alias": "Is the site personnel experienced and qualified in emergency care?",
+      "key": "3.3__is_the_site_personnel_experienced_and_qualified_in_emergency_care"
+    },
+    {
+      "alias": "Is there an SOP for preparing blood samples",
+      "key": "3.8__is_there_an_sop"
+    },
+    {
+      "alias": "Is there an SOP for preparing blood samples?",
+      "key": "3.8__is_there_an_sop"
+    },
+    {
+      "alias": "Is there room for participants to stay in the center for extended periods",
+      "key": "3.5.2__is_there_room_for_participants_to_stay_in_the_center_for_extended_periods"
+    },
+    {
+      "alias": "Is your pharmacy on-site or off campus",
+      "key": "3.6__is_your_pharmacy_on_site_or_off_campus"
+    },
+    {
+      "alias": "Is your pharmacy on-site or off campus?",
+      "key": "3.6__is_your_pharmacy_on_site_or_off_campus"
+    },
+    {
+      "alias": "List of SOPs available",
+      "key": "2.1__list_of_sops_available"
+    },
+    {
+      "alias": "Location ",
+      "key": "3.6__location"
+    },
+    {
+      "alias": "Location ?",
+      "key": "3.6__location"
+    },
+    {
+      "alias": "Longest single day visit that could be accommodated (hours)",
+      "key": "3.5.2__longest_single_day_visit_that_could_be_accommodated_hours"
+    },
+    {
+      "alias": "Medication Freezer available",
+      "key": "3.5.4__medication_freezer__device_available"
+    },
+    {
+      "alias": "Medication Freezer — available",
+      "key": "3.5.4__medication_freezer__device_available"
+    },
+    {
+      "alias": "Meets basic criteria per GCP/ICH",
+      "key": "2.2__meets_basic_criteria_per_gcp_ich"
+    },
+    {
+      "alias": "Meets basic criteria per GCP/ICH?",
+      "key": "2.2__meets_basic_criteria_per_gcp_ich"
+    },
+    {
+      "alias": "Minimal list of SOPs available",
+      "key": "2.1__minimal_list_of_sops_available"
+    },
+    {
+      "alias": "Minimal list of SOPs available?",
+      "key": "2.1__minimal_list_of_sops_available"
+    },
+    {
+      "alias": "Monitor for oxygen saturation Certificate/label available?",
+      "key": "3.7.2__oxygen_saturation_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Monitor for oxygen saturation available",
+      "key": "3.7.2__oxygen_saturation_monitor__device_available"
+    },
+    {
+      "alias": "Monitor for oxygen saturation — Certificate/label available",
+      "key": "3.7.2__oxygen_saturation_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Monitor for oxygen saturation — Certificate/label available?",
+      "key": "3.7.2__oxygen_saturation_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Monitor for oxygen saturation — available",
+      "key": "3.7.2__oxygen_saturation_monitor__device_available"
+    },
+    {
+      "alias": "Monitor for respiratory rate Certificate/label available?",
+      "key": "3.7.2__respiratory_rate_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Monitor for respiratory rate available",
+      "key": "3.7.2__respiratory_rate_monitor__device_available"
+    },
+    {
+      "alias": "Monitor for respiratory rate — Certificate/label available",
+      "key": "3.7.2__respiratory_rate_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Monitor for respiratory rate — Certificate/label available?",
+      "key": "3.7.2__respiratory_rate_monitor__certificate_label_available"
+    },
+    {
+      "alias": "Monitor for respiratory rate — available",
+      "key": "3.7.2__respiratory_rate_monitor__device_available"
+    },
+    {
+      "alias": "National/local language requirements",
+      "key": "2.3__national_local_language_requirements"
+    },
+    {
+      "alias": "National/local language requirements?",
+      "key": "2.3__national_local_language_requirements"
+    },
+    {
+      "alias": "Outpatient clinic",
+      "key": "3.1__outpatient_clinic"
+    },
+    {
+      "alias": "Overnight stay",
+      "key": "3.5.2__overnight_stay"
+    },
+    {
+      "alias": "Overnight stay?",
+      "key": "3.5.2__overnight_stay"
+    },
+    {
+      "alias": "PI experience deemed adequate (from profiling call)",
+      "key": "3.2__pi_experience_deemed_adequate_from_profiling_call"
+    },
+    {
+      "alias": "Peripheral Blood Mononuclear Cells (PBMCs)",
+      "key": "3.8__peripheral_blood_mononuclear_cells_pbmcs"
+    },
+    {
+      "alias": "Personal conversation with physician",
+      "key": "2.2__personal_conversation_with_physician"
+    },
+    {
+      "alias": "Personal conversation with physician?",
+      "key": "2.2__personal_conversation_with_physician"
+    },
+    {
+      "alias": "Pharmacy Contact person (if applicable)",
+      "key": "3.6__pharmacy_contact_person_if_applicable"
+    },
+    {
+      "alias": "Plan in case of power outage",
+      "key": "3.5.3__plan_in_case_of_power_outage"
+    },
+    {
+      "alias": "Possibility to have PCR tests performed",
+      "key": "3.8__possibility_to_have_pcr_tests_performed"
+    },
+    {
+      "alias": "Possibility to have PCR tests performed?",
+      "key": "3.8__possibility_to_have_pcr_tests_performed"
+    },
+    {
+      "alias": "Regular official device checks for monitoring devices",
+      "key": "3.7.2__regular_official_device_checks_for_monitoring_devices"
+    },
+    {
+      "alias": "Regular official device checks for monitoring devices?",
+      "key": "3.7.2__regular_official_device_checks_for_monitoring_devices"
+    },
+    {
+      "alias": "Room Temperature available",
+      "key": "3.5.4__room_temperature__device_available"
+    },
+    {
+      "alias": "Room Temperature — available",
+      "key": "3.5.4__room_temperature__device_available"
+    },
+    {
+      "alias": "Signature of legal guardian (adolescents, children)",
+      "key": "2.2__signature_of_legal_guardian_adolescents_children"
+    },
+    {
+      "alias": "Signature of legal guardian (adolescents, children)?",
+      "key": "2.2__signature_of_legal_guardian_adolescents_children"
+    },
+    {
+      "alias": "Specimen Freezer Automated alarm system? (-69ºC)",
+      "key": "3.7.1__specimen_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "Specimen Freezer Backup plan for device failure (-69ºC)",
+      "key": "3.7.1__specimen_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "Specimen Freezer Certificate/label available? (-69ºC)",
+      "key": "3.7.1__specimen_freezer__certificate_label_available"
+    },
+    {
+      "alias": "Specimen Freezer Temperature (at least -69°C) (-69ºC)",
+      "key": "3.7.1__specimen_freezer__temperature_at_least_69_c"
+    },
+    {
+      "alias": "Specimen Freezer Temperature log (-69ºC)",
+      "key": "3.7.1__specimen_freezer__temperature_log"
+    },
+    {
+      "alias": "Specimen Freezer available",
+      "key": "3.7.1__specimen_freezer__device_available"
+    },
+    {
+      "alias": "Specimen Freezer — Automated alarm system? (-69ºC)",
+      "key": "3.7.1__specimen_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "Specimen Freezer — Backup plan for device failure (-69ºC)",
+      "key": "3.7.1__specimen_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "Specimen Freezer — Certificate/label available? (-69ºC)",
+      "key": "3.7.1__specimen_freezer__certificate_label_available"
+    },
+    {
+      "alias": "Specimen Freezer — Temperature (at least -69°C) (-69ºC)",
+      "key": "3.7.1__specimen_freezer__temperature_at_least_69_c"
+    },
+    {
+      "alias": "Specimen Freezer — Temperature log (-69ºC)",
+      "key": "3.7.1__specimen_freezer__temperature_log"
+    },
+    {
+      "alias": "Specimen Freezer — available",
+      "key": "3.7.1__specimen_freezer__device_available"
+    },
+    {
+      "alias": "Staff list for lead study available",
+      "key": "3.2__staff_list_for_lead_study_available"
+    },
+    {
+      "alias": "Standard Freezer Automated alarm system? (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "Standard Freezer Backup plan for device failure (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "Standard Freezer Certificate/label available? (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__certificate_label_available"
+    },
+    {
+      "alias": "Standard Freezer Temperature log (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__temperature_log"
+    },
+    {
+      "alias": "Standard Freezer available",
+      "key": "3.7.1__standard_freezer__device_available"
+    },
+    {
+      "alias": "Standard Freezer — Automated alarm system? (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__automated_alarm_system"
+    },
+    {
+      "alias": "Standard Freezer — Backup plan for device failure (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__backup_plan_for_device_failure"
+    },
+    {
+      "alias": "Standard Freezer — Certificate/label available? (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__certificate_label_available"
+    },
+    {
+      "alias": "Standard Freezer — Temperature log (-20 - -10ºC)",
+      "key": "3.7.1__standard_freezer__temperature_log"
+    },
+    {
+      "alias": "Standard Freezer — available",
+      "key": "3.7.1__standard_freezer__device_available"
+    },
+    {
+      "alias": "Storage of IMPs is lockable and monitored",
+      "key": "3.5.3__storage_of_imps_is_lockable_and_monitored"
+    },
+    {
+      "alias": "Structure Comments",
+      "key": "3.1__structure_comments"
+    },
+    {
+      "alias": "Temperature excursion plan",
+      "key": "3.5.3__temperature_excursion_plan"
+    },
+    {
+      "alias": "Trained personnel for CGM available",
+      "key": "3.2__trained_personnel_for_cgm_available"
+    },
+    {
+      "alias": "Trained personnel for CGM available?",
+      "key": "3.2__trained_personnel_for_cgm_available"
+    },
+    {
+      "alias": "What area clinics or institutions would refer patients to your site",
+      "key": "2.2__what_area_clinics_or_institutions_would_refer_patients_to_your_site"
+    },
+    {
+      "alias": "What area clinics or institutions would refer patients to your site?",
+      "key": "2.2__what_area_clinics_or_institutions_would_refer_patients_to_your_site"
+    },
+    {
+      "alias": "What happens to the drug",
+      "key": "3.5.3__what_happens_to_the_drug"
+    },
+    {
+      "alias": "What happens to the drug?",
+      "key": "3.5.3__what_happens_to_the_drug"
+    },
+    {
+      "alias": "What is the name of the GCP Certification Program used",
+      "key": "3.2__what_is_the_name_of_the_gcp_certification_program_used"
+    },
+    {
+      "alias": "What is the name of the GCP Certification Program used?",
+      "key": "3.2__what_is_the_name_of_the_gcp_certification_program_used"
+    },
+    {
+      "alias": "What is the standard turn around for contract execution ? (time from initiation to signature - in days)",
+      "key": "2.4__what_is_the_standard_turn_around_for_contract_execution_time_from_initiation_to_signature_in_days"
+    },
+    {
+      "alias": "What is your procedure for reporting SAEs",
+      "key": "3.3__what_is_your_procedure_for_reporting_saes"
+    },
+    {
+      "alias": "What is your procedure for reporting SAEs?",
+      "key": "3.3__what_is_your_procedure_for_reporting_saes"
+    },
+    {
+      "alias": "What specialist physicians are available at your site",
+      "key": "3.4__what_specialist_physicians_are_available_at_your_site"
+    },
+    {
+      "alias": "What specialist physicians are available at your site?",
+      "key": "3.4__what_specialist_physicians_are_available_at_your_site"
+    },
+    {
+      "alias": "Which languages for consent forms",
+      "key": "2.3__which_languages_for_consent_forms"
+    },
+    {
+      "alias": "Which languages for consent forms?",
+      "key": "2.3__which_languages_for_consent_forms"
+    },
+    {
+      "alias": "Who conducts regular device checks",
+      "key": "3.7.2__by_whom"
+    },
+    {
+      "alias": "Who conducts regular device checks?",
+      "key": "3.7.2__by_whom"
+    },
+    {
+      "alias": "Who does sterile compounding of IMP",
+      "key": "3.6__who_does_sterile_compounding_of_imp"
+    },
+    {
+      "alias": "Who does sterile compounding of IMP?",
+      "key": "3.6__who_does_sterile_compounding_of_imp"
+    },
+    {
+      "alias": "Who is notified",
+      "key": "3.5.3__who_is_notified"
+    },
+    {
+      "alias": "Who is notified?",
+      "key": "3.5.3__who_is_notified"
+    },
+    {
+      "alias": "Who is responsible ",
+      "key": "2.2__who_is_responsible"
+    },
+    {
+      "alias": "Who is responsible ?",
+      "key": "2.2__who_is_responsible"
+    },
+    {
+      "alias": "Who stores and monitors IMP at your site",
+      "key": "3.5.3__who_stores_and_monitors_imp_at_your_site"
+    },
+    {
+      "alias": "Who stores and monitors IMP at your site?",
+      "key": "3.5.3__who_stores_and_monitors_imp_at_your_site"
+    },
+    {
+      "alias": "Who will prepare the blood samples",
+      "key": "3.8__who_will_prepare_the_blood_samples"
+    },
+    {
+      "alias": "ZnT8 tests available?",
+      "key": "3.8__znt8"
+    },
+    {
+      "alias": "all staff GCP Certified before participating in Study Activity?",
+      "key": "3.2__are_all_staff_gcp_certified_before_participating_in_study_activity"
+    },
+    {
+      "alias": "area clinics or institutions would refer patients to your site?",
+      "key": "2.2__what_area_clinics_or_institutions_would_refer_patients_to_your_site"
+    },
+    {
+      "alias": "certificates provided after routine device checks?",
+      "key": "3.7.2__certificate_label_provided_by_vendor_to_site"
+    },
+    {
+      "alias": "conducts regular device checks?",
+      "key": "3.7.2__by_whom"
+    },
+    {
+      "alias": "dedicated examination rooms available ?",
+      "key": "3.5.2__are_dedicated_examination_rooms_available"
+    },
+    {
+      "alias": "documents archived in a locked and secured area?",
+      "key": "3.5.1__are_documents_archived_in_a_locked_and_secured_area"
+    },
+    {
+      "alias": "does sterile compounding of IMP?",
+      "key": "3.6__who_does_sterile_compounding_of_imp"
+    },
+    {
+      "alias": "glucose testing available?",
+      "key": "3.8__glucose"
+    },
+    {
+      "alias": "happens to the drug?",
+      "key": "3.5.3__what_happens_to_the_drug"
+    },
+    {
+      "alias": "insulin tests available?",
+      "key": "3.8__insulin"
+    },
+    {
+      "alias": "is it resolved?",
+      "key": "3.5.3__how_is_it_resolved"
+    },
+    {
+      "alias": "is notified?",
+      "key": "3.5.3__who_is_notified"
+    },
+    {
+      "alias": "is responsible ?",
+      "key": "2.2__who_is_responsible"
+    },
+    {
+      "alias": "is source data for each trial captured?",
+      "key": "3.5.1__how_is_source_data_for_each_trial_captured"
+    },
+    {
+      "alias": "is the name of the GCP Certification Program used?",
+      "key": "3.2__what_is_the_name_of_the_gcp_certification_program_used"
+    },
+    {
+      "alias": "is the standard turn around for contract execution ? (time from initiation to signature - in days)",
+      "key": "2.4__what_is_the_standard_turn_around_for_contract_execution_time_from_initiation_to_signature_in_days"
+    },
+    {
+      "alias": "is your procedure for reporting SAEs?",
+      "key": "3.3__what_is_your_procedure_for_reporting_saes"
+    },
+    {
+      "alias": "laminar Flow hood for sterile preparation available?",
+      "key": "3.6__is_laminar_flow_hood_for_sterile_preparation_available"
+    },
+    {
+      "alias": "long are documents retained? (Years)",
+      "key": "3.5.1__how_long_are_documents_retained_years"
+    },
+    {
+      "alias": "many beds?",
+      "key": "3.5.2__how_many_beds"
+    },
+    {
+      "alias": "often are regular device checks conducted?",
+      "key": "3.7.2__how_often"
+    },
+    {
+      "alias": "often do they meet?",
+      "key": "2.3__how_often_do_they_meet"
+    },
+    {
+      "alias": "specialist physicians are available at your site?",
+      "key": "3.4__what_specialist_physicians_are_available_at_your_site"
+    },
+    {
+      "alias": "stores and monitors IMP at your site?",
+      "key": "3.5.3__who_stores_and_monitors_imp_at_your_site"
+    },
+    {
+      "alias": "the PI experienced in managing Serum Sickness, cytokine release syndrome, leukopenia and other serious AEs?",
+      "key": "3.4__is_the_pi_experienced_in_managing_serum_sickness_cytokine_release_syndrome_leukopenia_and_other_serious_aes"
+    },
+    {
+      "alias": "the lab available centrally or locally?",
+      "key": "3.8__availability"
+    },
+    {
+      "alias": "the local/external lab certificated / accredited",
+      "key": "3.8__is_the_local_external_lab_certificated_accredited"
+    },
+    {
+      "alias": "the site personnel experienced and qualified in emergency care?",
+      "key": "3.3__is_the_site_personnel_experienced_and_qualified_in_emergency_care"
+    },
+    {
+      "alias": "there an SOP for preparing blood samples?",
+      "key": "3.8__is_there_an_sop"
+    },
+    {
+      "alias": "there any other regulatory hurdles for your institution or country that we should be aware of?",
+      "key": "2.3__are_there_any_other_regulatory_hurdles_for_your_institution_or_country_that_we_should_be_aware_of"
+    },
+    {
+      "alias": "there room for participants to stay in the center for extended periods",
+      "key": "3.5.2__is_there_room_for_participants_to_stay_in_the_center_for_extended_periods"
+    },
+    {
+      "alias": "will prepare the blood samples",
+      "key": "3.8__who_will_prepare_the_blood_samples"
+    },
+    {
+      "alias": "you center have access to emergency medications (epinephrine, diphenhydramine, etc)?",
+      "key": "3.3__does_you_center_have_access_to_emergency_medications_epinephrine_diphenhydramine_etc"
+    },
+    {
+      "alias": "your center fall under an accredited institution?",
+      "key": "2.1__does_your_center_fall_under_an_accredited_institution"
+    },
+    {
+      "alias": "your center have the ability to administer IV Infusions (infusion pumps and trained staff?)",
+      "key": "3.5.2__does_your_center_have_the_ability_to_administer_iv_infusions_infusion_pumps_and_trained_staff"
+    },
+    {
+      "alias": "your local or external lab have the capability to do",
+      "key": "3.8__does_your_local_or_external_lab_have_the_capability_to_do"
+    },
+    {
+      "alias": "your pharmacy on-site or off campus?",
+      "key": "3.6__is_your_pharmacy_on_site_or_off_campus"
+    },
+    {
+      "alias": "your site have an IT help desk for any clinical trial related internet or interface issues?",
+      "key": "3.5.1__does_your_site_have_an_it_help_desk_for_any_clinical_trial_related_internet_or_interface_issues"
+    },
+    {
+      "alias": "your site have experience with Phase 1 Trials?",
+      "key": "3.4__does_your_site_have_experience_with_phase_1_trials"
+    },
+    {
+      "alias": "your site have experience with pancreatic or Islet Transplant?",
+      "key": "3.4__does_your_site_have_experience_with_pancreatic_or_islet_transplant"
+    }
+  ]
+}

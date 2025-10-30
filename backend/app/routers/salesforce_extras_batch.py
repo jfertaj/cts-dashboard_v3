@@ -39,10 +39,10 @@ def batch_fetch_account_extras(sf, account_ids: List[str]) -> Dict[str, Dict[str
                 continue
             o = out.setdefault(aid, {})
             o["extra.MemberName"] = (r.get("C_Member__r") or {}).get("Name")
-            o["extra.CS_Clinical_Site_CS__c"]   = r.get("Clinical_Site_CS__c", EXTRA_BOOL_DEFAULT)
-            o["extra.CS_INNODIA_Clinical_Trial_Site__c"]   = r.get("INNODIA_Clinical_Trial_Site__c", EXTRA_BOOL_DEFAULT)
-            o["extra.CS_Referral_Outreach_Site__c"] = r.get("Referral_Outreach_Site_Non_CTS__c", EXTRA_BOOL_DEFAULT)
-            o["extra.CS_Eligible_DETECT__c"]    = r.get("Elegible_for_DETECT_Site__c", EXTRA_BOOL_DEFAULT)
+            o["extra.Clinical_Site_CS__c"] = r.get("Clinical_Site_CS__c", EXTRA_BOOL_DEFAULT)
+            o["extra.INNODIA_Clinical_Trial_Site__c"] = r.get("INNODIA_Clinical_Trial_Site__c", EXTRA_BOOL_DEFAULT)
+            o["extra.Referral_Outreach_Site_Non_CTS__c"] = r.get("Referral_Outreach_Site_Non_CTS__c", EXTRA_BOOL_DEFAULT)
+            o["extra.Elegible_for_DETECT_Site__c"] = r.get("Elegible_for_DETECT_Site__c", EXTRA_BOOL_DEFAULT)
 
     # --- 2) PI (vía AccountContactRelation con Role__c='PI')
     for chunk in _chunked(account_ids, 150):
@@ -67,6 +67,7 @@ def batch_fetch_account_extras(sf, account_ids: List[str]) -> Dict[str, Dict[str
             o["extra.PIPhone"] = c.get("Phone")
 
     # --- 3) (Opcional) Conteo de Assignments por Account
+    counts_by_acc: Dict[str, int] = {}
     for chunk in _chunked(account_ids, 150):
         ids = ",".join([f"'{i}'" for i in chunk])
         soql = (
@@ -82,6 +83,39 @@ def batch_fetch_account_extras(sf, account_ids: List[str]) -> Dict[str, Dict[str
                 continue
             # algunas versiones devuelven el alias como expr0
             cnt = r.get("cnt", r.get("expr0"))
-            out.setdefault(aid, {})["extra.AssignmentsCount"] = cnt
+            counts_by_acc[str(aid)] = cnt
+
+    names_by_acc: Dict[str, List[str]] = {}
+    for chunk in _chunked(account_ids, 150):
+        ids = ",".join([f"'{i}'" for i in chunk])
+        soql = (
+            "SELECT C_Account__c, Name "
+            "FROM Assignment__c "
+            f"WHERE C_Account__c IN ({ids}) "
+            "ORDER BY CreatedDate DESC"
+        )
+        res = sf.query_all(soql)
+        for r in res.get("records", []):
+            aid = r.get("C_Account__c")
+            if not aid:
+                continue
+            name = (r.get("Name") or "").strip()
+            if not name:
+                continue
+            bucket = names_by_acc.setdefault(str(aid), [])
+            if name in bucket:
+                continue
+            if len(bucket) >= 15:
+                continue
+            bucket.append(name)
+
+    for aid, cnt in counts_by_acc.items():
+        out.setdefault(aid, {})["extra.AssignmentsCount"] = cnt
+    for aid, names in names_by_acc.items():
+        if not names:
+            continue
+        entry = out.setdefault(aid, {})
+        entry["extra.AssignmentsNames"] = "; ".join(names)
+        entry.setdefault("extra.AssignmentsCount", len(names))
 
     return out

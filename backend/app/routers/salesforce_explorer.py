@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict, Counter
 import hashlib
+from dataclasses import dataclass
 
 from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAuthenticationFailed
 
@@ -22,6 +23,7 @@ from app.database import get_db
 from app.models.site import Site
 from app.models.site_qual import SiteQual
 from app.models import Questionnaire, Question, Section, QuestionnaireType
+from app.parser import qualification as qual_parser
 
 # ====== OAuth helpers ======
 from app.services.salesforce_oauth import (
@@ -196,6 +198,141 @@ def _slugify_question(text: str) -> str:
     t = re.sub(r"_+", "_", t).strip("_")
     return t or "q"
 
+
+def _sf_bool(value: Any) -> bool:
+    """
+    Salesforce booleans pueden venir como True/False, 0/1, o strings "true"/"false".
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        val = value.strip().lower()
+        if val in {"", "0", "false", "no", "n"}:
+            return False
+        return val in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _normalize_label_lookup_key(label: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", (label or "").strip()).lower()
+
+
+def _normalize_subcode_token(code: str | None) -> set[str]:
+    if not code:
+        return {None}
+    raw = (code or "").strip()
+    if not raw:
+        return {None}
+    out = {None}
+    variants = {raw, raw.replace(".", "_"), raw.replace("_", "."), raw.lower(), raw.upper()}
+    for v in variants:
+        if not v:
+            continue
+        out.add(v.strip())
+        out.add(v.strip().lower())
+    return out
+
+
+def _register_override_label(index: dict, label: str, slug: str, subcode: str | None = None) -> None:
+    if not label or not slug:
+        return
+    lbl_key = _normalize_label_lookup_key(label)
+    bucket = index.setdefault(lbl_key, {})
+    for code_variant in _normalize_subcode_token(subcode):
+        if code_variant not in bucket:
+            bucket[code_variant] = set()
+        bucket[code_variant].add(slug)
+    # También registra sin signos de interrogación finales (si aplica)
+    if label.endswith("?"):
+        _register_override_label(index, label.rstrip("?").strip(), slug, subcode)
+
+
+_DEVICE_PRETTY_LOOKUP = {
+    _normalize_label_lookup_key(pretty): slug
+    for slug, pretty in (qual_parser.DEVICE_PRETTY or {}).items()
+}
+_KNOWN_DEVICE_SLUGS = set((qual_parser.DEVICE_PRETTY or {}).keys())
+_DEVICE_SUFFIXES = sorted(
+    {suffix for mapping in (qual_parser.DEVICE_TEMPERATURE_SUFFIX or {}).values() for suffix in mapping.values()},
+    key=len,
+    reverse=True,
+)
+
+
+@dataclass(frozen=True)
+class _SlugGuess:
+    base_slug: str
+    device_slug: str | None = None
+
+
+def _split_device_from_label(label: str) -> tuple[str | None, str]:
+    for sep in (" — ", " – ", " - ", " -- ", " —", " –", " -"):
+        if sep in label:
+            left, right = label.split(sep, 1)
+            device_name = left.strip()
+            rest = right.strip()
+            device_slug = _DEVICE_PRETTY_LOOKUP.get(_normalize_label_lookup_key(device_name)) or _slugify_question(device_name)
+            return device_slug, rest
+    return None, label
+
+
+def _strip_known_suffixes(text: str) -> str:
+    t = text.strip()
+    for suffix in _DEVICE_SUFFIXES:
+        if suffix and t.endswith(suffix):
+            return t[: -len(suffix)].rstrip()
+    return t
+
+
+def _lookup_override_slugs(label: str, subcode: str | None) -> set[str]:
+    if not label:
+        return set()
+    key = _normalize_label_lookup_key(label)
+    entry = _LABEL_OVERRIDE_INDEX.get(key)
+    if not entry:
+        return set()
+    out: set[str] = set()
+    candidates = [None]
+    if subcode:
+        candidates.extend(_normalize_subcode_token(subcode))
+    for cand in candidates:
+        if cand in entry:
+            out.update(entry[cand])
+    return out
+
+
+def _guess_slugs_for_question(question_text: str, subcode: str | None) -> list[_SlugGuess]:
+    txt = (question_text or "").strip()
+    if not txt:
+        return []
+
+    # Prefijo IMP opcional
+    core = txt[4:].strip() if txt.upper().startswith("IMP ") else txt
+
+    device_slug, remainder = _split_device_from_label(core)
+    cleaned = _strip_known_suffixes(remainder).strip()
+
+    variants = {core.strip(), remainder.strip(), cleaned.strip(), cleaned.strip().rstrip("?")}
+    slugs: set[_SlugGuess] = set()
+    for variant in variants:
+        if not variant:
+            continue
+        for slug in _lookup_override_slugs(variant, subcode):
+            if slug:
+                slugs.add(_SlugGuess(slug, device_slug))
+
+    if slugs:
+        return sorted(slugs, key=lambda g: (g.device_slug or "", g.base_slug))
+
+    # Fallback al slugify normal
+    fallback_slug = _slugify_question(cleaned or core)
+    return [_SlugGuess(fallback_slug, device_slug)]
+
 # === Overrides & filtros para el catálogo qual.* que muestra /api/explorer/fields ===
 # Prefijos de grupo (sección) a excluir del Column Picker (p.ej. "4." -> irá a Profiling)
 EXCLUDE_QUAL_GROUP_PREFIXES: tuple[str, ...] = ("1.", "PART I", "4.", "PART IV")
@@ -213,10 +350,14 @@ DESCRIBE_SLOTS_OVERRIDE: dict[str, int] = {
 QUAL_LABEL_OVERRIDES: dict[str, dict | str] = {
     # 2.1 SOPs
     "comments": "Comments on SOPs or general institution",
+    "2_1__comments": "Comments on SOPs or general",
+    "2_2__comments": "Comments on consent process or age of enrollment",
     # 2.2 Recruitment & Consenting
     "meets_basic_criteria_per_gcp_ich": "Does the consenting process meet GCP requirements",
     "personal_conversation_with_physician": "Does the consenting process involve a Personal Conversation with Physician",
     "who_is_responsible": "Who is responsible for recruitment and consenting",
+    "2_4__comments": "Comments on Contracting Process",
+    "3_8__comments": "Comments on the site lab resources or accreditation",
     # 2.3 Ethics & IRB
     "how_often_do_they_meet": "How often does the local ethics meet?",
     # 3.2 Study team
@@ -234,12 +375,153 @@ QUAL_LABEL_OVERRIDES: dict[str, dict | str] = {
     # 3.6 Pharmacy
     "location": {"_group": "3.6 Pharmacy / Preparation of Medication",
                  "label": "Location of the laminar flow hood for sterile preparation"},
+    # 3.7.1 storage device clarifications
+    "3_7_1__fridge__available": "Fridge — available (2-8ºC)",
+    "3_7_1__fridge__backup_plan_for_fridge_failure": "Fridge — Backup plan for fridge failure (2-8ºC)",
+    # 3.7.2 Additional devices/equipment
+    "blood_pressure_monitor": {"_group": "3.7.2 Additional devices/equipment",
+                               "label": "Blood pressure monitor available?"},
+    "centrifuge": {"_group": "3.7.2 Additional devices/equipment",
+                   "label": "Centrifuge available?"},
+    "ecg_device": {"_group": "3.7.2 Additional devices/equipment",
+                   "label": "ECG device available?"},
+    "monitor_for_oxygen_saturation": {"_group": "3.7.2 Additional devices/equipment",
+                                      "label": "Monitor for oxygen saturation available?"},
+    "monitor_for_respiratory_rate": {"_group": "3.7.2 Additional devices/equipment",
+                                     "label": "Monitor for respiratory rate available?"},
+    "temperature_range": {"_group": "3.7.2 Additional devices/equipment",
+                          "label": "Temperature range (°C)"},
+    "by_whom": {"_group": "3.7.2 Additional devices/equipment",
+                "label": "Who conducts regular device checks?"},
+    "regular_official_device_checks_for_monitoring_devices": {
+        "_group": "3.7.2 Additional devices/equipment",
+        "label": "Are regular official device checks for monitoring devices conducted?",
+    },
+    "certificate_label_provided_by_vendor_to_site": {
+        "_group": "3.7.2 Additional devices/equipment",
+        "label": "Are certificates provided after routine device checks?",
+    },
+    "how_often": {"_group": "3.7.2 Additional devices/equipment",
+                  "label": "How often are regular device checks conducted?"},
+    # 3.8 Laboratory
+    "availability": {"_group": "3.8 Laboratory",
+                     "label": "Is the lab available centrally or locally?"},
+    "certificate_available": {"_group": "3.8 Laboratory",
+                              "label": "Do you have a local or external lab certificate available?"},
+    "is_there_an_sop": {"_group": "3.8 Laboratory",
+                        "label": "Is there an SOP for preparing blood samples?"},
+    "describe_process": {"_group": "3.8 Laboratory",
+                         "label": "Describe process for preparing blood samples"},
+    "fbc": {"_group": "3.8 Laboratory", "label": "Are FBC tests available?"},
+    "hba1c": {"_group": "3.8 Laboratory", "label": "Is HbA1c testing available?"},
+    "c_peptide": {"_group": "3.8 Laboratory", "label": "Is C-peptide testing available?"},
+    "glucose": {"_group": "3.8 Laboratory", "label": "Is glucose testing available?"},
+    "insulin": {"_group": "3.8 Laboratory",
+                 "label": "Are insulin tests available?"},
+    "insulin_2": {"_group": "3.8 Laboratory",
+                   "label": "Are insulin autoantibody tests available?"},
+    "peripheral_blood_mononuclear_cells": {"_group": "3.8 Laboratory",
+                                           "label": "Are PBMC tests available?"},
+    "autoantibodies": {"_group": "3.8 Laboratory", "label": "Are autoantibody tests available?"},
+    "gad65": {"_group": "3.8 Laboratory", "label": "Are GAD65 tests available?"},
+    "znt8": {"_group": "3.8 Laboratory", "label": "Are ZnT8 tests available?"},
+    "ia_2": {"_group": "3.8 Laboratory", "label": "Are IA-2 tests available?"},
+    "possibility_to_have_pcr_tests_performed": {"_group": "3.8 Laboratory",
+                                                "label": "Is PCR testing available?"},
+    "can_you_do_hla_typing": {"_group": "3.8 Laboratory",
+                              "label": "Is HLA typing available?"},
+    "who_will_prepare_the_blood_samples": {"_group": "3.8 Laboratory",
+                                           "label": "Who prepares the blood samples?"},
 }
+
+
+def _build_label_override_index() -> dict[str, dict[str | None, set[str]]]:
+    idx: dict[str, dict[str | None, set[str]]] = {}
+
+    def _register_list(labels, slug_base: str, subcode: str | None = None):
+        if not labels:
+            return
+        for i, lbl in enumerate(labels):
+            slug = slug_base if i == 0 else f"{slug_base}_{i+1}"
+            _register_override_label(idx, lbl, slug, subcode)
+
+    # Comentarios específicos
+    for subcode, mapping in (qual_parser.COMMENT_LABEL_OVERRIDES or {}).items():
+        if isinstance(mapping, dict):
+            for slug_base, val in mapping.items():
+                if isinstance(val, list):
+                    _register_list(val, slug_base or "comments", subcode)
+                else:
+                    _register_override_label(idx, val, slug_base or "comments", subcode)
+        elif isinstance(mapping, list):
+            _register_list(mapping, "comments", subcode)
+        else:
+            _register_override_label(idx, mapping, "comments", subcode)
+
+    # Describe overrides
+    for subcode, mapping in (qual_parser.DESCRIBE_LABEL_OVERRIDES or {}).items():
+        if isinstance(mapping, dict):
+            for slug_base, val in mapping.items():
+                if isinstance(val, list):
+                    _register_list(val, slug_base or "describe", subcode)
+                else:
+                    _register_override_label(idx, val, slug_base or "describe", subcode)
+        elif isinstance(mapping, list):
+            _register_list(mapping, "describe", subcode)
+        else:
+            _register_override_label(idx, mapping, "describe", subcode)
+
+    # Genéricos (lab, pharmacy, etc.)
+    for subcode, mapping in (qual_parser.GENERIC_LABEL_OVERRIDES or {}).items():
+        for slug_base, val in (mapping or {}).items():
+            if isinstance(val, list):
+                _register_list(val, slug_base, subcode)
+            else:
+                _register_override_label(idx, val, slug_base, subcode)
+
+    # Overrides específicos con clave completa (incluye device)
+    for key_full, label in (qual_parser.SPECIFIC_LABEL_OVERRIDES or {}).items():
+        key_txt = str(key_full or "").strip()
+        if not key_txt:
+            continue
+        parts = key_txt.split("__")
+        if len(parts) < 2:
+            continue
+        subcode = parts[0].replace(".", "_").strip()
+        base_slug = parts[-1].strip()
+        if base_slug:
+            _register_override_label(idx, label, base_slug, subcode)
+
+    # Overrides definidos en este módulo
+    for slug, val in QUAL_LABEL_OVERRIDES.items():
+        if isinstance(val, dict):
+            label = val.get("label")
+            if label:
+                _register_override_label(idx, label, slug, None)
+        else:
+            _register_override_label(idx, val, slug, None)
+
+    return idx
+
+
+_LABEL_OVERRIDE_INDEX = _build_label_override_index()
 
 
 # --- Helpers para formatear labels y grupos de claves qual.* nuevas ---
 _SUBCODE_RE = re.compile(r"^\d+(?:_\d+)*$")          # 3, 3_5, 3_5_4 ...
 _SUBSECT_CODE_EXTRACT_RE = re.compile(r"^\s*(\d+(?:\.\d+)+)")
+
+
+def _normalize_qual_key(raw: str) -> str:
+    if not raw:
+        return raw
+    text = str(raw)
+    parts = text.split("__", 1)
+    head = parts[0].strip().replace(".", "_")
+    if len(parts) == 1:
+        return head
+    tail = parts[1].strip()
+    return f"{head}__{tail}"
 
 def _dots(s: str) -> str:
     return (s or "").replace("_", ".")
@@ -270,6 +552,115 @@ def _build_subcode_to_group(db: Session) -> dict[str, str]:
         code_unders = code_dots.replace(".", "_")    # '3_5_4'
         out.setdefault(code_unders, subsec.strip())
     return out
+
+def _build_qual_question_catalog(db: Session) -> tuple[dict[str, dict[str, str]], dict[str, list[dict[str, str]]]]:
+    """
+    Devuelve dos catálogos:
+      - by_key:    clave canónica (sin prefijo qual.) -> metadata
+      - by_slug:   slug base -> [metadata,...] (para resolver empates por subcode/device)
+    """
+
+    rows = (
+        db.query(
+            Question.question_text,
+            Question.subsection,
+            Question.question_number,
+            Section.name,
+        )
+        .join(Section, Section.id == Question.section_id)
+        .join(Questionnaire, Questionnaire.id == Section.questionnaire_id)
+        .filter(Questionnaire.type == QuestionnaireType.qualification)
+        .filter(func.length(func.coalesce(Question.question_text, "")) > 0)
+        .limit(10_000)
+        .all()
+    )
+
+    catalog_by_key: dict[str, dict[str, str]] = {}
+    catalog_by_slug: dict[str, list[dict[str, str]]] = defaultdict(list)
+
+    for qtext, subsection, qnum, secname in rows:
+        question = (qtext or "").strip()
+        if not question:
+            continue
+
+        section = (secname or "").strip()
+        if section.upper().startswith("PART I"):
+            continue
+
+        slug = _slugify_question(question)
+        if not slug:
+            continue
+
+        subsection_label = (subsection or "").strip()
+        subcode = None
+        if subsection_label:
+            m = _SUBSECT_CODE_EXTRACT_RE.match(subsection_label)
+            if m:
+                subcode = m.group(1).replace('.', '_')
+        alt_code = None
+        if qnum:
+            m = _SUBSECT_CODE_EXTRACT_RE.match(str(qnum))
+            if m:
+                alt_code = m.group(1).replace('.', '_')
+        code_candidates = []
+        if subcode:
+            code_candidates.append(subcode)
+        if alt_code and alt_code not in code_candidates:
+            code_candidates.append(alt_code)
+
+        slug_guesses = _guess_slugs_for_question(question, subcode or alt_code)
+        if not slug_guesses:
+            slug_guesses = [_SlugGuess(_slugify_question(question), None)]
+
+        for guess in slug_guesses:
+            meta = {
+                "question": question,
+                "subsection": subsection_label,
+                "section": section,
+                "subcode": (subcode or alt_code or ""),
+                "base_slug": guess.base_slug,
+                "device": guess.device_slug or "",
+            }
+
+            catalog_by_slug[guess.base_slug].append(meta)
+
+            base_key = _normalize_qual_key(guess.base_slug)
+            catalog_by_key.setdefault(base_key, meta)
+
+            for code in code_candidates or [""]:
+                if not code:
+                    continue
+                parts = [code]
+                if guess.device_slug:
+                    parts.append(guess.device_slug)
+                parts.append(guess.base_slug)
+                canon = _normalize_qual_key("__".join(parts))
+                catalog_by_key.setdefault(canon, meta)
+
+    return catalog_by_key, catalog_by_slug
+
+
+def _split_canonical_qual_key(key_no_prefix: str) -> tuple[str | None, str | None, str]:
+    """
+    Descompone '3_7_1__fridge__temperature_log' en ('3_7_1','fridge','temperature_log')
+    """
+    raw = (key_no_prefix or "").strip()
+    if not raw:
+        return None, None, ""
+    parts = raw.split("__")
+    subcode = None
+    device = None
+    base = ""
+    if parts and _SUBCODE_RE.match(parts[0]):
+        subcode = parts[0]
+        parts = parts[1:]
+    if parts:
+        if len(parts) >= 2 and parts[0] in _KNOWN_DEVICE_SLUGS:
+            device = parts[0]
+            base = "__".join(parts[1:]) or ""
+        else:
+            base = "__".join(parts) or ""
+    return subcode, device, base
 
 def _pretty_label_and_group_from_key(key_no_prefix: str,
                                      subcode_to_group: dict[str, str]) -> tuple[str, Optional[str]]:
@@ -302,28 +693,36 @@ def _pretty_label_and_group_from_key(key_no_prefix: str,
 
 def _disambiguate_duplicate_labels(fields: list[dict]) -> list[dict]:
     """
-    Si hay labels duplicadas (p.ej. varios 'Comments' o varios 'Describe'), añade un sufijo
-    con el código de subsección usando la key:
+    Añade el código de subsección a TODAS las columnas qual.* para consistencia:
       - qual.3_6_3__comments       -> Comments (3.6.3)
       - qual.2_4__comments_details -> Comments details (2.4)
+      - qual.2_1__comments         -> Comments on SOPs or general (2.1)
     No cambia las keys, solo la etiqueta visible.
+    
+    EXCEPCIONES:
+    - No se aplica a labels que ya contienen " — " (dispositivos)
+    - No se aplica a labels que empiezan con "IMP " 
+    - No se aplica si el label ya tiene un código de sección al final
     """
     import re
-    from collections import Counter
-
-    counts = Counter()
-    for f in fields:
-        lbl = (f.get("label") or "").strip()
-        if lbl:
-            counts[lbl] += 1
 
     out: list[dict] = []
     for f in fields:
         k = str(f.get("key") or "")
         lbl = (f.get("label") or "").strip()
 
-        # Si no está duplicado o no es qual.*, lo dejamos tal cual
-        if counts.get(lbl, 0) <= 1 or not k.startswith("qual."):
+        # Solo aplicar a columnas qual.*
+        if not k.startswith("qual."):
+            out.append(f)
+            continue
+        
+        # NO añadir sufijo si:
+        # 1. Ya tiene dispositivo (contiene " — ")
+        # 2. Es un campo IMP
+        # 3. Ya tiene un código de sección al final tipo "(3.5.4)"
+        if (" — " in lbl or 
+            lbl.startswith("IMP ") or
+            re.search(r"\(\d+\.\d+(?:\.\d+)?\)\s*$", lbl)):
             out.append(f)
             continue
 
@@ -341,6 +740,7 @@ def _disambiguate_duplicate_labels(fields: list[dict]) -> list[dict]:
             if m:
                 subcode = m.group(1)
 
+        # Añade el sufijo si tenemos un subcode válido
         if subcode:
             f = {**f, "label": f"{lbl} ({subcode})"}
 
@@ -351,7 +751,7 @@ def _disambiguate_duplicate_labels(fields: list[dict]) -> list[dict]:
 
 def _apply_qual_overrides(fields: list[dict]) -> list[dict]:
     """
-    - Oculta secciones por prefijo (e.g., "4.")
+    - Oculta secciones por prefijo (e.g., "4.", "PART I")
     - Cambia labels según QUAL_LABEL_OVERRIDES
     - Prefija con "IMP " en 3.5.3 IMP Storage
     - Filtra cualquier 'qual.describe' genérico que pudiera colarse
@@ -364,11 +764,20 @@ def _apply_qual_overrides(fields: list[dict]) -> list[dict]:
         # 0) Nunca publicar el genérico
         if k == "qual.describe":
             continue
+        
+        # 0b) Filtrar PART I por clave (formato I__*)
+        if k.startswith("qual.I__"):
+            continue
 
-        # 1) ocultar secciones 4.x
+        # 1) ocultar secciones por grupo o qual_section
         if grp:
             gnorm = grp.strip().upper()
             if any(gnorm.startswith(p.upper()) for p in EXCLUDE_QUAL_GROUP_PREFIXES):
+                continue
+        qsection = (f.get("qual_section") or "").strip()
+        if qsection:
+            snorm = qsection.upper()
+            if any(snorm.startswith(p.upper()) for p in EXCLUDE_QUAL_GROUP_PREFIXES):
                 continue
 
         # 2) overrides de label (tu lógica)
@@ -430,14 +839,17 @@ def _qualification_field_defs(db: Session) -> list[dict]:
     )
     out = []
     for (qt,) in q.all():
-        key = f"qual.{_slugify_question(qt)}"
+        slug = _slugify_question(qt)
+        key = f"qual.{slug}"
         out.append({
             "key": key,
-            "label": qt.strip(),
+            "label": (qt or "").strip(),
             "type": "string",
             "source": "qual",
         })
     return out
+
+
 
 # ======================= si se necesitan extras =======================
 
@@ -550,6 +962,15 @@ def _norm_label_to_key(x: Any) -> str:
     if s.startswith("[qual] "): s = s[7:]
     return s
 
+
+def _strip_account_prefix(field: str) -> str:
+    f = field
+    if f.startswith("sf."):
+        f = f[3:]
+    if f.startswith("Account."):
+        f = f.split(".", 1)[1]
+    return f
+
 def _safe_field(field: str) -> str:
     if field not in ALLOWED_FIELDS:
         if field.startswith("Account."):
@@ -607,8 +1028,6 @@ def _build_sf_where(q: FilterQuery) -> str:
         return ""
     clauses: List[str] = []
     for r in q.rules:
-        if r.field.startswith("Account."):
-            continue
         f = _safe_field(r.field)
         op_raw = r.operator
         op = _OP_SYNONYM.get(op_raw, op_raw).lower()
@@ -711,6 +1130,16 @@ def _build_sf_where(q: FilterQuery) -> str:
     # Devuelve SIEMPRE agrupado en paréntesis para proteger precedencias aguas arriba
     return f"({glue.join(clauses)})"
 
+# ===== Helper: Prefix Account.* rules for WHERE usage =====
+def _prefix_account_rules_for_where(rules: List[Rule]) -> List[Rule]:
+    out: List[Rule] = []
+    for r in rules or []:
+        f = r.field or ""
+        f = f if f.startswith("Account.") else f"Account.{f}"
+        out.append(Rule(field=f, operator=r.operator, value=r.value))
+    return out
+
+
 # ======================= UTILIDADES ACCOUNT =======================
 
 # --- Normalización ligera de países (Europa + comunes)
@@ -807,6 +1236,28 @@ def _norm_type(t: str | None) -> str | None:
     if "qual"  in t: return "qualification"
     return None
 
+def _safe_int(value: Any) -> Optional[int]:
+    if value in (None, "", [], {}):
+        return None
+    try:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int,)):
+            return int(value)
+        return int(float(value))
+    except Exception:
+        return None
+
+
+def _split_assignment_names(raw: Any) -> List[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    s = str(raw)
+    return [p.strip() for p in s.split(";") if p and p.strip()]
+
+
 def _build_account_map(sf, acc_ids: List[str]) -> Dict[str, Dict]:
     if not acc_ids:
         return {}
@@ -820,7 +1271,9 @@ def _build_account_map(sf, acc_ids: List[str]) -> Dict[str, Dict]:
         Id, Name,
         ShippingCity, ShippingCountry, ShippingLatitude, ShippingLongitude,
         BillingCity,  BillingCountry,  BillingLatitude,  BillingLongitude,
-        Account_Inactive__c, Subaccount_Inactive__c
+        Account_Inactive__c, Subaccount_Inactive__c,
+        Clinical_Site_CS__c, INNODIA_Clinical_Trial_Site__c,
+        Referral_Outreach_Site_Non_CTS__c, Elegible_for_DETECT_Site__c
     """
 
     out: Dict[str, Dict] = {}
@@ -828,8 +1281,8 @@ def _build_account_map(sf, acc_ids: List[str]) -> Dict[str, Dict]:
         vals = ", ".join(f"'{x}'" for x in group)
         recs = _sf_query_all(sf, f"SELECT {fields} FROM Account WHERE Id IN ({vals})")
         for a in recs:
-            # ❌ Filtrar cuentas inactivas
-            if a.get("Account_Inactive__c") or a.get("Subaccount_Inactive__c"):
+            inactive = _sf_bool(a.get("Account_Inactive__c")) or _sf_bool(a.get("Subaccount_Inactive__c"))
+            if inactive:
                 continue
 
             city = a.get("ShippingCity") or a.get("BillingCity")
@@ -842,6 +1295,11 @@ def _build_account_map(sf, acc_ids: List[str]) -> Dict[str, Dict]:
                 "name": a.get("Name"),
                 "city": city, "country": country,
                 "lat":  lat,  "lng":     lng,
+                "cs": {
+                    "clinical": _sf_bool(a.get("INNODIA_Clinical_Trial_Site__c") or a.get("Clinical_Site_CS__c")),
+                    "referral": _sf_bool(a.get("Referral_Outreach_Site_Non_CTS__c")),
+                    "detect": _sf_bool(a.get("Elegible_for_DETECT_Site__c")),
+                },
             }
     return out
 
@@ -1052,6 +1510,7 @@ def _infer_qual_fields(db: Session, sample: int = 200) -> List[Dict[str, Any]]:
         .join(Section, Section.id == Question.section_id)
         .join(Questionnaire, Questionnaire.id == Section.questionnaire_id)
         .filter(Questionnaire.type == QuestionnaireType.qualification)
+        .filter(~Section.name.ilike("PART I%"))
         .order_by(literal(0).asc(), literal(0).asc())
         .all()
     )
@@ -1102,7 +1561,8 @@ def _infer_qual_fields(db: Session, sample: int = 200) -> List[Dict[str, Any]]:
         # fan-out describe (usa tu helper actual)
         row_data = _expand_describe_keys_for_row(row_data, groups_by_slug)
 
-        for k, v in (row_data or {}).items():
+        for raw_key, v in (row_data or {}).items():
+            k = _normalize_qual_key(raw_key)
             # --- FILTRO: mantener solo describe_N que estén en los slots permitidos (deduplicados por subsección) ---
             if "__describe" in k:
                 base = k.split("__", 1)[0]  # "<sub>"
@@ -1131,39 +1591,137 @@ def _infer_qual_fields(db: Session, sample: int = 200) -> List[Dict[str, Any]]:
             prev = keys_types.get(k)
             keys_types[k] = t if prev is None or prev == t else "string"
 
-    # === 3) Etiquetado bonito ===
+    # Asegura que todos los campos detectados en el catálogo de preguntas aparecen aunque SiteQual no tenga datos
+    catalog_by_key, catalog_by_slug = _build_qual_question_catalog(db)
+    for key_full in catalog_by_key.keys():
+        if "__" in key_full:
+            keys_types.setdefault(key_full, "string")
+
+    # === 3) Etiquetado con textos del cuestionario ===
     subcode_to_group = _build_subcode_to_group(db)
+    keys_all = sorted(set(keys_types.keys()) | set(catalog_by_key.keys()))
 
-    # Overrides de label para describe
-    DESCRIBE_LABEL_OVERRIDES = {
-        # 3.4 (dos Describe)
-        "3_4__describe":   "Describe the site's experience Managing serious AEs",
-        "3_4__describe_2": "Describe the site's experience with Phase 1 or Islet Transplant",
-        # 3.5.1 (uno)
-        "3_5_1__describe": "Describe",
-        # 3.8 (uno, texto específico)
-        "3_8__describe":   "Describe process",
-    }
-
+    # Deduplicate: prefer versioned keys (e.g., '2_1__comments') over base keys (e.g., 'comments')
+    # Build a map of base_slug -> best_key to eliminate duplicates at the source
+    key_priority_map: Dict[str, str] = {}
+    for raw_key in keys_all:
+        canonical = _normalize_qual_key(raw_key)
+        if canonical == "describe" or "__describe" in canonical:
+            continue
+        if canonical.upper().startswith("I__"):
+            continue
+        
+        # Extract the base slug (part after __ if present, otherwise the whole key)
+        if "__" in canonical:
+            base_slug = canonical.split("__", 1)[1]  # e.g., "2_1__comments" -> "comments"
+            # Prefer keys with section prefixes (they're more specific)
+            if base_slug not in key_priority_map or "__" not in key_priority_map[base_slug]:
+                key_priority_map[base_slug] = canonical
+        else:
+            # Base key without section prefix
+            if canonical not in key_priority_map:
+                key_priority_map[canonical] = canonical
+    
+    # Now iterate only through the deduplicated keys
     out: List[Dict[str, Any]] = []
-    for k, t in sorted(keys_types.items()):
-        # Nunca emitas 'describe' genérico
-        if k == "describe":
+    processed_keys = set()
+    for raw_key in keys_all:
+        canonical = _normalize_qual_key(raw_key)
+        if canonical == "describe" or "__describe" in canonical:
             continue
 
-        label, group = _pretty_label_and_group_from_key(k, subcode_to_group)
+        if canonical.upper().startswith("I__"):
+            continue
+        
+        # Skip if this is a base key that has a better versioned alternative
+        if "__" not in canonical and canonical in key_priority_map:
+            if key_priority_map[canonical] != canonical:
+                continue  # Skip the base key, we'll use the versioned one
+        
+        # Skip if we've already processed this exact key
+        if canonical in processed_keys:
+            continue
+        processed_keys.add(canonical)
 
-        # Ajuste de labels SOLO para __describe*
-        if "__describe" in k:
-            if k in DESCRIBE_LABEL_OVERRIDES:
-                label = DESCRIBE_LABEL_OVERRIDES[k]
+        subcode_part, device_part, base_part = _split_canonical_qual_key(canonical)
+
+        meta = catalog_by_key.get(canonical)
+        if not meta and base_part:
+            candidates = catalog_by_slug.get(base_part) or []
+            if len(candidates) == 1:
+                meta = candidates[0]
+            elif candidates:
+                for candidate in candidates:
+                    if candidate.get("subcode") == (subcode_part or ""):
+                        if not device_part or candidate.get("device") == (device_part or ""):
+                            meta = candidate
+                            break
+                if not meta:
+                    meta = candidates[0]
+
+        section_label = (meta.get("section") if meta else "") or ""
+        if section_label.upper().startswith("PART I"):
+            continue
+
+        t = keys_types.get(raw_key, keys_types.get(canonical, "string"))
+        label = None
+        group = None
+
+        if meta:
+            qtext = (meta.get("question") or "").strip()
+            subsection = (meta.get("subsection") or "").strip()
+            if qtext:
+                label = qtext
+            if section_label and subsection:
+                group = f"{section_label} › {subsection}"
+            elif subsection:
+                group = subsection
+            elif section_label:
+                group = section_label
+
+        if not label or not group:
+            pretty_label, pretty_group = _pretty_label_and_group_from_key(canonical, subcode_to_group)
+            if not label:
+                label = pretty_label
+            if not group:
+                group = pretty_group
+
+        override_slug_key = base_part or canonical
+        override = QUAL_LABEL_OVERRIDES.get(canonical) or QUAL_LABEL_OVERRIDES.get(override_slug_key)
+        if isinstance(override, str):
+            label = override
+        elif isinstance(override, dict):
+            label = override.get("label") or label
+            want_group = (override.get("_group") or "").strip()
+            if want_group:
+                group = want_group
+
+        # Ajuste de labels para secciones con dispositivos (temperaturas + prefijos IMP)
+        # IMPORTANTE: El parser YA incluye el dispositivo en el question_text con formato:
+        #   "<Pretty Device> — <Pregunta>" (ej: "Room Temperature (RT) — Lockable?")
+        # Así que NO debemos modificar el label si ya viene del catálogo (meta)
+        # Solo aplicamos este ajuste si el label fue generado automáticamente sin meta
+        if device_part and not meta:
+            dotted_sub = subcode_part.replace("_", ".") if subcode_part else ""
+            suffix_map = (qual_parser.DEVICE_TEMPERATURE_SUFFIX or {}).get(dotted_sub, {})
+            pretty_name = (qual_parser.DEVICE_PRETTY or {}).get(device_part, _titlecase(device_part))
+            suffix = suffix_map.get(device_part, "")
+            target_device = f"{pretty_name}{suffix}"
+            if label:
+                # Si no tiene "—", añadimos el dispositivo
+                if " — " not in label:
+                    label = f"{target_device} — {label}"
             else:
-                prefix = (group or "").split()[0] if group else ""
-                label = f"Describe ({prefix})" if prefix else "Describe"
+                label = target_device
 
-        item = {"key": f"qual.{k}", "label": label, "type": t, "source": "qual"}
+        if subcode_part == "3_5_4" and label and not label.upper().startswith("IMP "):
+            label = f"IMP {label}"
+
+        item = {"key": f"qual.{canonical}", "label": label, "type": t, "source": "qual"}
         if group:
             item["group"] = group
+        if section_label:
+            item["qual_section"] = section_label
         out.append(item)
 
     return out
@@ -1538,7 +2096,8 @@ async def map_bootstrap(request: Request, db: Session = Depends(get_db)):
     try:
         sf = _get_sf(request)
         opps = _sf_query_all(sf, f"""
-            SELECT Id, Name, Type, StageName, IsClosed, CloseDate, AccountId
+            SELECT Id, Name, Type, StageName, IsClosed, CloseDate, AccountId,
+                   C_Number_of_new_T1D_diagnosed_U_18__c, C_Number_of_new_T1D_diagnosed_O_18__c
             FROM Opportunity
             WHERE Type IN ({TYPE_IN}) AND AccountId != null
         """)
@@ -1547,6 +2106,38 @@ async def map_bootstrap(request: Request, db: Session = Depends(get_db)):
 
         acc_ids = sorted({o.get("AccountId") for o in opps if o.get("AccountId")})
         acc_map = _build_account_map(sf, acc_ids)
+        active_acc_ids = list(acc_map.keys())
+        extras_map = batch_fetch_account_extras(sf, active_acc_ids) if active_acc_ids else {}
+
+        badges: Dict[str, Dict[str, bool]] = {}
+        nd_counts: Dict[str, Dict[str, Optional[int]]] = {}
+        for o in opps:
+            aid = o.get("AccountId")
+            t = _norm_type(o.get("Type"))
+            if not aid:
+                continue
+            if aid not in acc_map:
+                continue
+
+            if t == "profiling":
+                u18 = _safe_int(o.get("C_Number_of_new_T1D_diagnosed_U_18__c"))
+                o18 = _safe_int(o.get("C_Number_of_new_T1D_diagnosed_O_18__c"))
+                if u18 is not None or o18 is not None:
+                    nd = nd_counts.setdefault(aid, {"u18": None, "o18": None})
+                    if u18 is not None:
+                        nd["u18"] = u18
+                    if o18 is not None:
+                        nd["o18"] = o18
+
+            b = badges.setdefault(aid, {"profiling": False, "qualification": False})
+            if t == "profiling":
+                b["profiling"] = True
+            elif t == "qualification":
+                b["qualification"] = True
+
+        for aid, counts in nd_counts.items():
+            if aid in acc_map:
+                acc_map[aid].setdefault("nd_counts", counts)
 
         site_rows = db.execute(
             select(Site.salesforce_account_id, Site.name, Site.city, Site.country, Site.latitude, Site.longitude)
@@ -1558,20 +2149,10 @@ async def map_bootstrap(request: Request, db: Session = Depends(get_db)):
                 "site_name": sname, "city": scity, "country": scountry, "lat": slat, "lng": slng
             }
 
-        badges: Dict[str, Dict[str, bool]] = {}
-        for o in opps:
-            aid = o.get("AccountId");  t = _norm_type(o.get("Type"))
-            if not aid: 
-                continue
-            # ⛔ Si la cuenta fue filtrada por inactividad, no la mostramos
-            if aid not in acc_map:
-                continue
-            b = badges.setdefault(aid, {"profiling": False, "qualification": False})
-            if t == "profiling": b["profiling"] = True
-            elif t == "qualification": b["qualification"] = True
-
         out = []
         for aid, acc in acc_map.items():
+            if aid in nd_counts:
+                acc.setdefault("nd_counts", nd_counts[aid])
             # 1) Coordenadas directas de SF
             lat, lng = acc.get("lat"), acc.get("lng")
 
@@ -1626,6 +2207,34 @@ async def map_bootstrap(request: Request, db: Session = Depends(get_db)):
             city_out    = acc_city or site_city
             country_out = acc_country or site_country
 
+            extras_entry = (extras_map.get(aid) or {})
+            assignments_list = _split_assignment_names(extras_entry.get("extra.AssignmentsNames"))
+            assign_count = _safe_int(extras_entry.get("extra.AssignmentsCount"))
+            nd_meta = (acc.get("nd_counts") or {})
+            # Prefer CS flags coming from extras_map (batch_fetch_account_extras) when available;
+            # fall back to any precomputed acc.get('cs'). There are two variants historically
+            # used for extra keys (some helpers return keys like "extra.CS_...", others
+            # like "extra.Clinical_Site_CS__c" or "extra.INNODIA_Clinical_Trial_Site__c").
+            # Be permissive and check multiple possible keys.
+            def _get_extra_bool(e: dict, *keys: str) -> bool:
+                for k in keys:
+                    if k in e and e.get(k) is not None:
+                        return bool(e.get(k))
+                return False
+
+            cs_from_acc = acc.get("cs") or {}
+            cs_from_extra = {
+                "clinical": _get_extra_bool(extras_entry, "extra.CS_Clinical_Site_CS__c", "extra.Clinical_Site_CS__c", "extra.INNODIA_Clinical_Trial_Site__c"),
+                "referral": _get_extra_bool(extras_entry, "extra.CS_Referral_Outreach_Site__c", "extra.Referral_Outreach_Site_Non_CTS__c"),
+                "detect": _get_extra_bool(extras_entry, "extra.CS_Eligible_DETECT__c", "extra.Elegible_for_DETECT_Site__c"),
+            }
+            # merge, prefer extras when truthy; otherwise fallback to acc map
+            cs_flags = {
+                "clinical": bool(cs_from_extra.get("clinical") or bool(cs_from_acc.get("clinical"))),
+                "referral": bool(cs_from_extra.get("referral") or bool(cs_from_acc.get("referral"))),
+                "detect": bool(cs_from_extra.get("detect") or bool(cs_from_acc.get("detect"))),
+            }
+
             out.append({
                 "account_id": aid,
                 "site":       acc.get("name"),
@@ -1635,6 +2244,34 @@ async def map_bootstrap(request: Request, db: Session = Depends(get_db)):
                 "longitude":  lng,
                 "hasQualification": badges.get(aid, {}).get("qualification", False),
                 "hasProfiling":     badges.get(aid, {}).get("profiling", False),
+                "cs": {
+                    "clinical": bool(cs_flags.get("clinical")),
+                    "referral": bool(cs_flags.get("referral")),
+                    "detect": bool(cs_flags.get("detect")),
+                },
+                "meta": {
+                    "pi_name": extras_entry.get("extra.PIName"),
+                    "pi_email": extras_entry.get("extra.PIEmail"),
+                    "pi_phone": extras_entry.get("extra.PIPhone"),
+                    "assignments": assignments_list,
+                    "assignments_count": assign_count,
+                    "nd_u18": nd_meta.get("u18"),
+                    "nd_o18": nd_meta.get("o18"),
+                    # also include CS flags inside meta for compatibility/debugging
+                    # Use the real Salesforce API name `INNODIA_Clinical_Trial_Site__c` but
+                    # keep legacy fallbacks. IMPORTANT: fall back to the already-computed
+                    # `cs_flags` so meta.csContribution cannot contradict the top-level `cs`.
+                    "csContribution": {
+                        # Ensure meta.csContribution reflects the computed cs_flags so it
+                        # cannot contradict the top-level `cs` used by the map. This
+                        # prefers explicit extras when they are present AND truthy, but
+                        # ultimately coerces to the merged cs_flags booleans to keep
+                        # consistency between meta and top-level cs.
+                        "INNODIA_Clinical_Trial_Site__c": bool(cs_flags.get("clinical")),
+                        "Referral_Outreach_Site_Non_CTS__c": bool(cs_flags.get("referral")),
+                        "Elegible_for_DETECT_Site__c": bool(cs_flags.get("detect")),
+                    },
+                },
             })
         return out
     except HTTPException as he:
@@ -1694,28 +2331,21 @@ def explorer_fields(db: Session = Depends(get_db)):
             "source":"account",
             "group": "Account",
         })
-    # Conveniencia: MemberName y HasPI (Account.*)
+    # Conveniencia: MemberName (Account.*)
     account_fields_cfg += [
         {"key": "Account.MemberName", "label": "Member (lookup name)", "type": "string",  "source": "account", "group": "Account"},
-        {"key": "Account.HasPI",      "label": "Has PI",               "type": "boolean", "source": "account", "group": "Account"},
     ]
 
     # --- NUEVO: Catálogo extra.* (Salesforce extras batch) ---
     # Estos campos los rellena batch_fetch_account_extras() y se pueden filtrar/mostrar.
     extras_fields = [
-        {"key": "extra.MemberName",                      "label": "Member (Account)",                 "type": "string",  "source": "extra", "group": "Salesforce Extras"},
         {"key": "extra.PIName",                          "label": "PI Name",                          "type": "string",  "source": "extra", "group": "Salesforce Extras"},
         {"key": "extra.PIEmail",                         "label": "PI Email",                         "type": "string",  "source": "extra", "group": "Salesforce Extras"},
         {"key": "extra.PIPhone",                         "label": "PI Phone",                         "type": "string",  "source": "extra", "group": "Salesforce Extras"},
 
-        # Flags de contribución a INNODIA (desde Account)
-        {"key": "extra.Clinical_Site_CS__c",             "label": "INNODIA Clinical Site",            "type": "boolean", "source": "extra", "group": "Salesforce Extras"},
-        {"key": "extra.INNODIA_Clinical_Trial_Site__c",  "label": "INNODIA Clinical Trial Site",      "type": "boolean", "source": "extra", "group": "Salesforce Extras"},
-        {"key": "extra.Referral_Outreach_Site_Non_CTS__c",    "label": "Referral & Outreach Site (Non-CTS)","type": "boolean","source": "extra", "group": "Salesforce Extras"},
-        {"key": "extra.Elegible_for_DETECT_Site__c",           "label": "Eligible for DETECT Site",         "type": "boolean", "source": "extra", "group": "Salesforce Extras"},
-
         # Métrica útil
         {"key": "extra.AssignmentsCount",                "label": "Assignments (count)",              "type": "number",  "source": "extra", "group": "Salesforce Extras"},
+        {"key": "extra.AssignmentsNames",                "label": "Assignments (names)",              "type": "string",  "source": "extra", "group": "Salesforce Extras"},
     ]
 
     # Unificar y deduplicar manteniendo el primero que aparezca
@@ -1759,13 +2389,14 @@ async def explorer_search(
     qual_rules: List[Rule] = []
     account_rules: List[Rule] = []
     member_rules: List[Rule] = []
-    haspi_rules: List[Rule] = []
     extra_rules: List[Rule] = []
 
     need_member = False
-    need_haspi = False
     need_account_extras = False
     need_batch_extras = False
+
+    # Contador de diagnósticos nuevos por cuenta (se usa más adelante tanto en vecinos como en filas finales)
+    nd_counts_by_acc: Dict[str, Dict[str, Optional[int]]] = {}
 
     def _norm_label_to_key_safe(k: str) -> str:
         try:
@@ -1782,10 +2413,7 @@ async def explorer_search(
             member_rules.append(Rule(field="sf.Account.MemberName", operator=op, value=val))
             need_member = True
             continue
-        if f in ("sf.Account.HasPI", "Account.HasPI"):
-            haspi_rules.append(Rule(field="sf.Account.HasPI", operator=op, value=val))
-            need_haspi = True
-            continue
+        # (HasPI filtering removed - field deprecated)
 
         if f.startswith("extra."):
             extra_rules.append(Rule(field=f, operator=op, value=val))
@@ -1808,22 +2436,28 @@ async def explorer_search(
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
                 sf_rules.append(Rule(field=f, operator=op, value=val))
 
-    sf_filter = FilterQuery(logic=filters.get("logic", "AND"), rules=sf_rules)
+    merged_rules = sf_rules + _prefix_account_rules_for_where(account_rules)
+    sf_filter = FilterQuery(logic=filters.get("logic", "AND"), rules=merged_rules)
 
     # -------- Columnas solicitadas --------
     requested_cols: List[str] = []
     requested_account_cols: Set[str] = set()
     requested_extra_cols: Set[str] = set()
+    active_acc_ids: List[str] = []  # ensure downstream branches always see a defined list
 
     for c in (columns or []):
         k = _norm_label_to_key_safe(c)
         requested_cols.append(k)
         if k in ("sf.Account.Member__c", "Account.Member__c", "sf.Account.MemberName", "Account.MemberName"):
             need_member = True
-        if k in ("sf.Account.HasPI", "Account.HasPI"):
-            need_haspi = True
+        # HasPI removed from filters/columns
+        acct_field = None
         if k.startswith("Account."):
-            requested_account_cols.add(k[8:])
+            acct_field = _strip_account_prefix(k)
+        elif k.startswith("sf.Account."):
+            acct_field = _strip_account_prefix(k)
+        if acct_field:
+            requested_account_cols.add(acct_field)
             need_account_extras = True
         if k.startswith("extra."):
             requested_extra_cols.add(k)
@@ -1841,7 +2475,8 @@ async def explorer_search(
     opp_fields: Set[str] = {
         "Id","Name","Type","StageName","IsClosed","CloseDate","AccountId",
         # añadimos recordtype para permitir filtros/columnas cuando se trabaje con Activities
-        "RecordType.Name","RecordType.DeveloperName"
+        "RecordType.Name","RecordType.DeveloperName",
+        "C_Number_of_new_T1D_diagnosed_U_18__c","C_Number_of_new_T1D_diagnosed_O_18__c"
     }
     acc_fields: Set[str] = set()
 
@@ -1877,22 +2512,85 @@ async def explorer_search(
     # ===========================================================
     # 2) Activities + Assignments -> subcuentas
     # ===========================================================
-    # En tu org el RecordType se llama RT_Activity; acepta ambos por si acaso
+    # En la org: los "activities" son Opportunities con RecordType = Activity/RT_Activity.
     ACT_RT = ("Activity", "RT_Activity")
-    in_clause = ", ".join("'" + x.replace("'", "\\'") + "'" for x in ACT_RT)
+    _rt_in = ", ".join("'" + x.replace("'", "\\'") + "'" for x in ACT_RT)
 
-    act_where = (
-        "WHERE AccountId != null "
-        "AND RecordType.DeveloperName IN (" + in_clause + ")"
-    )
+    act_where = "WHERE AccountId != null AND RecordType.DeveloperName IN (" + _rt_in + ")"
     if extra_where:
         act_where += f" AND {extra_where}"
 
-    soql_acts = f"SELECT Id, Name, AccountId, RecordType.DeveloperName FROM Opportunity {act_where}"
-    if debug: print("[/search][SOQL acts]", soql_acts)
+    soql_acts = (
+        "SELECT Id, Name, AccountId, RecordType.DeveloperName "
+        "FROM Opportunity " + act_where
+    )
+    if debug: print("[/search][SOQL activities]", soql_acts)
     activities = _sf_query_all(sf, soql_acts) or []
 
     assignments_by_opp: Dict[str, List[Dict[str, Any]]] = {}
+    nd_counts_by_acc: Dict[str, Dict[str, Optional[int]]] = {}
+
+    def _chunks(xs, n=120):
+        buf=[]
+        for x in xs:
+            if x: buf.append(x)
+            if len(buf)>=n:
+                yield buf; buf=[]
+        if buf: yield buf
+        
+    def _fetch_assignments_map(sf, activity_ids: list[str]) -> tuple[
+        Dict[str, list[Dict[str, Any]]],  # by_subaccount[AccountId] = [assignments...]
+        Dict[str, list[Dict[str, Any]]],  # by_activity[ActivityId]  = [assignments...]
+    ]:
+        """
+        Lee Assignment__c que enlaza subcuentas con actividades (opportunities RT_Activity).
+        Devuelve dos mapas para conveniencia.
+        Campos usados (ajusta si tus API names difieren):
+        - C_Account__c                   -> Subaccount Id
+        - C_Account__r.Name             -> Subaccount Name
+        - C_Opportunity_Name__c         -> Activity Opportunity Id
+        - C_Opportunity_Name__r.Name    -> Activity Name (trial/program)
+        - Status__c (opcional)
+        """
+        if not activity_ids:
+            return {}, {}
+        by_sub: Dict[str, list[Dict[str, Any]]] = {}
+        by_act: Dict[str, list[Dict[str, Any]]] = {}
+        for chunk in _chunks(activity_ids, 120):
+            ids_in = ", ".join(f"'{x}'" for x in chunk)
+            soql = (
+                "SELECT Id, Name, "
+                "C_Account__c, C_Account__r.Name, "
+                "C_Opportunity_Name__c, C_Opportunity_Name__r.Name "
+                "FROM Assignment__c "
+                f"WHERE C_Opportunity_Name__c IN ({ids_in})"
+            )
+            rows = _sf_query_all(sf, soql) or []
+            for a in rows:
+                sub_id   = a.get("C_Account__c")
+                sub_name = (a.get("C_Account__r") or {}).get("Name")
+                act_id   = a.get("C_Opportunity_Name__c")
+                act_name = (a.get("C_Opportunity_Name__r") or {}).get("Name")
+                item = {
+                    "assignment_id": a.get("Id"),
+                    "assignment_name": a.get("Name"),
+                    "activity_id": act_id,
+                    "activity_name": act_name,
+                    "subaccount_id": sub_id,
+                    "subaccount_name": sub_name,
+                    "status": a.get("Status__c"),
+                }
+                if sub_id:
+                    by_sub.setdefault(sub_id, []).append(item)
+                if act_id:
+                    by_act.setdefault(act_id, []).append(item)
+        return by_sub, by_act
+
+    assignments_by_sub: Dict[str, list[Dict[str, Any]]] = {}
+    assignments_by_act: Dict[str, list[Dict[str, Any]]] = {}
+    if activities:
+        act_ids = [a["Id"] for a in activities if a.get("Id")]
+        assignments_by_sub, assignments_by_act = _fetch_assignments_map(sf, act_ids)
     if activities:
         def _chunks(xs, n=120):
             buf=[]
@@ -1930,6 +2628,42 @@ async def explorer_search(
                     "created": r.get("CreatedDate"),
                 })
 
+    assignments_names_by_acc: Dict[str, List[str]] = {}
+    if assignments_by_opp:
+        names_map: Dict[str, List[str]] = defaultdict(list)
+        for assigns in assignments_by_opp.values():
+            for a in assigns:
+                acc_id = a.get("account_id")
+                if not acc_id:
+                    continue
+                name = (a.get("name") or "").strip()
+                if not name:
+                    continue
+                key = str(acc_id)
+                bucket = names_map.setdefault(key, [])
+                if name in bucket:
+                    continue
+                if len(bucket) >= 15:
+                    continue
+                bucket.append(name)
+        assignments_names_by_acc = names_map
+
+    for o in opps:
+        aid = o.get("AccountId")
+        if not aid:
+            continue
+        if _norm_type(o.get("Type")) != "profiling":
+            continue
+        u18 = _safe_int(o.get("C_Number_of_new_T1D_diagnosed_U_18__c"))
+        o18 = _safe_int(o.get("C_Number_of_new_T1D_diagnosed_O_18__c"))
+        if u18 is None and o18 is None:
+            continue
+        bucket = nd_counts_by_acc.setdefault(aid, {"u18": None, "o18": None})
+        if u18 is not None:
+            bucket["u18"] = u18
+        if o18 is not None:
+            bucket["o18"] = o18
+
     # ===========================================================
     # 3) Accounts implicadas (incluye subcuentas de assignments)
     # ===========================================================
@@ -1953,6 +2687,11 @@ async def explorer_search(
         return out
 
     acc_map = _build_account_map(sf, acc_ids)
+    # Lista de cuentas activas (IDs) usada en pasos posteriores. Se declara
+    # aquí para garantizar que la variable exista en todos los bloques
+    # posteriores que la referencian (evita UnboundLocalError si no se
+    # inicializaba en alguna rama del flujo).
+    active_acc_ids = sorted(acc_map.keys())
 
     # ===========================================================
     # 4) Sites locales + Qualification JSON
@@ -1994,22 +2733,12 @@ async def explorer_search(
             mname = (a.get("C_Member__r") or {}).get("Name")
             member_by_acc[str(aid)] = mname or None
 
-    pi_accounts: Set[str] = set()
-    if need_haspi and acc_ids:
-        acc_ids_str = ",".join([f"'{x}'" for x in acc_ids])
-        soql = (
-            "SELECT AccountId FROM AccountContactRelation "
-            f"WHERE AccountId IN ({acc_ids_str}) AND Role__c = 'PI'"
-        )
-        acrs = _sf_query_all(sf, soql)
-        for r in acrs:
-            if r.get("AccountId"):
-                pi_accounts.add(str(r.get("AccountId")))
+    # HasPI / PI-account derived data removed: not querying AccountContactRelation here
 
     account_fields_needed: Set[str] = {r.field for r in account_rules}
     account_fields_needed |= requested_account_cols
-    supported = set(ACCOUNT_EXTRA_FIELDS.keys()) | {"MemberName", "HasPI", "ShippingAddress"}
-    fields_to_fetch = {f for f in account_fields_needed if f in supported and f not in {"MemberName", "HasPI"}}
+    supported = set(ACCOUNT_EXTRA_FIELDS.keys()) | {"MemberName", "ShippingAddress"}
+    fields_to_fetch = {f for f in account_fields_needed if f in supported and f not in {"MemberName"}}
 
     account_extras_by_acc: Dict[str, Dict[str, Any]] = {}
     if need_account_extras and acc_ids and fields_to_fetch:
@@ -2018,6 +2747,13 @@ async def explorer_search(
     extras_map: Dict[str, Dict[str, Any]] = {}
     if need_batch_extras and acc_ids:
         extras_map = batch_fetch_account_extras(sf, list({x for x in acc_ids if x}))
+    if assignments_names_by_acc:
+        for acc_id, names in assignments_names_by_acc.items():
+            if not names:
+                continue
+            entry = extras_map.setdefault(str(acc_id), {})
+            entry["extra.AssignmentsNames"] = "; ".join(names)
+            entry.setdefault("extra.AssignmentsCount", len(names))
 
     # ===========================================================
     # 6) Helpers de filtrado post-query
@@ -2068,22 +2804,7 @@ async def explorer_search(
         res = [eval_rule_text(actual, r) for r in member_rules]
         return all(res) if glue_and else any(res)
 
-    def pass_haspi(aid: str) -> bool:
-        if not haspi_rules:
-            return True
-        def as_bool(x: Any) -> bool:
-            if isinstance(x, bool): return x
-            s = _str(x).strip().lower()
-            return s in ("1","true","yes","y","t")
-        actual = str(aid) in pi_accounts
-        glue_and = (filters.get("logic") or "AND") == "AND"
-        res = []
-        for r in haspi_rules:
-            op = _op_norm(r.operator); want = as_bool(r.value)
-            if   op in ("equals","="):      res.append(actual == want)
-            elif op in ("not_equals","!="): res.append(actual != want)
-            else:                            res.append(True)
-        return all(res) if glue_and else any(res)
+    # pass_haspi removed: HasPI filtering deprecated/removed
 
     def pass_extra(aid: str) -> bool:
         if not extra_rules:
@@ -2100,8 +2821,8 @@ async def explorer_search(
         if not account_rules:
             return True
         vals = dict(account_extras_by_acc.get(str(aid), {}))
-        if need_member: vals["MemberName"] = member_by_acc.get(str(aid))
-        if need_haspi:  vals["HasPI"]      = (str(aid) in pi_accounts)
+        if need_member:
+            vals["MemberName"] = member_by_acc.get(str(aid))
         glue_and = (filters.get("logic") or "AND") == "AND"
         res = []
         for ar in account_rules:
@@ -2126,7 +2847,6 @@ async def explorer_search(
 
         if not pass_qual(qual_data): continue
         if not pass_member(aid):     continue
-        if not pass_haspi(aid):      continue
         if not pass_account(aid):    continue
         if not pass_extra(aid):      continue
 
@@ -2152,13 +2872,31 @@ async def explorer_search(
                     elif sub == "BillingLongitude": data[k] = acc.get("lng")
                 elif sub in {"Member__c"}:         data[k] = None
                 elif sub in {"MemberName"}:        data[k] = member_by_acc.get(str(aid)) if need_member else None
-                elif sub in {"HasPI"}:             data[k] = (str(aid) in pi_accounts)   if need_haspi  else None
+                # HasPI removed
                 else:
                     data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
                 continue
 
             # qual.*
-            if k.startswith("qual."):   data[k] = qual_data.get(k[5:]); continue
+            if k.startswith("qual."):
+                qual_key = k[5:]  # Remove 'qual.' prefix -> "2_1__comments"
+                
+                # Try multiple key variants to handle both . and _ formats
+                # 1. Try exact key first
+                value = qual_data.get(qual_key)
+                
+                # 2. Try with dots instead of underscores (e.g., "2.1__comments")
+                if value is None and "_" in qual_key:
+                    qual_key_dots = qual_key.replace("_", ".", 1)  # Only first occurrence
+                    value = qual_data.get(qual_key_dots)
+                
+                # 3. If not found and key has section prefix, try base key without section
+                if value is None and "__" in qual_key:
+                    base_key = qual_key.split("__", 1)[1]  # e.g., "comments" or "room_temperature__lockable"
+                    value = qual_data.get(base_key)
+                
+                data[k] = value
+                continue
 
             # sf.*
             if k.startswith("sf."):
@@ -2173,9 +2911,15 @@ async def explorer_search(
 
             # extra.*
             if k.startswith("extra."):
-                data[k] = (extras_map.get(str(aid), {}) or {}).get(k); continue
+                data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
+                continue
 
             data[k] = o.get(k)
+
+        names_for_acc = assignments_names_by_acc.get(str(aid), [])
+        if names_for_acc:
+            data.setdefault("extra.AssignmentsNames", "; ".join(names_for_acc))
+            data.setdefault("extra.AssignmentsCount", len(names_for_acc))
 
         _flatten_sf_inplace(data)
         rows.append({
@@ -2245,7 +2989,6 @@ async def explorer_search(
 
                 if not pass_qual(qual_data): continue
                 if not pass_member(aid):     continue
-                if not pass_haspi(aid):      continue
                 if not pass_account(aid):    continue
                 if not pass_extra(aid):      continue
 
@@ -2269,12 +3012,14 @@ async def explorer_search(
                             elif sub == "BillingLongitude": data[k] = acc.get("lng")
                         elif sub in {"Member__c"}:         data[k] = None
                         elif sub in {"MemberName"}:        data[k] = member_by_acc.get(str(aid)) if need_member else None
-                        elif sub in {"HasPI"}:             data[k] = (str(aid) in pi_accounts)   if need_haspi  else None
+                        elif sub in {"HasPI"}:             data[k] = None
                         else:
                             data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
                         continue
                     if k.startswith("qual."):   data[k] = qual_data.get(k[5:]); continue
-                    if k.startswith("extra."):  data[k] = (extras_map.get(str(aid), {}) or {}).get(k); continue
+                    if k.startswith("extra."):
+                        data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
+                        continue
                     if k.startswith("sf."):
                         fld = k[3:]
                         # Mostrar el nombre de la Activity cuando se pide [sf] Opportunity Name
@@ -2284,6 +3029,11 @@ async def explorer_search(
                             data[k] = proxy.get(fld) if proxy else None
                         continue
                     data[k] = None
+                names_for_acc = assignments_names_by_acc.get(str(aid), [])
+                if names_for_acc:
+                    data.setdefault("extra.AssignmentsNames", "; ".join(names_for_acc))
+                    data.setdefault("extra.AssignmentsCount", len(names_for_acc))
+
                 _flatten_sf_inplace(data)
 
                 rows.append({
@@ -2299,7 +3049,80 @@ async def explorer_search(
     # ===========================================================
     # 10) Colapso por subcuenta y markers
     # ===========================================================
+    # --- Prefetch maps for Account.* and extra.* so we can inject values even if not used in WHERE ---
+    account_extras_map: Dict[str, Dict[str, Any]] = {}
+    if need_account_extras and requested_account_cols:
+        # Filter out virtual/derived fields (MemberName, HasPI) which are not
+        # real Account columns in Salesforce and would break the SOQL SELECT.
+        # Only request keys that are present in ACCOUNT_EXTRA_FIELDS or the
+        # special composed ShippingAddress.
+        safe_fields = {f for f in requested_account_cols if f in ACCOUNT_EXTRA_KEYS or f == "ShippingAddress"}
+        if safe_fields:
+            try:
+                account_extras_map = _fetch_account_extras(sf, active_acc_ids, safe_fields)
+            except Exception as e:
+                log.warning("/explorer/search: _fetch_account_extras failed: %s", e)
+                account_extras_map = {}
+
+    extra_batch_map: Dict[str, Dict[str, Any]] = {}
+    if need_batch_extras and active_acc_ids:
+        try:
+            extra_batch_map = batch_fetch_account_extras(sf, active_acc_ids) or {}
+        except Exception as e:
+            log.warning("/explorer/search: batch_fetch_account_extras failed: %s", e)
+            extra_batch_map = {}
+    if assignments_names_by_acc:
+        for acc_id, names in assignments_names_by_acc.items():
+            if not names:
+                continue
+            entry = extra_batch_map.setdefault(str(acc_id), {})
+            entry["extra.AssignmentsNames"] = "; ".join(names)
+            entry.setdefault("extra.AssignmentsCount", len(names))
+
     rows = collapse_rows_by_account(rows)
+
+    # --- Inject Account.* + extra.* + Member into returned rows ---
+    if rows:
+        for r in rows:
+            aid = str(r.get("account_id") or "")
+            if not aid:
+                continue
+            r.setdefault("data", {})
+            data = r["data"]
+
+            # 1) Account.* columns explicitly requested
+            if requested_account_cols:
+                acc_vals = (account_extras_map.get(aid, {}) or {})
+                for f in requested_account_cols:
+                    # Keep the exact front-end key format: "Account.<Field>"
+                    data[f"Account.{f}"] = acc_vals.get(f)
+
+            # 2) extra.* columns explicitly requested
+            if requested_extra_cols:
+                ex_vals = (extra_batch_map.get(aid, {}) or {})
+                for full_key in requested_extra_cols:
+                    fetched = ex_vals.get(full_key)
+                    if fetched is not None:
+                        if full_key not in data or data.get(full_key) in (None, "", []):
+                            data[full_key] = fetched
+                    else:
+                        if full_key not in data:
+                            data[full_key] = None
+
+            # 3) MemberName if requested
+            if need_member:
+                m = (extra_batch_map.get(aid, {}) or {}).get("extra.MemberName")
+                if m is None:
+                    m = member_by_acc.get(aid)
+                data["Account.MemberName"] = m
+                # also expose as extra.MemberName if not present
+                if "extra.MemberName" not in data:
+                    data["extra.MemberName"] = m
+
+            names_for_acc = assignments_names_by_acc.get(aid, [])
+            if names_for_acc:
+                data.setdefault("extra.AssignmentsNames", "; ".join(names_for_acc))
+                data.setdefault("extra.AssignmentsCount", len(names_for_acc))
 
     badges: Dict[str, Dict[str, bool]] = {}
     for r in rows:
@@ -2311,7 +3134,14 @@ async def explorer_search(
         if "profiling" in types_str:     b["profiling"] = True
         if "qualification" in types_str: b["qualification"] = True
 
-    acc_map_final = _build_account_map(sf, [r["account_id"] for r in rows if r.get("account_id")])
+    acc_ids_final = [r["account_id"] for r in rows if r.get("account_id")]
+    acc_map_final = _build_account_map(sf, acc_ids_final)
+    for aid, counts in nd_counts_by_acc.items():
+        if aid in acc_map_final:
+            acc_map_final[aid].setdefault("nd_counts", counts)
+    map_extra = extra_batch_map if extra_batch_map else (
+        batch_fetch_account_extras(sf, acc_ids_final) if acc_ids_final else {}
+    )
     points = []
     for r in rows:
         aid = r.get("account_id")
@@ -2336,6 +3166,44 @@ async def explorer_search(
                 lat, lng = glat, glng
         if lat is None or lng is None:
             continue
+        str_aid = str(aid) if aid is not None else ""
+        extras_entry = (map_extra.get(str_aid) or map_extra.get(aid) or {})
+
+        def _extra_bool(entry: Dict[str, Any], *keys: str) -> bool:
+            for key in keys:
+                if key in entry and entry.get(key) is not None:
+                    return bool(entry.get(key))
+            return False
+
+        cs_from_acc = accd.get("cs") or {}
+        cs_from_extra = {
+            "clinical": _extra_bool(
+                extras_entry,
+                "extra.CS_Clinical_Site_CS__c",
+                "extra.Clinical_Site_CS__c",
+                "extra.INNODIA_Clinical_Trial_Site__c",
+            ),
+            "referral": _extra_bool(
+                extras_entry,
+                "extra.CS_Referral_Outreach_Site__c",
+                "extra.Referral_Outreach_Site_Non_CTS__c",
+            ),
+            "detect": _extra_bool(
+                extras_entry,
+                "extra.CS_Eligible_DETECT__c",
+                "extra.Elegible_for_DETECT_Site__c",
+            ),
+        }
+        cs_flags = {
+            "clinical": bool(cs_from_extra.get("clinical") or cs_from_acc.get("clinical")),
+            "referral": bool(cs_from_extra.get("referral") or cs_from_acc.get("referral")),
+            "detect": bool(cs_from_extra.get("detect") or cs_from_acc.get("detect")),
+        }
+
+        assignments_list = _split_assignment_names(extras_entry.get("extra.AssignmentsNames"))
+        assign_count = _safe_int(extras_entry.get("extra.AssignmentsCount"))
+        nd_meta = accd.get("nd_counts") or {}
+
         points.append({
             "lat": lat, "lng": lng,
             "account_id": aid,
@@ -2343,6 +3211,25 @@ async def explorer_search(
             "city": accd.get("city") or r.get("city"),
             "country": accd.get("country") or r.get("country"),
             "badges": badges.get(aid, {"profiling": False, "qualification": False}),
+            "cs": {
+                "clinical": bool(cs_flags.get("clinical")),
+                "referral": bool(cs_flags.get("referral")),
+                "detect": bool(cs_flags.get("detect")),
+            },
+            "meta": {
+                "pi_name": extras_entry.get("extra.PIName"),
+                "pi_email": extras_entry.get("extra.PIEmail"),
+                "pi_phone": extras_entry.get("extra.PIPhone"),
+                "assignments": assignments_list,
+                "assignments_count": assign_count,
+                "nd_u18": nd_meta.get("u18"),
+                "nd_o18": nd_meta.get("o18"),
+                "csContribution": {
+                    "INNODIA_Clinical_Trial_Site__c": bool(cs_flags.get("clinical")),
+                    "Referral_Outreach_Site_Non_CTS__c": bool(cs_flags.get("referral")),
+                    "Elegible_for_DETECT_Site__c": bool(cs_flags.get("detect")),
+                },
+            },
         })
 
     resp = {"points": points, "rows": rows}
@@ -2402,11 +3289,11 @@ async def explorer_fill_columns(
     Devuelve valores para columnas solicitadas, sin filtros.
     Úsalo cuando el usuario añade columnas para rellenar la tabla
     con los accounts ya visibles.
-    payload:
-      {
-        "account_ids": ["001...", "001..."],   # opcional; si falta, usa todos los accounts activos con Opp CTS
-        "columns": ["sf.StageName","sf.CloseDate","Account.HasPI","qual.xxx","extra.MemberName"]
-      }
+        payload:
+            {
+                "account_ids": ["001...", "001..."],   # opcional; si falta, usa todos los accounts activos con Opp CTS
+                "columns": ["sf.StageName","sf.CloseDate","qual.xxx","extra.MemberName"]
+            }
     """
     sf = _get_sf(request)
     _ensure_describes(sf)
@@ -2448,10 +3335,22 @@ async def explorer_fill_columns(
         return s
 
     requested_cols: List[str] = [norm_key(c) for c in columns]
+    requested_account_cols: Set[str] = set()
+    requested_extra_cols: Set[str] = set()
     need_member = any(k in ("sf.Account.MemberName","Account.MemberName","Account.Member__c","sf.Account.Member__c") for k in requested_cols)
-    need_haspi  = any(k in ("sf.Account.HasPI","Account.HasPI") for k in requested_cols)
-    need_account_extras = any(k.startswith("Account.") for k in requested_cols)
-    need_batch_extras   = any(k.startswith("extra.")   for k in requested_cols)
+    need_account_extras = False
+    need_batch_extras   = False
+    nd_counts_by_acc: Dict[str, Dict[str, Optional[int]]] = {}
+
+    for k in requested_cols:
+        if k.startswith("Account.") or k.startswith("sf.Account."):
+            fld = _strip_account_prefix(k)
+            if fld:
+                requested_account_cols.add(fld)
+                need_account_extras = True
+        if k.startswith("extra."):
+            requested_extra_cols.add(k)
+            need_batch_extras = True
 
     # sf.* seleccionables
     opp_fields: Set[str] = {"Id","Name","Type","StageName","IsClosed","CloseDate","AccountId"}
@@ -2486,7 +3385,13 @@ async def explorer_fill_columns(
     qual_rows = db.execute(select(SiteQual.site_id, SiteQual.data)).all()
     groups_by_slug = _qual_groups_from_questions(db)
     qual_by_site: Dict[int, Dict[str, Any]] = {
-        sid: _expand_comments_keys_for_row(data or {}, groups_by_slug) for sid, data in qual_rows
+        sid: (
+            lambda _d: _expand_describe_keys_for_row(
+                _expand_comments_keys_for_row(_d, groups_by_slug),
+                groups_by_slug
+            )
+        )((data or {}))
+        for sid, data in qual_rows
     }
 
     # Member / HasPI
@@ -2497,21 +3402,17 @@ async def explorer_fill_columns(
         for a in rows:
             member_by_acc[str(a.get("Id"))] = (a.get("C_Member__r") or {}).get("Name") or None
 
-    pi_accounts: Set[str] = set()
-    if need_haspi:
-        vals2 = ",".join(f"'{x}'" for x in active_acc_ids)
-        rows = _sf_query_all(sf, f"SELECT AccountId FROM AccountContactRelation WHERE AccountId IN ({vals2}) AND Role__c = 'PI'")
-        for r in rows:
-            if r.get("AccountId"):
-                pi_accounts.add(str(r.get("AccountId")))
+    # PI/account derived data (HasPI) removed — we don't query AccountContactRelation here
 
     # Extras de Account (Account.* configurados)
     account_fields_needed: Set[str] = set()
     for k in requested_cols:
-        if k.startswith("Account."):
-            account_fields_needed.add(k.split(".",1)[1])
-    supported = set(ACCOUNT_EXTRA_FIELDS.keys()) | {"MemberName","HasPI","ShippingAddress"}
-    fields_to_fetch = {f for f in account_fields_needed if f in supported and f not in {"MemberName","HasPI"}}
+        if k.startswith("Account.") or k.startswith("sf.Account."):
+            acct_field = _strip_account_prefix(k)
+            if acct_field:
+                account_fields_needed.add(acct_field)
+    supported = set(ACCOUNT_EXTRA_FIELDS.keys()) | {"MemberName","ShippingAddress"}
+    fields_to_fetch = {f for f in account_fields_needed if f in supported and f not in {"MemberName"}}
     account_extras_by_acc: Dict[str, Dict[str, Any]] = {}
     if need_account_extras and active_acc_ids and fields_to_fetch:
         account_extras_by_acc = _fetch_account_extras(sf, active_acc_ids, fields_to_fetch)
@@ -2530,6 +3431,16 @@ async def explorer_fill_columns(
         acc = acc_map.get(aid) or {}
         sid = site_id_by_acc.get(str(aid))
         qual_data = qual_by_site.get(sid, {}) if sid else {}
+
+        if _norm_type(o.get("Type")) == "profiling":
+            u18 = _safe_int(o.get("C_Number_of_new_T1D_diagnosed_U_18__c"))
+            o18 = _safe_int(o.get("C_Number_of_new_T1D_diagnosed_O_18__c"))
+            if u18 is not None or o18 is not None:
+                bucket = nd_counts_by_acc.setdefault(aid, {"u18": None, "o18": None})
+                if u18 is not None:
+                    bucket["u18"] = u18
+                if o18 is not None:
+                    bucket["o18"] = o18
 
         data: Dict[str, Any] = {}
         for k in requested_cols:
@@ -2551,14 +3462,30 @@ async def explorer_fill_columns(
                 elif sub in {"BillingCity","BillingCountry","BillingLatitude","BillingLongitude"}:
                     data[k] = acc.get({"BillingCity":"city","BillingCountry":"country","BillingLatitude":"lat","BillingLongitude":"lng"}[sub])
                 elif sub == "MemberName":       data[k] = member_by_acc.get(str(aid)) if need_member else None
-                elif sub == "HasPI":            data[k] = (str(aid) in pi_accounts) if need_haspi else None
+                elif sub == "HasPI":            data[k] = None
                 else:
                     data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
                 continue
 
             # qual.*
             if k.startswith("qual."):
-                data[k] = qual_data.get(k[5:]); continue
+                qual_key = k[5:]
+                # Try multiple key variants to handle both . and _ formats
+                # 1. Try exact key first
+                value = qual_data.get(qual_key)
+                
+                # 2. Try with dots instead of underscores (e.g., "2.1__comments")
+                if value is None and "_" in qual_key:
+                    qual_key_dots = qual_key.replace("_", ".", 1)  # Only first occurrence
+                    value = qual_data.get(qual_key_dots)
+                
+                # 3. If not found and key has section prefix, try base key without section
+                if value is None and "__" in qual_key:
+                    base_key = qual_key.split("__", 1)[1]  # e.g., "comments" or "room_temperature__lockable"
+                    value = qual_data.get(base_key)
+                
+                data[k] = value
+                continue
 
             # sf.*
             if k.startswith("sf."):
@@ -2579,6 +3506,15 @@ async def explorer_fill_columns(
             data[k] = o.get(k)
 
         # Normaliza sf.* embebido si viniera como objeto
+        names_for_acc = (extras_map.get(str(aid), {}) or {}).get("extra.AssignmentsNames")
+        if names_for_acc and isinstance(names_for_acc, str):
+            data.setdefault("extra.AssignmentsNames", names_for_acc)
+            try:
+                count_val = len([x for x in names_for_acc.split(";") if x.strip()])
+            except Exception:
+                count_val = None
+            if count_val is not None:
+                data.setdefault("extra.AssignmentsCount", count_val)
         _flatten_sf_inplace(data)
 
         rows_raw.append({
@@ -2590,8 +3526,78 @@ async def explorer_fill_columns(
             "data": data,
         })
 
+
+    # --- Prefetch maps for Account.* and extra.* so we can inject values even if not used in WHERE ---
+    account_extras_map: Dict[str, Dict[str, Any]] = {}
+    if need_account_extras and requested_account_cols:
+        try:
+            account_extras_map = _fetch_account_extras(sf, active_acc_ids, requested_account_cols)
+        except Exception as e:
+            log.warning("/explorer/search: _fetch_account_extras failed: %s", e)
+            account_extras_map = {}
+
+    extra_batch_map: Dict[str, Dict[str, Any]] = {}
+    if need_batch_extras and active_acc_ids:
+        try:
+            extra_batch_map = batch_fetch_account_extras(sf, active_acc_ids) or {}
+        except Exception as e:
+            log.warning("/explorer/search: batch_fetch_account_extras failed: %s", e)
+            extra_batch_map = {}
+
     # Colapsa por cuenta para devolver UNA fila por cuenta
     rows = collapse_rows_by_account(rows_raw)
+    
+    # --- Inject Account.* + extra.* + Member/HasPI into returned rows ---
+    if rows:
+        for r in rows:
+            aid = str(r.get("account_id") or "")
+            if not aid:
+                continue
+            r.setdefault("data", {})
+            data = r["data"]
+
+            # 1) Account.* columns explicitly requested
+            if requested_account_cols:
+                acc_vals = (account_extras_map.get(aid, {}) or {})
+                for f in requested_account_cols:
+                    # Keep the exact front-end key format: "Account.<Field>"
+                    data[f"Account.{f}"] = acc_vals.get(f)
+
+            # 2) extra.* columns explicitly requested
+            if requested_extra_cols:
+                ex_vals = (extra_batch_map.get(aid, {}) or {})
+                for full_key in requested_extra_cols:
+                    fetched = ex_vals.get(full_key)
+                    if fetched is not None:
+                        if full_key not in data or data.get(full_key) in (None, "", []):
+                            data[full_key] = fetched
+                    else:
+                        if full_key not in data:
+                            data[full_key] = None
+
+            # 3) MemberName if requested
+            if need_member:
+                m = (extra_batch_map.get(aid, {}) or {}).get("extra.MemberName")
+                if m is None:
+                    m = member_by_acc.get(aid)
+                data["Account.MemberName"] = m
+                # also expose as extra.MemberName if not present
+                if "extra.MemberName" not in data:
+                    data["extra.MemberName"] = m
+
+            names_val = (extra_batch_map.get(aid, {}) or {}).get("extra.AssignmentsNames")
+            if names_val:
+                data.setdefault("extra.AssignmentsNames", names_val)
+                count_val = (extra_batch_map.get(aid, {}) or {}).get("extra.AssignmentsCount")
+                if count_val is None:
+                    try:
+                        count_val = len([x for x in str(names_val).split(";") if x.strip()])
+                    except Exception:
+                        count_val = None
+                if count_val is not None:
+                    data.setdefault("extra.AssignmentsCount", count_val)
+
+
     # (Mantenemos solo las columnas pedidas en data)
     trimmed = []
     for r in rows:
@@ -2604,7 +3610,53 @@ async def explorer_fill_columns(
             "data": {k: d.get(k) for k in requested_cols}
         })
 
-    return {"rows": trimmed}
+    # --- Construye 'points' para el mapa con las cuentas filtradas ---
+    acc_ids_final = [rr["account_id"] for rr in trimmed if rr.get("account_id")]
+    acc_map_final = _build_account_map(sf, acc_ids_final)
+    for aid, counts in nd_counts_by_acc.items():
+        if aid in acc_map_final:
+            acc_map_final[aid].setdefault("nd_counts", counts)
+    map_extra = batch_fetch_account_extras(sf, acc_ids_final) if acc_ids_final else {}
+    points = []
+    for rr in trimmed:
+        aid = rr.get("account_id")
+        accd = acc_map_final.get(aid) or {}
+        lat, lng = accd.get("lat"), accd.get("lng")
+        if lat is None or lng is None:
+            glat, glng = await _geocode_city_country(accd.get("city"), accd.get("country"))
+            if glat is not None and glng is not None:
+                lat, lng = glat, glng
+        if lat is None or lng is None:
+            continue
+        cs_flags = accd.get("cs") or {}
+        extras_entry = (map_extra.get(aid) or {})
+        assignments_list = _split_assignment_names(extras_entry.get("extra.AssignmentsNames"))
+        assign_count = _safe_int(extras_entry.get("extra.AssignmentsCount"))
+        nd_meta = accd.get("nd_counts") or {}
+        points.append({
+            "lat": lat, "lng": lng,
+            "account_id": aid,
+            "account_name": accd.get("name") or rr.get("account_name"),
+            "city": accd.get("city") or rr.get("city"),
+            "country": accd.get("country") or rr.get("country"),
+            "badges": {"profiling": False, "qualification": False},
+            "cs": {
+                "clinical": bool(cs_flags.get("clinical")),
+                "referral": bool(cs_flags.get("referral")),
+                "detect": bool(cs_flags.get("detect")),
+            },
+            "meta": {
+                "pi_name": extras_entry.get("extra.PIName"),
+                "pi_email": extras_entry.get("extra.PIEmail"),
+                "pi_phone": extras_entry.get("extra.PIPhone"),
+                "assignments": assignments_list,
+                "assignments_count": assign_count,
+                "nd_u18": nd_meta.get("u18"),
+                "nd_o18": nd_meta.get("o18"),
+            },
+        })
+
+    return {"points": points, "rows": trimmed}
 
 
 
@@ -2692,16 +3744,25 @@ async def _drive_km_matrix(origin: Tuple[float,float], dests: List[Tuple[float,f
                 r.raise_for_status()
                 mx = r.json()
                 _cache_set(ck, mx, ttl=3600)
-            if mx.get("status") != "OK":
+            status = mx.get("status") if isinstance(mx, dict) else None
+            if status != "OK":
+                log.warning("DistanceMatrix status=%s for origin=%s chunk_size=%s", status, o_str, len(chunk))
                 continue
-            elems = (mx.get("rows", [{}])[0] or {}).get("elements", [])
+            rows = mx.get("rows") if isinstance(mx, dict) else None
+            if not rows:
+                log.warning("DistanceMatrix rows missing for origin=%s chunk_size=%s", o_str, len(chunk))
+                continue
+            elems = (rows[0] or {}).get("elements", []) if rows else []
             for j, _ in enumerate(chunk):
                 e = elems[j] if j < len(elems) else {}
-                if e.get("status") != "OK":
+                if not isinstance(e, dict):
                     continue
-                dist_m = (e.get("distance") or {}).get("value")  # metros
+                if e.get("status") != "OK":
+                    log.debug("DistanceMatrix element status=%s idx=%s origin=%s", e.get("status"), j, o_str)
+                    continue
+                dist_m = (e.get("distance") or {}).get("value")
                 if dist_m is not None:
-                    out[i + j] = round(float(dist_m) / 1000.0, 3)  # km
+                    out[i + j] = round(float(dist_m) / 1000.0, 3)
     return out
 
 @explorer_router.post("/search/within-drive-km")
@@ -2720,6 +3781,7 @@ async def explorer_search_within_drive_km(
 
     base_account_id: str = payload.get("base_account_id") or ""
     max_km: Optional[float] = payload.get("max_km")
+    log.info("within-drive-km: request base=%s max_km_raw=%s", base_account_id, max_km)
     if not base_account_id:
         raise HTTPException(status_code=400, detail="base_account_id is required")
     if not max_km or max_km <= 0:
@@ -2739,15 +3801,15 @@ async def explorer_search_within_drive_km(
 
     # Reglas especiales
     member_rules: List[Rule] = []
-    haspi_rules: List[Rule] = []
     need_member = False
-    need_haspi  = False
     need_batch_extras = False
 
     # Extras de Account (p.ej. Accredited__c, ShippingAddress, etc.)
     need_account_fields = False
+    need_account_extras = False
     account_fields_needed: Set[str] = set()
     requested_account_cols: Set[str] = set()
+    nd_counts_by_acc: Dict[str, Dict[str, Optional[int]]] = {}
 
     def _norm_label_to_key_safe(k: str) -> str:
         try:
@@ -2765,10 +3827,6 @@ async def explorer_search_within_drive_km(
             member_rules.append(Rule(field="Account.MemberName", operator=op, value=val))
             need_member = True
             continue
-        if f in ("sf.Account.HasPI", "Account.HasPI"):
-            haspi_rules.append(Rule(field="Account.HasPI", operator=op, value=val))
-            need_haspi = True
-            continue
 
         if f.startswith("site."):
             site_rules.append(Rule(field=f, operator=op, value=val))
@@ -2781,15 +3839,16 @@ async def explorer_search_within_drive_km(
             nf = f[3:]
             if nf.startswith("Account."):
                 fld = nf.split(".", 1)[1]
-                account_rules.append(Rule(field=f"Account.{fld}", operator=op, value=val))
+                account_rules.append(Rule(field=fld, operator=op, value=val))
                 need_account_fields = True
                 account_fields_needed.add(fld)
             else:
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
         elif f.startswith("Account."):
             fld = f.split(".",1)[1]
-            account_rules.append(Rule(field=f, operator=op, value=val))
+            account_rules.append(Rule(field=fld, operator=op, value=val))
             need_account_fields = True
+            need_account_extras = True
             account_fields_needed.add(fld)
         else:
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
@@ -2805,10 +3864,13 @@ async def explorer_search_within_drive_km(
         requested_cols.append(k)
         if k in ("sf.Account.Member__c", "Account.Member__c", "sf.Account.MemberName", "Account.MemberName"):
             need_member = True
-        if k in ("sf.Account.HasPI", "Account.HasPI"):
-            need_haspi = True
+        acct_field = None
         if k.startswith("Account."):
-            requested_account_cols.add(k.split(".",1)[1])
+            acct_field = _strip_account_prefix(k)
+        elif k.startswith("sf.Account." ):
+            acct_field = _strip_account_prefix(k)
+        if acct_field:
+            requested_account_cols.add(acct_field)
             need_account_fields = True
         if k.startswith("extra."):
             requested_extra_cols.add(k)
@@ -2829,8 +3891,10 @@ async def explorer_search_within_drive_km(
     acc_ids_all = [r["AccountId"] for r in _sf_query_all(
         sf, f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null GROUP BY AccountId"
     )]
+    log.info("within-drive-km: base=%s opportunity_accounts=%s", base_account_id, len(acc_ids_all))
     # Filtramos inactivas mediante _build_account_map
     acc_map_all = _build_account_map(sf, acc_ids_all)
+    log.info("within-drive-km: active_accounts=%s", len(acc_map_all))
 
     # Merge coords: SIEMPRE prioriza Salesforce; Site como fallback (sólo activas)
     coords_by_acc: Dict[str, Dict[str, Any]] = {}
@@ -2853,6 +3917,8 @@ async def explorer_search_within_drive_km(
             if glat is not None and glng is not None:
                 info["lat"], info["lng"] = glat, glng
                 coords_by_acc[aid] = info
+            else:
+                log.debug("within-drive-km: no coords for account=%s city=%s country=%s", aid, info.get("city"), info.get("country"))
 
     # -------- base (coords) --------
     acc_map_base = _build_account_map(sf, [base_account_id])
@@ -2874,6 +3940,7 @@ async def explorer_search_within_drive_km(
         lat0, lng0 = glat, glng
     if lat0 is None or lng0 is None:
         raise HTTPException(status_code=404, detail="Base account has no geolocation")
+    log.info("within-drive-km: base coords lat=%s lng=%s city=%s country=%s", lat0, lng0, base_info.get("city"), base_info.get("country"))
 
     # -------- 1) Vecinos por distancia (SIN filtros) --------
     dests: List[Tuple[float, float]] = []
@@ -2886,9 +3953,25 @@ async def explorer_search_within_drive_km(
             continue
         dests.append((float(lat_i), float(lng_i)))
         dest_accs.append(acc)
+    log.info("within-drive-km: candidate coords=%s", len(dest_accs))
 
     dists_km = await _drive_km_matrix((float(lat0), float(lng0)), dests)
+    valid = [km for km in dists_km if km is not None]
+    log.info(
+        "within-drive-km: distance stats valid=%s none=%s min=%.2f max=%.2f",
+        len(valid),
+        len(dists_km) - len(valid),
+        min(valid) if valid else float("nan"),
+        max(valid) if valid else float("nan"),
+    )
     neighbor_accs = [acc for acc, km in zip(dest_accs, dists_km) if km is not None and km <= float(max_km)]
+    log.info(
+        "within-drive-km: base=%s neighbor_candidates=%s within_max=%s max_km=%s",
+        base_account_id,
+        len(dest_accs),
+        len(neighbor_accs),
+        max_km,
+    )
 
     # === Extras también para neighbors_all ===
     fields_to_fetch_neighbors: Set[str] = (account_fields_needed | requested_account_cols) - {"MemberName", "HasPI"}
@@ -2898,8 +3981,11 @@ async def explorer_search_within_drive_km(
 
     # Batch extras (extra.*) para vecinos
     extras_map_neighbors: Dict[str, Dict[str, Any]] = {}
-    if need_batch_extras and neighbor_accs:
-        extras_map_neighbors = batch_fetch_account_extras(sf, neighbor_accs)
+    if neighbor_accs:
+        if need_batch_extras:
+            extras_map_neighbors = batch_fetch_account_extras(sf, neighbor_accs)
+        else:
+            extras_map_neighbors = batch_fetch_account_extras(sf, neighbor_accs)
 
     member_by_acc_neighbors: Dict[str, Optional[str]] = {}
     if need_member and neighbor_accs:
@@ -2908,17 +3994,14 @@ async def explorer_search_within_drive_km(
         for a in rows:
             member_by_acc_neighbors[str(a.get("Id"))] = (a.get("C_Member__r") or {}).get("Name") or None
 
-    pi_neighbors: Set[str] = set()
-    if need_haspi and neighbor_accs:
-        vals = ",".join(f"'{a}'" for a in neighbor_accs)
-        rows = _sf_query_all(sf, f"SELECT AccountId FROM AccountContactRelation WHERE AccountId IN ({vals}) AND Role__c = 'PI'")
-        for r in rows:
-            if r.get("AccountId"):
-                pi_neighbors.add(str(r.get("AccountId")))
-
     # Sólo vecinos ACTIVOS (según _build_account_map)
     acc_map_neighbors = _build_account_map(sf, neighbor_accs) if neighbor_accs else {}
+    if acc_map_neighbors:
+        for aid, counts in nd_counts_by_acc.items():
+            if aid in acc_map_neighbors:
+                acc_map_neighbors[aid].setdefault("nd_counts", counts)
     active_neighbor_ids = list(acc_map_neighbors.keys())
+    log.info("within-drive-km: active_neighbor_ids=%s (from %s)", len(active_neighbor_ids), len(neighbor_accs))
 
     # Construcción de neighbors_all (sólo activos)
     neighbors_all: List[Dict[str, Any]] = []
@@ -2948,8 +4031,6 @@ async def explorer_search_within_drive_km(
         extras: Dict[str, Any] = {}
         if need_member:
             extras["MemberName"] = member_by_acc_neighbors.get(str(acc))
-        if need_haspi:
-            extras["HasPI"] = (str(acc) in pi_neighbors)
         if need_account_fields:
             extras.update(account_extras_for_neighbors.get(str(acc), {}))
         if need_batch_extras:
@@ -2958,6 +4039,11 @@ async def explorer_search_within_drive_km(
                 xall = extras_map_neighbors.get(str(acc), {}) or {}
                 extras.update({k: xall.get(k) for k in requested_extra_cols})
 
+        assignments_list = _split_assignment_names(extras_map_neighbors.get(str(acc), {}).get("extra.AssignmentsNames"))
+        assign_count = _safe_int(extras_map_neighbors.get(str(acc), {}).get("extra.AssignmentsCount"))
+        nd_meta = accd.get("nd_counts") or {}
+        cs_flags = accd.get("cs") or {}
+
         neighbors_all.append({
             "lat": lat, "lng": lng,
             "account_id": acc,
@@ -2965,10 +4051,31 @@ async def explorer_search_within_drive_km(
             "city": accd.get("city") or (site_by_acc.get(acc) or {}).get("city"),
             "country": accd.get("country") or (site_by_acc.get(acc) or {}).get("country"),
             "extras": extras,
+            "badges": {"profiling": False, "qualification": False},
+            "cs": {
+                "clinical": bool(cs_flags.get("clinical")),
+                "referral": bool(cs_flags.get("referral")),
+                "detect": bool(cs_flags.get("detect")),
+            },
+            "meta": {
+                "pi_name": extras_map_neighbors.get(str(acc), {}).get("extra.PIName"),
+                "pi_email": extras_map_neighbors.get(str(acc), {}).get("extra.PIEmail"),
+                "pi_phone": extras_map_neighbors.get(str(acc), {}).get("extra.PIPhone"),
+                "assignments": assignments_list,
+                "assignments_count": assign_count,
+                "nd_u18": nd_meta.get("u18"),
+                "nd_o18": nd_meta.get("o18"),
+            },
         })
 
     # Si no hay vecinos activos, devolvemos bootstrap mínimo
     if not active_neighbor_ids:
+        log.info(
+            "within-drive-km: no active neighbors (neighbor_accs=%s) for base=%s max_km=%s",
+            len(neighbor_accs),
+            base_account_id,
+            max_km,
+        )
         return {
             "base": {"account_id": base_account_id, "lat": lat0, "lng": lng0},
             "neighbors_all": neighbors_all,
@@ -2997,11 +4104,14 @@ async def explorer_search_within_drive_km(
     for k in requested_cols:
         if not k.startswith("sf."):
             continue
-        fld = k[3:]
-        if _exists_on_opportunity(fld):
-            opp_fields.add(fld)
-        elif _exists_on_account(fld):
-            opp_fields.add(f"Account.{fld}")
+        raw = k[3:]
+        if raw.startswith("Account."):
+            inner = raw.split(".", 1)[1]
+            if _exists_on_account(inner):
+                opp_fields.add(f"Account.{inner}")
+        else:
+            if _exists_on_opportunity(raw):
+                opp_fields.add(raw)
 
     opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     if (set(opp_fields) - opp_fields_valid):
@@ -3010,6 +4120,13 @@ async def explorer_search_within_drive_km(
     select_fields = ", ".join(sorted(opp_fields_valid))
     opps = _sf_query_all(sf, f"SELECT {select_fields} FROM Opportunity {where_sql}")
     if not opps:
+        log.info(
+            "within-drive-km: no opportunities after filter (active_neighbors=%s base=%s max_km=%s where=%s)",
+            len(active_neighbor_ids),
+            base_account_id,
+            max_km,
+            where_sql,
+        )
         return {
             "base": {"account_id": base_account_id, "lat": lat0, "lng": lng0},
             "neighbors_all": neighbors_all,
@@ -3037,13 +4154,7 @@ async def explorer_search_within_drive_km(
         for a in rows:
             member_by_acc[str(a.get("Id"))] = (a.get("C_Member__r") or {}).get("Name") or None
 
-    pi_accounts: Set[str] = set()
-    if need_haspi and acc_ids:
-        vals2 = ",".join(f"'{x}'" for x in acc_ids)
-        rows = _sf_query_all(sf, f"SELECT AccountId FROM AccountContactRelation WHERE AccountId IN ({vals2}) AND Role__c = 'PI'")
-        for r in rows:
-            if r.get("AccountId"):
-                pi_accounts.add(str(r.get("AccountId")))
+    # PI/account derived data (HasPI) removed — not querying AccountContactRelation here
 
     fields_to_fetch = ((account_fields_needed | requested_account_cols) - {"MemberName","HasPI"})
     account_extras_by_acc: Dict[str, Dict[str, Any]] = {}
@@ -3097,28 +4208,15 @@ async def explorer_search_within_drive_km(
         res = [eval_one(r) for r in member_rules]
         return all(res) if (filters.get("logic") or "AND") == "AND" else any(res)
 
-    def pass_haspi(aid: str) -> bool:
-        if not haspi_rules:
-            return True
-        actual = str(aid) in pi_accounts
-        def as_bool(x: Any) -> bool:
-            if isinstance(x, bool): return x
-            s = str(x).strip().lower()
-            return s in ("1","true","yes","y","t")
-        res = []
-        for r in haspi_rules:
-            op = _OP_SYNONYM.get(r.operator, r.operator); want = as_bool(r.value)
-            if op in ("equals","="):      res.append(actual == want)
-            elif op in ("not_equals","!="): res.append(actual != want)
-            else:                         res.append(True)
-        return all(res) if (filters.get("logic") or "AND") == "AND" else any(res)
+    # pass_haspi removed: HasPI filtering deprecated/removed
 
     def pass_account(aid: str) -> bool:
         if not account_rules:
             return True
         vals = dict(account_extras_by_acc.get(str(aid), {}))
         if need_member: vals["MemberName"] = member_by_acc.get(str(aid))
-        if need_haspi:  vals["HasPI"] = (str(aid) in pi_accounts)
+        # HasPI support removed — don't attempt to compute or include it here.
+        # (keep values derived from account_extras and member_by_acc only)
         glue_and = (filters.get("logic") or "AND") == "AND"
         res = []
         for ar in account_rules:
@@ -3153,7 +4251,6 @@ async def explorer_search_within_drive_km(
         qual_data = qual_by_site.get(sid, {}) if sid else {}
         if not pass_qual(qual_data): continue
         if not pass_member(aid):     continue
-        if not pass_haspi(aid):      continue
         if not pass_account(aid):    continue
         if not pass_extra(aid):      continue
 
@@ -3172,7 +4269,7 @@ async def explorer_search_within_drive_km(
                 elif sub in {"BillingCity","BillingCountry","BillingLatitude","BillingLongitude"}:
                     data[k] = acc.get({"BillingCity":"city","BillingCountry":"country","BillingLatitude":"lat","BillingLongitude":"lng"}[sub])
                 elif sub == "MemberName":           data[k] = member_by_acc.get(str(aid)) if need_member else None
-                elif sub == "HasPI":                data[k] = (str(aid) in pi_accounts) if need_haspi else None
+                elif sub == "HasPI":                data[k] = None
                 else:
                     data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
                 continue
@@ -3193,8 +4290,69 @@ async def explorer_search_within_drive_km(
             "data": data,
         })
 
+    # --- Prefetch maps for Account.* and extra.* so we can inject values even if not used in WHERE ---
+    account_extras_map: Dict[str, Dict[str, Any]] = {}
+    if need_account_extras and requested_account_cols:
+        try:
+            account_extras_map = _fetch_account_extras(sf, acc_ids, requested_account_cols)
+        except Exception as e:
+            log.warning("/explorer/search: _fetch_account_extras failed: %s", e)
+            account_extras_map = {}
+
+    extra_batch_map: Dict[str, Dict[str, Any]] = {}
+    if need_batch_extras and acc_ids:
+        try:
+            extra_batch_map = batch_fetch_account_extras(sf, list(acc_ids)) or {}
+        except Exception as e:
+            log.warning("/explorer/search: batch_fetch_account_extras failed: %s", e)
+            extra_batch_map = {}
+
+    map_extra = extra_batch_map if extra_batch_map else (
+        batch_fetch_account_extras(sf, list(acc_ids)) if acc_ids else {}
+    )
+
     # Colapsa a una fila por cuenta
     rows = collapse_rows_by_account(rows)
+
+    # --- Inject Account.* + extra.* + Member/HasPI into returned rows ---
+    if rows:
+        for r in rows:
+            aid = str(r.get("account_id") or "")
+            if not aid:
+                continue
+            r.setdefault("data", {})
+            data = r["data"]
+
+            # 1) Account.* columns explicitly requested
+            if requested_account_cols:
+                acc_vals = (account_extras_map.get(aid, {}) or {})
+                for f in requested_account_cols:
+                    # Keep the exact front-end key format: "Account.<Field>"
+                    data[f"Account.{f}"] = acc_vals.get(f)
+
+            # 2) extra.* columns explicitly requested
+            if requested_extra_cols:
+                ex_vals = (extra_batch_map.get(aid, {}) or {})
+                for full_key in requested_extra_cols:
+                    fetched = ex_vals.get(full_key)
+                    if fetched is not None:
+                        if full_key not in data or data.get(full_key) in (None, "", []):
+                            data[full_key] = fetched
+                    else:
+                        if full_key not in data:
+                            data[full_key] = None
+
+            # 3) MemberName / HasPI if requested
+            if need_member:
+                m = (extra_batch_map.get(aid, {}) or {}).get("extra.MemberName")
+                if m is None:
+                    m = member_by_acc.get(aid)
+                data["Account.MemberName"] = m
+                # also expose as extra.MemberName if not present
+                if "extra.MemberName" not in data:
+                    data["extra.MemberName"] = m
+
+            # HasPI deprecated — do not inject Account.HasPI
 
     # Badges + puntos (solo los que CUMPLEN filtros)
     badges: Dict[str, Dict[str, bool]] = {}
@@ -3207,6 +4365,9 @@ async def explorer_search_within_drive_km(
         if t in ("qualification", "both"): b["qualification"] = True
 
     acc_map_final = _build_account_map(sf, [r["account_id"] for r in rows if r.get("account_id")])
+    for aid, counts in nd_counts_by_acc.items():
+        if aid in acc_map_final:
+            acc_map_final[aid].setdefault("nd_counts", counts)
     points = []
     for r in rows:
         aid = r.get("account_id")
@@ -3231,6 +4392,12 @@ async def explorer_search_within_drive_km(
                 lat, lng = glat, glng
         if lat is None or lng is None:
             continue
+        cs_flags = accd.get("cs") or {}
+        extras_entry = (map_extra.get(aid) or {})
+        assignments_list = _split_assignment_names(extras_entry.get("extra.AssignmentsNames"))
+        assign_count = _safe_int(extras_entry.get("extra.AssignmentsCount"))
+        nd_meta = accd.get("nd_counts") or {}
+
         points.append({
             "lat": lat, "lng": lng,
             "account_id": aid,
@@ -3238,7 +4405,30 @@ async def explorer_search_within_drive_km(
             "city": accd.get("city") or r.get("city"),
             "country": accd.get("country") or r.get("country"),
             "badges": badges.get(aid, {"profiling": False, "qualification": False}),
+            "cs": {
+                "clinical": bool(cs_flags.get("clinical")),
+                "referral": bool(cs_flags.get("referral")),
+                "detect": bool(cs_flags.get("detect")),
+            },
+            "meta": {
+                "pi_name": extras_entry.get("extra.PIName"),
+                "pi_email": extras_entry.get("extra.PIEmail"),
+                "pi_phone": extras_entry.get("extra.PIPhone"),
+                "assignments": assignments_list,
+                "assignments_count": assign_count,
+                "nd_u18": nd_meta.get("u18"),
+                "nd_o18": nd_meta.get("o18"),
+            },
         })
+
+    log.info(
+        "within-drive-km: neighbors_all=%s rows=%s points=%s (base=%s max_km=%s)",
+        len(neighbors_all),
+        len(rows),
+        len(points),
+        base_account_id,
+        max_km,
+    )
 
     return {
         "base": {"account_id": base_account_id, "lat": lat0, "lng": lng0},

@@ -89,6 +89,7 @@ export type FieldDef = {
   type: "string" | "number" | "boolean" | "date" | "datetime" | "ID";
   source: "site" | "sf" | "qual";
   group?: string;
+  qual_section?: string;
 };
 
 export type FilterRule = {
@@ -106,6 +107,20 @@ export type ExplorerPoint = {
   city?: string | null;
   country?: string | null;
   badges: { profiling: boolean; qualification: boolean };
+  cs?: {
+    clinical?: boolean | null;
+    referral?: boolean | null;
+    detect?: boolean | null;
+  };
+  meta?: {
+    pi_name?: string | null;
+    pi_email?: string | null;
+    pi_phone?: string | null;
+    assignments?: string[];
+    assignments_count?: number | null;
+    nd_u18?: number | null;
+    nd_o18?: number | null;
+  };
 };
 export type ExplorerRow = {
   account_id: string;
@@ -118,6 +133,18 @@ export type ExplorerRow = {
 
 /* ---------------------- Payload normalization helpers -------------------- */
 type FlatRule = { field: string; operator: string; value: any };
+
+// Nodo de filtro anidado que entenderá el backend v2
+type ApiFilterNode =
+  | { field: string; operator: string; value: any }
+  | { logic: "AND" | "OR"; rules: ApiFilterNode[] };
+
+// Quita prefijos de fuente para las keys de filtro (el backend suele esperar nombres "crudos")
+function normalizeFieldKey(k: string): string {
+  if (!k) return k;
+  return k.replace(/^(sf|qual|site)\./, "");
+}
+
 
 function mapOpFlexible(op?: string): string {
   switch ((op || "").toLowerCase()) {
@@ -142,14 +169,16 @@ function mapOpFlexible(op?: string): string {
   }
 }
 
-function normalizeFilters(input: FilterGroup): { logic: "AND" | "OR"; rules: FlatRule[] } {
+// ====== v1 (plano): mantiene compat con backend actual ======
+function normalizeFiltersFlat(input: FilterGroup): { logic: "AND" | "OR"; rules: FlatRule[] } {
   const out: FlatRule[] = [];
   const walk = (g: FilterGroup) => {
     for (const r of g.rules) {
-      if ((r as any).logic) { walk(r as FilterGroup); }
-      else {
+      if ((r as any).logic) {
+        walk(r as FilterGroup);
+      } else {
         const rr = r as any;
-        const field = rr.field;
+        const field = normalizeFieldKey(rr.field);
         const operator = mapOpFlexible(rr.op ?? rr.operator);
         out.push({ field, operator, value: rr.value });
       }
@@ -157,6 +186,24 @@ function normalizeFilters(input: FilterGroup): { logic: "AND" | "OR"; rules: Fla
   };
   walk(input);
   return { logic: input.logic, rules: out };
+}
+
+// ====== v2 (árbol): preserva AND/OR anidados ======
+function normalizeFiltersTree(input: FilterGroup): ApiFilterNode {
+  const toNode = (node: FilterGroup | FlatRule | any): ApiFilterNode => {
+    if (node && node.logic && Array.isArray(node.rules)) {
+      const logic = (node.logic === "OR" ? "OR" : "AND") as "AND" | "OR";
+      return {
+        logic,
+        rules: (node.rules as any[]).map((child) => toNode(child)),
+      };
+    }
+    // hoja
+    const field = normalizeFieldKey(node.field);
+    const operator = mapOpFlexible(node.op ?? node.operator);
+    return { field, operator, value: node.value };
+  };
+  return toNode(input);
 }
 
 /** Re-prefija claves a "sf." para que encajen con los headers de la tabla */
@@ -167,9 +214,16 @@ function rePrefixDataKeys(data: Record<string, any> | undefined) {
     if (k.startsWith("sf.") || k.startsWith("qual.") || k.startsWith("site.")) {
       out[k] = v;
     } else if (k.startsWith("Account.")) {
-      out[`sf.${k}`] = v; // Account.* → sf.Account.*
+      // ✅ mantener Account.* tal cual (NO lo conviertas a sf.Account.*)
+      out[k] = v;
+    } else if (k.startsWith("extra.")) {
+      // ✅ mantener extra.* tal cual (NO lo conviertas a sf.extra.*)
+      out[k] = v;
+    } else if (k.startsWith("Account.")) {
+      out[k] = v;
     } else {
-      out[`sf.${k}`] = v; // valores Opportunity → sf.*
+      // Valores Opportunity “crudos” → sf.<campo>
+      out[`sf.${k}`] = v;
     }
   }
   return out;
@@ -261,15 +315,6 @@ export async function getExplorerFields(): Promise<{ fields: FieldDef[] }> {
       group: "Salesforce",
     });
   }
-  if (!hasKey.has("sf.HasPI")) {
-    virtuals.push({
-      key: "sf.HasPI",
-      label: "Has PI contact",
-      type: "boolean",
-      source: "sf",
-      group: "Salesforce",
-    });
-  }
   const all = [...base, ...virtuals];
   return { fields: ensureUniqueLabels(all) };
 }
@@ -281,7 +326,10 @@ export async function explorerSearch(
 ): Promise<{ points: ExplorerPoint[]; rows: ExplorerRow[] }> {
   const cols = (payload.columns ?? []);
   const normalized = {
-    filters: normalizeFilters(payload.filters),
+    // v1: plano (compat)
+    filters: normalizeFiltersFlat(payload.filters),
+    // v2: árbol (backend nuevo podrá leer `filters_tree`)
+    filters_tree: normalizeFiltersTree(payload.filters),
     columns: cols.map((k) => (k.startsWith("sf.") ? k.slice(3) : k)),
   };
 
@@ -330,7 +378,39 @@ export async function explorerBootstrap(): Promise<{ points: ExplorerPoint[]; ro
       city: n.city ?? null,
       country: n.country ?? null,
       badges: { profiling: !!n.hasProfiling, qualification: !!n.hasQualification },
+      // Copiamos los flags CS y meta que vienen del bootstrap para que el mapa
+      // pueda colorear los markers y mostrar la info en el InfoWindow.
+      cs: {
+        // Compute CS flags from multiple possible locations for robustness:
+        // 1) top-level n.cs (preferred), 2) n.meta.csContribution (backend compatibility),
+        // 3) legacy extra keys under meta (some backends used extra.CS_* names).
+  clinical: !!((n as any).cs?.clinical || (n as any).meta?.csContribution?.INNODIA_Clinical_Trial_Site__c || (n as any).meta?.["extra.CS_Clinical_Site_CS__c"] || (n as any).meta?.["extra.INNODIA_Clinical_Trial_Site__c"]),
+        referral: !!((n as any).cs?.referral || (n as any).meta?.csContribution?.Referral_Outreach_Site_Non_CTS__c || (n as any).meta?.["extra.CS_Referral_Outreach_Site__c"]),
+        detect: !!((n as any).cs?.detect || (n as any).meta?.csContribution?.Elegible_for_DETECT_Site__c || (n as any).meta?.["extra.CS_Eligible_DETECT__c"]),
+      },
+      meta: {
+        pi_name: (n as any).meta?.pi_name ?? null,
+        pi_email: (n as any).meta?.pi_email ?? null,
+        pi_phone: (n as any).meta?.pi_phone ?? null,
+        assignments: Array.isArray((n as any).meta?.assignments) ? (n as any).meta.assignments : [],
+        assignments_count: (n as any).meta?.assignments_count ?? null,
+        nd_u18: typeof (n as any).meta?.nd_u18 === "number" ? (n as any).meta.nd_u18 : ((n as any).meta?.nd_u18 ?? null),
+        nd_o18: typeof (n as any).meta?.nd_o18 === "number" ? (n as any).meta.nd_o18 : ((n as any).meta?.nd_o18 ?? null),
+      },
     }));
+
+  // Debug instrumentation: log the parsed ExplorerPoint for the specific
+  // account we're investigating so we can confirm if `cs` survived the
+  // bootstrap → client parsing step. Keep it guarded and lightweight.
+  try {
+    const dbg = points.find(p => p.account_id === "001Vg00000UGORhIAP");
+    if (dbg) {
+      // Use console.info so the message is visible even if 'Debug' level is filtered
+      console.info && console.info("[CTS] explorerBootstrap parsed point for 001Vg00000UGORhIAP:", dbg);
+    }
+  } catch (e) {
+    // swallow - purely diagnostics
+  }
 
   const rows: ExplorerRow[] = nodes.map(n => ({
     account_id: n.account_id,

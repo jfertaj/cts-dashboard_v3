@@ -8,6 +8,7 @@ export type FieldDef = {
   source?: "sf" | "site" | string;
   /** opcional: nombre de grupo ya resuelto desde backend (para qual.* = Subsection, ej. "2.3 Ethics...") */
   group?: string;
+  qual_section?: string;
 };
 
 type Preset = { id: string; label: string; keys: string[] };
@@ -131,6 +132,14 @@ export default function ColumnPicker({
   const groupNameOf = (f: FieldDef): string => {
     const by = groupBy?.(f);
     if (by) return by;
+    if ((f.source || "").toLowerCase() === "qual") {
+      const section = f.qual_section?.trim();
+      const subsection = f.group?.trim();
+      if (section && subsection) return `${section} › ${subsection}`;
+      if (section) return section;
+      if (subsection) return subsection;
+      return "Qualification";
+    }
     if (f.group) return f.group;
     if (f.source) return f.source.toString();
     if (f.key.startsWith("qual.")) return "Qualification";

@@ -13,10 +13,11 @@ export type TablePayload = {
 };
 
 export type ChatResponse = {
-  ok: boolean;
-  answer: string;
+  ok?: boolean;
+  answer?: string;
   table?: TablePayload;
   visualization?: VizPayload;
+  clarify?: { question: string; options: Array<{ label: string; query: string }> };
 };
 
 export async function askAI(prompt: string): Promise<ChatResponse> {

@@ -18,10 +18,13 @@ from app.routers.salesforce_extras import _account_extras_core
 
 # OpenAI
 from openai import OpenAI
+from app.services.sf_labels import humanize_headers
+from app.utils.soql_helpers import build_followup_accounts_query
 
 DEBUG = os.environ.get("AI_CHAT_DEBUG", "0") == "1"
 INDEX_REFRESH_SEC = int(os.environ.get("AI_INDEX_REFRESH_SEC", "600"))
 FIELDS_SF_JSON_PATH = os.environ.get("FIELDS_SF_JSON_PATH", "app/config/fields_opportunity_curated.json")
+QUAL_ALIAS_JSON_PATH = os.environ.get("QUAL_ALIAS_JSON_PATH", "app/config/qualification_aliases.json")
 EXPLORER_DRIVE_KM_PATH = "/api/explorer/search/within-drive-km"
 
 def _dbg(msg: str, *args):
@@ -41,6 +44,10 @@ def _first_account_id_from_table(table: Optional[Dict[str, Any]]) -> Optional[st
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 router = APIRouter(prefix="/api/ai", tags=["AI"])
+
+def _clean_text(s: str) -> str:
+    # Elimina restos como "<table>" del texto del asistente
+    return re.sub(r"\s*<table>\s*", "", s or "").strip()
 
 # ====== Tipos ======
 Role = Literal["system","user","assistant","tool"]
@@ -79,6 +86,63 @@ def _normalize(s: str) -> str:
     s = re.sub(r"[_\-\/:]+", " ", s)
     s = re.sub(r"\s+", " ", s)
     return s
+
+# ------- Field name prettification helpers -------
+def _smart_title(s: str) -> str:
+    """Title-case but preserve acronyms like T1D, CS, PI and comparison signs."""
+    if not s:
+        return s
+    out = s.title()
+    # restore acronyms
+    out = re.sub(r"\bT1d\b", "T1D", out)
+    out = re.sub(r"\bPi\b", "PI", out)
+    out = re.sub(r"\bCs\b", "CS", out)
+    out = out.replace("> =","≥").replace("&gt;=","≥").replace(">=","≥")
+    return out
+
+def _apply_common_rewrites(txt: str) -> str:
+    """
+    Normalize frequent Salesforce-style phrases into human-friendly text.
+    E.g. 'C_Number_of_new_T1D_diagnosed_U_18__c' → 'Newly Diagnosed T1D <18'
+    """
+    t = txt or ""
+    # remove double underscores and trailing __c
+    t = re.sub(r"__c$", "", t)
+    # Normalize separators
+    t = t.replace("__", "_")
+    t = re.sub(r"[_\s]+", " ", t).strip()
+
+    # Frequent domain-specific rewrites (order matters)
+    t = re.sub(r"\bNumber Of New T1d Diagnosed\b", "Newly Diagnosed T1D", t, flags=re.I)
+    t = re.sub(r"\bNumber Of T1d Patients Currently\b", "T1D Patients Currently", t, flags=re.I)
+    t = re.sub(r"\bNumber Of T1d Patients\b", "T1D Patients", t, flags=re.I)
+    t = re.sub(r"\bStage\s*1\b", "Stage 1", t, flags=re.I)
+    t = re.sub(r"\bStage\s*2\b", "Stage 2", t, flags=re.I)
+
+    # Under/Over 18 → symbols
+    t = re.sub(r"\b(U\s*[_ ]?\s*18|Under\s*18)\b", "<18", t, flags=re.I)
+    t = re.sub(r"\b(O\s*[_ ]?\s*18|Over\s*18)\b", "≥18", t, flags=re.I)
+
+    # Clean residual leading C / custom prefixes
+    t = re.sub(r"^\s*C\s+", "", t)
+
+    # Compact multiple spaces
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    return _smart_title(t)
+
+def _prettify_sf_field_name(core: str) -> str:
+    """
+    Heuristic prettifier for Salesforce API names when curated labels are not available.
+    Keeps domain terms (T1D, Stage 1/2, <18, ≥18) readable.
+    """
+    if not core:
+        return core
+    # Remove object prefix when present (Account.)
+    c = re.sub(r"^Account\.", "", core)
+    # Strip __c and replace underscores with spaces first
+    c = re.sub(r"__c$", "", c)
+    c = c.replace("_", " ")
+    return _apply_common_rewrites(c)
 
 def _load_sf_fields() -> Dict[str, Dict[str, str]]:
     """
@@ -140,6 +204,50 @@ def _introspect_site_qual_keys(db: Session, limit: int = 500) -> Dict[str, Dict[
         _dbg("WARN: site_qual introspection failed: %s", e)
     return out
 
+def _introspect_profiling_kv_keys(db: Session, limit: int = 500) -> Dict[str, Dict[str, str]]:
+    """
+    Devuelve: { normalized_alias: {"source":"profiling_kv","key":<kv key>} ... }
+    Basado en DISTINCT key de profiling_kv.
+    """
+    out: Dict[str, Dict[str, str]] = {}
+    sql = "SELECT key, COUNT(*) FROM public.profiling_kv GROUP BY key ORDER BY COUNT(*) DESC LIMIT :lim"
+    try:
+        res = db.execute(text(sql), {"lim": limit})
+        for key, _cnt in res.fetchall():
+            if not key:
+                continue
+            base = _normalize(key)
+            out.setdefault(base, {"source":"profiling_kv","key": key})
+            short = re.sub(r"^C[_\-]+", "", key)
+            out.setdefault(_normalize(short), {"source":"profiling_kv","key": key})
+    except Exception as e:
+        _dbg("WARN: profiling_kv introspection failed: %s", e)
+    return out
+
+def _load_qual_aliases() -> Dict[str, str]:
+    """Lee qualification_aliases.json si existe. Formato esperado:
+    { "alias string": "JSONB_key", ... } o { "aliases": [{"alias":"...","key":"..."}, ...] }
+    Devuelve dict alias_normalizado -> key
+    """
+    out: Dict[str, str] = {}
+    try:
+        with open(QUAL_ALIAS_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "aliases" not in data:
+            for a, k in data.items():
+                if a and k:
+                    out[_normalize(str(a))] = str(k)
+        elif isinstance(data, dict) and isinstance(data.get("aliases"), list):
+            for it in data["aliases"]:
+                alias = _normalize(str(it.get("alias") or ""))
+                key = str(it.get("key") or "")
+                if alias and key:
+                    out[alias] = key
+    except Exception as e:
+        _dbg("WARN: cannot load qual aliases %s: %s", QUAL_ALIAS_JSON_PATH, e)
+    return out
+
+
 def _build_knowledge_index(db: Session) -> Dict[str, Any]:
     """
     Funde SF (curated) + site_qual. Si hay duplicidad de concepto, preferimos SF.
@@ -150,10 +258,18 @@ def _build_knowledge_index(db: Session) -> Dict[str, Any]:
 
     sf_map = _load_sf_fields()  # normalized_alias -> {source:"sf", field, label}
     sq_map = _introspect_site_qual_keys(db)  # normalized_alias -> {source:"site_qual", key}
+    prof_map = _introspect_profiling_kv_keys(db)  # normalized_alias -> {source:"profiling_kv", key}
+
+    # Aliases curados de Qualification (alias -> key)
+    qual_aliases = _load_qual_aliases()
 
     fused: Dict[str, Dict[str, str]] = {}
-    # Primero metemos site_qual
+    # Primero metemos profiling y site_qual (warehouse)
+    fused.update(prof_map)
     fused.update(sq_map)
+    # Añadimos aliases curados para site_qual
+    for alias, key in qual_aliases.items():
+        fused[alias] = {"source":"site_qual","key": key}
     # Luego SF pisa (prioridad)
     for k, v in sf_map.items():
         fused[k] = v
@@ -161,7 +277,7 @@ def _build_knowledge_index(db: Session) -> Dict[str, Any]:
     _INDEX_CACHE["ts"] = now
     _INDEX_CACHE["index"] = fused
     _INDEX_CACHE["sf_fields"] = sf_map
-    _dbg("INDEX built: %d aliases (sf=%d, sq=%d)", len(fused), len(sf_map), len(sq_map))
+    _dbg("INDEX built: %d aliases (sf=%d, sq=%d, prof=%d, qual_alias=%d)", len(fused), len(sf_map), len(sq_map), len(prof_map), len(qual_aliases))
     return _INDEX_CACHE
 
 def _top_matches(q: str, aliases: List[str], k: int = 5) -> List[str]:
@@ -201,6 +317,8 @@ def _extract_structured(content: str) -> Dict[str, Any]:
     content = re.sub(r"(?is)</?table>", "", content or "")
     # líneas basura como  ,,,,"rows":
     content = re.sub(r'(?m)^\s*[,"]*\s*rows\s*:\s*[,]?\s*$', "", content or "")
+    # Propaga la versión limpiada al texto de salida
+    out["answer"] = content
     tbl = _pull("table")
     viz = _pull("visualization")
 
@@ -239,6 +357,10 @@ def _extract_structured(content: str) -> Dict[str, Any]:
     # Limpieza final de saltos/espacios sobrantes
     txt = out["answer"]
 
+    # Elimina etiquetas sueltas <table> que quedaron antes del escape
+    txt = re.sub(r"(?im)^\s*<table>\s*$", "", txt)
+    txt = txt.replace("<table>", "")
+
     # --- Limpieza avanzada para quitar JSON crudo y artefactos ---
     # 1️⃣ Elimina bloques ```json ... ``` o ```...```
     txt = re.sub(r"```(?:json)?[\s\S]*?```", "", txt)
@@ -266,13 +388,33 @@ def _extract_structured(content: str) -> Dict[str, Any]:
     txt = re.sub(r"(?m)^\s*\d+\.\s*", lambda m: f"{m.group(0).strip()} ", txt)
     txt = txt.strip()
 
-    # --- Conversión básica a HTML (para renderizado visual en ChatView) ---
-    # Sustituimos saltos de línea dobles por párrafos y simples por <br>
+    # --- Conversión a HTML con listas ordenadas y no ordenadas ---
     import html
-    safe = html.escape(txt)
-    safe = re.sub(r"\n{2,}", "</p><p>", safe)
-    safe = re.sub(r"(?<!>)\n(?!<)", "<br>", safe)
-    safe = f"<p>{safe}</p>"
+
+    def _lines(s: str) -> list[str]:
+        return [ln.strip() for ln in (s or "").split("\n")]
+
+    lines = [ln for ln in _lines(txt) if ln]
+
+    # Detect ordered list: lines like "1. ...", "2. ..."
+    is_ordered = len(lines) >= 2 and all(re.match(r"^\d+\.\s+", ln) for ln in lines)
+    # Detect unordered list: leading bullet or dash
+    is_unordered = (not is_ordered) and len(lines) >= 2 and all(re.match(r"^(?:[-•\u2022])\s+", ln) for ln in lines)
+
+    if is_ordered:
+        items = [re.sub(r"^\d+\.\s+", "", ln) for ln in lines]
+        safe_items = [html.escape(it) for it in items]
+        safe = "<ol>" + "".join(f"<li>{it}</li>" for it in safe_items) + "</ol>"
+    elif is_unordered:
+        items = [re.sub(r"^(?:[-•\u2022])\s+", "", ln) for ln in lines]
+        safe_items = [html.escape(it) for it in items]
+        safe = "<ul>" + "".join(f"<li>{it}</li>" for it in safe_items) + "</ul>"
+    else:
+        # Paragraphs: preserve single line breaks as <br>, double as new paragraphs
+        safe = html.escape(txt)
+        safe = re.sub(r"\n{2,}", "</p><p>", safe)
+        safe = re.sub(r"(?<!>)\n(?!<)", "<br>", safe)
+        safe = f"<p>{safe}</p>"
 
     out["answer"] = safe
     return out
@@ -295,23 +437,24 @@ def _pretty_label(key: str) -> str:
         lbl = (_INDEX_CACHE.get("sf_fields") or {}).get(_normalize(core), {}) or {}
         if isinstance(lbl, dict) and lbl.get("label"):
             return lbl["label"]
-        # último recurso: quitar __c y humanizar
-        core = re.sub(r"^Account\.", "", core)
-        core = re.sub(r"__c$", "", core)
-        core = core.replace("_", " ")
-        return core.replace(" T1D ", " T1D ").title()
+        # último recurso: heurística específica para API names
+        return _prettify_sf_field_name(core)
     # qual.* -> humaniza
     if k.startswith("qual."):
         base = k.split(".",1)[1]
         base = re.sub(r"__c$", "", base).replace("_", " ")
-        return base.title()
+        return _apply_common_rewrites(base)
+    if k.startswith("profil.") or k.startswith("profiling."):
+        base = k.split(".",1)[1]
+        base = re.sub(r"__c$", "", base).replace("_", " ")
+        return _apply_common_rewrites(base)
     # extra.* y otros
     if k.startswith("extra."):
         return k.split(".",1)[1].replace("_"," ").title()
     if k in ("site","city","country","account_id"):
         return {"site":"Account Name","city":"City","country":"Country","account_id":"Account Id"}[k]
     # por defecto humaniza
-    return re.sub(r"[_]+"," ",k).title()
+    return _apply_common_rewrites(re.sub(r"[_]+"," ",k))
 
 def _ok_table(name: str) -> bool:
     name = (name or "").strip().strip('"')
@@ -336,7 +479,7 @@ SF_ALLOWED_FIELDS = {
     "C_Nbr_of_studies_PI_is_involved_PI_Sub_I__c","C_Deadline__c","C_Start_Date__c","C_Signature__c",
     "C_Comments__c","C_Additional_Comments__c","C_Certification_Output__c","C_Account_Verified__c",
     "C_Contact_Verified__c","C_All_Research_Staff_Needed_for_GCP__c","C_Aware_of_any_Screening_Program__c",
-    "C_Center_for_Running_Early_Diagnosis__c","C_Centralized_Clinical_Trial_Facility__c",
+    "C_Center_for_Running_Early_Diagnosis__c",
     "C_Interest_about_setting_up_a_program__c","C_Lead_Study_Nurse_Dedicated_to_the_cent__c",
     "C_Primarily_Caring_for_all_study__c","C_Site_Linked_with_Patient_Org_or_PAC__c",
     "C_Centralized_Facility_Contact_Person__c","C_Contact_Provided__c",
@@ -351,8 +494,18 @@ SF_ALLOWED_FIELDS = {
     "C_Under_Which_Program__c","C_Has_facility_to_conduct__c",
     "C_Send_patients_to_other_CTS_nearby__c","C_List_of_nearby_CTS__c",
 }
+# Campos adicionales permitidos dinámicamente (rellenado en runtime vía describe)
+SF_ALLOWED_DYNAMIC: set[str] = set()
 
-def _validate_soql(soql: str):
+def _describe_fields(sf, obj: str) -> set[str]:
+    try:
+        desc = sf.__getattr__(obj).describe()
+        names = {f.get('name') for f in desc.get('fields', [])}
+        return {n for n in names if n}
+    except Exception:
+        return set()
+
+def _validate_soql(soql: str, sf=None):
     if not re.match(r"^\s*select\s", soql, re.I):
         raise HTTPException(400, "SOQL must start with SELECT")
     if not re.search(r"\bfrom\s+Opportunity\b", soql, re.I):
@@ -375,12 +528,25 @@ def _validate_soql(soql: str):
         base = norm(f)
         if re.match(r"^(count|sum|min|max|avg)\s*\(", base, re.I):
             continue
+        # Whitelist (static + dynamic)
+        allowed = SF_ALLOWED_FIELDS | SF_ALLOWED_DYNAMIC
         if base.startswith("Account."):
-            if base not in SF_ALLOWED_FIELDS:
+            if base not in allowed:
                 bad.append(base)
             continue
-        if base not in SF_ALLOWED_FIELDS:
+        if base not in allowed:
             bad.append(base)
+    # Intento de ampliar whitelist dinámicamente
+    if bad and sf is not None:
+        acc_fields = _describe_fields(sf, 'Account')
+        opp_fields = _describe_fields(sf, 'Opportunity')
+        for b in list(bad):
+            if b.startswith('Account.') and b in {f'Account.{x}' for x in acc_fields}:
+                SF_ALLOWED_DYNAMIC.add(b)
+                bad.remove(b)
+            elif b in opp_fields:
+                SF_ALLOWED_DYNAMIC.add(b)
+                bad.remove(b)
     if bad:
         raise HTTPException(400, f"SOQL field(s) not allowed: {', '.join(bad)}")
 
@@ -461,17 +627,51 @@ def _normalize_table_for_ui(table: Optional[Dict[str, Any]]) -> Optional[Dict[st
             if val is not None:
                 rd.setdefault(std, val); add_col(std)
         norm_rows.append(rd)
-    # --- De-duplicación de columnas visibles ---
-    # Si existen ambas 'sf.Account.Id' y 'account_id', mantener solo 'account_id'
-    keys_now = [c["key"] for c in cols]
-    if "sf.Account.Id" in keys_now and "account_id" in keys_now:
-        cols = [c for c in cols if c["key"] != "sf.Account.Id"]
-    # Reasignar
-    # Quita columnas duplicadas "sf.Account.*" si ya tenemos sus amigables
-    friendly = {"sf.Account.Id":"account_id","sf.Account.Name":"site",
-                "sf.Account.ShippingCountry":"country","sf.Account.ShippingCity":"city"}
-    cols = [c for c in cols if friendly.get(c.get("key")) is None] + \
-           [ {"key": fk, "label": _pretty_label(fk)} for fk in ("account_id","site","country","city") if fk in col_set ]
+    # --- De-duplicación y normalización final de columnas visibles ---
+    # Preferimos claves amigables y eliminamos los equivalentes sf.Account.*
+    friendly = {
+        "sf.Account.Id": "account_id",
+        "sf.Account.Name": "site",
+        "sf.Account.ShippingCountry": "country",
+        "sf.Account.ShippingCity": "city",
+    }
+
+    # 1) Recoge el orden original de claves visto en 'cols'
+    orig_keys = [c.get("key") if isinstance(c, dict) else str(c) for c in cols]
+
+    # 2) Calcula cuáles amigables existen realmente (por datos o por columnas)
+    present = set()
+    for r in norm_rows:
+        if isinstance(r, dict):
+            present.update(k for k, v in r.items() if v is not None)
+    present.update(orig_keys)
+
+    preferred = [k for k in ("account_id", "site", "country", "city") if k in present]
+
+    # 3) Elimina duplicados y mapea sf.Account.* → amigables
+    def _normalize_key(k: str) -> str:
+        return friendly.get(k, k)
+
+    seen = set()
+    final_keys = []
+
+    # a) siempre primero las preferidas si existen
+    for k in preferred:
+        if k not in seen:
+            seen.add(k); final_keys.append(k)
+
+    # b) el resto respetando orden original, filtrando equivalentes sf.Account.*
+    for k in orig_keys:
+        nk = _normalize_key(k)
+        # omite las sf.Account.* mapeadas cuando ya está su amigable
+        if nk in preferred and nk in seen:
+            continue
+        if nk not in seen:
+            seen.add(nk); final_keys.append(nk)
+
+    # 4) Construye columnas finales con etiquetas bonitas
+    cols = [{"key": k, "label": _pretty_label(k)} for k in final_keys]
+
     table["columns"] = cols
     table["rows"] = norm_rows
     return table
@@ -638,12 +838,11 @@ def tool_sql_query(db: Session, sql: str, params: Optional[Dict[str, Any]] = Non
 
 def tool_salesforce_query(sf, soql: str):
     _dbg("SOQL (raw) >>> %s", soql)
-    # Aseguramos que si se piden Account.* campos, también venga Account.Id
     soql_plus = _ensure_soql_has_account_id(soql)
     fixed = _sanitize_soql_basic(soql_plus)
     if fixed != soql:
         _dbg("SOQL (fixed) >>> %s", fixed)
-    _validate_soql(fixed)
+    _validate_soql(fixed, sf)
     raw = sf.query_all(fixed)
     _dbg("SOQL <<< records=%d", len(raw.get("records", [])) if isinstance(raw, dict) else -1)
     return raw
@@ -659,7 +858,7 @@ def tool_salesforce_account_extras(sf, account_id: str):
         "pi_name": (data.get("pi") or {}).get("name"),
         "pi_email": (data.get("pi") or {}).get("email"),
         "pi_phone": (data.get("pi") or {}).get("phone"),
-        "cs_clinical_site": (data.get("csContribution") or {}).get("Clinical_Site_CS__c"),
+        "cs_clinical_site": (data.get("csContribution") or {}).get("INNODIA_Clinical_Trial_Site__c"),
         "cs_referral_outreach": (data.get("csContribution") or {}).get("Referral_Outreach_Site_Non_CTS__c"),
         "cs_eligible_detect": (data.get("csContribution") or {}).get("Elegible_for_DETECT_Site__c"),
         "assignments_count": int(len(data.get("assignments") or [])),
@@ -670,6 +869,516 @@ def tool_salesforce_account_extras(sf, account_id: str):
          flat.get("member_name"), flat.get("pi_name"),
          flat.get("assignments_count", 0), str(flat.get("new_dx_u18")), str(flat.get("new_dx_o18")))
     return {"columns": list(flat.keys()), "rows": [[flat[k] for k in flat.keys()]]}
+
+
+def tool_salesforce_account_contacts(sf, account_id: str, include_subaccounts: bool = False, role_contains: Optional[str] = None, roles: Optional[List[str]] = None, title_contains: Optional[str] = None):
+    """Fetch contacts for an Account (and optionally its child Accounts).
+    Supports role filtering via AccountContactRelation.Role__c (env SF_CONTACT_ROLES or param 'roles')
+    and free-text filtering by Contact.Title.
+    Returns a normalized table with account_id, account_name, contact_id, name, email, phone, title, department, role.
+    """
+    if not account_id:
+        raise HTTPException(400, "Missing account_id")
+    # Collect account ids
+    account_ids = [account_id]
+    try:
+        if include_subaccounts:
+            import os
+            rt_sub_cfg = os.environ.get("SF_ACCOUNT_RT_SUB", "SubAccount").strip()
+            rt_list = [s.strip() for s in rt_sub_cfg.split(",") if s.strip()]
+            if not rt_list:
+                rt_list = ["SubAccount"]
+            if len(rt_list) == 1:
+                rt_clause = f"RecordType.DeveloperName = '{rt_list[0]}'"
+            else:
+                rt_vals = ", ".join([f"'{x}'" for x in rt_list])
+                rt_clause = f"RecordType.DeveloperName IN ({rt_vals})"
+            acct_type_field = os.environ.get("SF_ACCOUNT_TYPE_FIELD", "C_Type__c").strip() or "C_Type__c"
+            clinical_val = os.environ.get("SF_ACCOUNT_TYPE_CLINICAL", "Clinical").strip() or "Clinical"
+            soql_children = (
+                "SELECT Id FROM Account "
+                f"WHERE ParentId = '{account_id}' AND {rt_clause} "
+                f"AND {acct_type_field} = '{clinical_val}'"
+            )
+            res = sf.query_all(soql_children)
+            for rec in res.get("records", []):
+                cid = rec.get("Id")
+                if cid:
+                    account_ids.append(cid)
+    except Exception as e:
+        _dbg("WARN: listing subaccounts failed: %s", e)
+
+    # Build IN clause
+    ids_clause = ",".join([f"'{aid}'" for aid in set(account_ids)])
+
+    # Resolve role list from param or env
+    import os
+    roles_env = [s.strip() for s in (os.environ.get("SF_CONTACT_ROLES", "").split(",")) if s.strip()]
+    role_list = roles if roles and len(roles) else roles_env
+
+    rows: List[Dict[str, Any]] = []
+
+    if role_list:
+        # Use AccountContactRelation when roles are specified
+        role_vals = ", ".join([f"'{r}'" for r in role_list])
+        soql = (
+            "SELECT Id, AccountId, ContactId, Role__c, "
+            "Contact.Name, Contact.Email, Contact.Phone, Contact.Title, Contact.Department, "
+            "Account.Name "
+            "FROM AccountContactRelation "
+            f"WHERE AccountId IN ({ids_clause}) AND Role__c IN ({role_vals}) "
+            + ("" if not title_contains else f" AND Contact.Title LIKE '%{title_contains.replace("'","\\'" )}%'") +
+            " ORDER BY AccountId, Contact.Name"
+        )
+        raw = sf.query_all(soql)
+        for r in raw.get("records", []):
+            acc = r.get("Account") or {}
+            c = r.get("Contact") or {}
+            rows.append({
+                "account_id": r.get("AccountId"),
+                "site": acc.get("Name"),
+                "contact_id": r.get("ContactId"),
+                "contact_name": c.get("Name"),
+                "email": c.get("Email"),
+                "phone": c.get("Phone"),
+                "title": c.get("Title"),
+                "department": c.get("Department"),
+                "role": r.get("Role__c"),
+            })
+    else:
+        # Fallback to Contact list with optional Title/Department contains
+        fields = ["Id", "Name", "Email", "Phone", "Title", "Department", "AccountId", "Account.Name"]
+        where = f"AccountId IN ({ids_clause})"
+        if role_contains:
+            # Heuristic: search in Title or Department
+            rc = role_contains.replace("'", "\'")
+            where += f" AND (Title LIKE '%{rc}%' OR Department LIKE '%{rc}%')"
+        if title_contains:
+            tc = title_contains.replace("'", "\'")
+            where += f" AND Title LIKE '%{tc}%'"
+        soql = f"SELECT {', '.join(fields)} FROM Contact WHERE {where} ORDER BY AccountId, Name"
+        raw = sf.query_all(soql)
+        for r in raw.get("records", []):
+            acc = r.get("Account") or {}
+            rows.append({
+                "account_id": r.get("AccountId"),
+                "site": acc.get("Name"),
+                "contact_id": r.get("Id"),
+                "contact_name": r.get("Name"),
+                "email": r.get("Email"),
+                "phone": r.get("Phone"),
+                "title": r.get("Title"),
+                "department": r.get("Department"),
+            })
+
+    table = {
+        "columns": [
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":"contact_id","label":"Contact Id"},
+            {"key":"contact_name","label":"Contact Name"},
+            {"key":"email","label":"Email"},
+            {"key":"phone","label":"Phone"},
+            {"key":"title","label":"Title"},
+            {"key":"department","label":"Department"},
+            {"key":"role","label":"Role"},
+        ],
+        "rows": rows,
+    }
+    return _normalize_table_for_ui(table)
+
+
+def tool_rank_sites_by_group(
+    db: Session,
+    metric: str,
+    group_by: Literal["country","city"] = "country",
+    top_n: int = 3,
+    order: Literal["asc","desc"] = "desc",
+):
+    """Top-N per group (country/city) for a site_qual metric."""
+    meta = _resolve_metric(metric, db)
+    if meta.get("source") != "site_qual":
+        raise HTTPException(400, "rank_sites_by_group only supports site_qual metrics for now")
+    key = meta.get("key")
+    dir_sql = "ASC" if str(order).lower() == "asc" else "DESC"
+    grp = "s.country" if group_by == "country" else "s.city"
+    sql = f"""
+        WITH scored AS (
+          SELECT
+            {grp} AS grp,
+            s.salesforce_account_id AS account_id,
+            s.name AS site,
+            COALESCE(NULLIF(regexp_replace(sq.data->>:key, '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0) AS metric,
+            ROW_NUMBER() OVER (PARTITION BY {grp} ORDER BY COALESCE(NULLIF(regexp_replace(sq.data->>:key, '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0) {dir_sql} NULLS LAST) AS rn
+          FROM public.sites s
+          LEFT JOIN public.site_qual sq ON sq.site_id = s.id
+        )
+        SELECT grp, account_id, site, metric
+        FROM scored
+        WHERE rn <= :top
+        ORDER BY grp, metric {dir_sql}
+    """
+    out = tool_sql_query(db, sql, {"key": key, "top": int(top_n)})
+    cols = out.get("columns") or []
+    rows = [{cols[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
+    table = {
+        "columns": [
+            {"key":"group","label": group_by.title()},
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":f"qual.{key}","label": _pretty_label(f"qual.{key}")}
+        ],
+        "rows": [
+            {"group": r.get("grp"), "account_id": r.get("account_id"), "site": r.get("site"), f"qual.{key}": r.get("metric")} for r in rows
+        ],
+    }
+    return _normalize_table_for_ui(table)
+
+
+def tool_group_count(
+    db: Session,
+    by: List[Literal["country","city"]],
+    where: Optional[Dict[str, Any]] = None,
+):
+    by = by or ["country"]
+    cols = ["s.country" if b == "country" else "s.city" for b in by]
+    sel = ", ".join(cols)
+    grp = ", ".join(cols)
+    where_sql = "1=1"
+    params: Dict[str, Any] = {}
+    if where and where.get("key"):
+        meta = _resolve_metric(where.get("key"), db)
+        if meta.get("source") != "site_qual":
+            raise HTTPException(400, "group_count only supports site_qual filters for now")
+        k = meta.get("key")
+        if where.get("exists"):
+            where_sql = f"(sq.data ? :wkey)"
+            params["wkey"] = k
+        else:
+            op = str(where.get("op") or ">=").upper()
+            if op not in {">","<",">=","<=","=","!="}:
+                op = ">="
+            where_sql = f"COALESCE(NULLIF(regexp_replace(sq.data->>:wkey, '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0) {op} :wval"
+            params.update({"wkey": k, "wval": where.get("value", 0)})
+    sql = f"""
+        SELECT {sel}, COUNT(*) AS sites
+        FROM public.sites s
+        LEFT JOIN public.site_qual sq ON sq.site_id = s.id
+        WHERE {where_sql}
+        GROUP BY {grp}
+        ORDER BY {grp}
+    """
+    out = tool_sql_query(db, sql, params)
+    c = out.get("columns") or []
+    rows = [{c[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
+    result_rows = []
+    for r in rows:
+        rr = {"sites": r.get("sites")}
+        for i,b in enumerate(by):
+            rr[b] = r.get(cols[i])
+        result_rows.append(rr)
+    return {"columns": [{"key":b, "label": b.title()} for b in by] + [{"key":"sites","label":"Sites"}], "rows": result_rows}
+
+
+def tool_group_count_agg(
+    db: Session,
+    by: List[Literal["country","city"]],
+    metric: Optional[str] = None,
+    agg: Literal["avg","sum","ratio_exists"] = "avg",
+):
+    by = by or ["country"]
+    cols = ["s.country" if b == "country" else "s.city" for b in by]
+    sel = ", ".join(cols)
+    grp = ", ".join(cols)
+    if agg == "ratio_exists":
+        if not metric:
+            raise HTTPException(400, "metric required for ratio_exists")
+        meta = _resolve_metric(metric, db)
+        if meta.get("source") != "site_qual":
+            raise HTTPException(400, "ratio_exists only supports site_qual")
+        k = meta.get("key")
+        sql = f"""
+            SELECT {sel},
+               COUNT(*) FILTER (WHERE sq.data ? :k) * 1.0 / NULLIF(COUNT(*),0) AS ratio
+            FROM public.sites s
+            LEFT JOIN public.site_qual sq ON sq.site_id = s.id
+            GROUP BY {grp}
+            ORDER BY {grp}
+        """
+        out = tool_sql_query(db, sql, {"k": k})
+        c = out.get("columns") or []
+        rows = [{c[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
+        res = []
+        for r in rows:
+            rr = {"ratio": float(r.get("ratio") or 0)}
+            for i,b in enumerate(by): rr[b] = r.get(cols[i])
+            res.append(rr)
+        return {"columns": [{"key":b,"label":b.title()} for b in by] + [{"key":"ratio","label":"Ratio"}], "rows": res}
+    # avg/sum
+    if not metric:
+        raise HTTPException(400, "metric required for avg/sum")
+    meta = _resolve_metric(metric, db)
+    if meta.get("source") != "site_qual":
+        raise HTTPException(400, "only site_qual supported here")
+    k = meta.get("key")
+    func = "AVG" if agg == "avg" else "SUM"
+    sql = f"""
+        SELECT {sel}, {func}(COALESCE(NULLIF(regexp_replace(sq.data->>:k, '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)) AS value
+        FROM public.sites s
+        LEFT JOIN public.site_qual sq ON sq.site_id = s.id
+        GROUP BY {grp}
+        ORDER BY {grp}
+    """
+    out = tool_sql_query(db, sql, {"k": k})
+    c = out.get("columns") or []
+    rows = [{c[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
+    res = []
+    for r in rows:
+        rr = {"value": float(r.get("value") or 0)}
+        for i,b in enumerate(by): rr[b] = r.get(cols[i])
+        res.append(rr)
+    return {"columns": [{"key":b,"label":b.title()} for b in by] + [{"key":"value","label":_pretty_label(f"qual.{k}") + f" ({agg})"}], "rows": res}
+
+
+def tool_time_series_sf(
+    sf,
+    field: str,
+    date_field: str = "CloseDate",
+    period: Literal["month","quarter","year"] = "month",
+    agg: Literal["sum","max","avg"] = "sum",
+    last_n: Optional[int] = None,
+):
+    if not sf:
+        raise HTTPException(400, "No SF session")
+    func = {"sum":"SUM","max":"MAX","avg":"AVG"}[agg]
+    per_fn = {"month":"CALENDAR_MONTH","quarter":"CALENDAR_QUARTER","year":"CALENDAR_YEAR"}[period]
+    where = f"WHERE {field} != null"
+    if last_n and period in ("month","quarter"):
+        # filtrar últimos N unidades aproximando por CreatedDate/CloseDate
+        where += " AND LastModifiedDate = LAST_N_MONTHS:%d" % (last_n if period=="month" else last_n*3)
+    soql = f"""
+        SELECT {per_fn}({date_field}) per, {func}({field}) metric
+        FROM Opportunity
+        {where}
+        GROUP BY {per_fn}({date_field})
+        ORDER BY {per_fn}({date_field})
+    """
+    _validate_soql(f"SELECT {date_field} FROM Opportunity", sf)  # asegura date field permitido
+    raw = tool_salesforce_query(sf, soql)
+    recs = raw.get("records", []) if isinstance(raw, dict) else []
+    rows = []
+    for r in recs:
+        rows.append({"period": r.get("expr0") or r.get("per"), f"sf.{field}": r.get("expr1") or r.get("metric")})
+    return {"columns": [{"key":"period","label":"Period"},{"key":f"sf.{field}","label":_pretty_label(f"sf.{field}")}], "rows": rows}
+
+
+def tool_sql_query_fill_sf(
+    db: Session,
+    sf,
+    sql: str,
+    account_fields: List[str],
+    params: Optional[Dict[str, Any]] = None,
+):
+    """Ejecuta SQL (debe devolver account_id) y rellena columnas Account.* desde SF en lote."""
+    base = tool_sql_query(db, sql, params or {})
+    cols = base.get("columns") or []
+    rows = [{cols[i]: v for i, v in enumerate(r)} for r in base.get("rows") or []]
+    ids = list({str(r.get("account_id")) for r in rows if r.get("account_id")})
+    if sf and ids and account_fields:
+        fields = [f for f in account_fields if f and f != "Id"]
+        soql = f"SELECT Id, {', '.join(fields)} FROM Account WHERE Id IN ({', '.join([f'\'{i}\'' for i in ids])})"
+        accs = tool_salesforce_query(sf, soql).get("records", [])
+        m = {a.get("Id"): a for a in accs}
+        for r in rows:
+            aid = str(r.get("account_id") or "")
+            a = m.get(aid) or {}
+            for f in fields:
+                r[f"sf.Account.{f}"] = a.get(f)
+    return {"columns": [{"key":k, "label": _pretty_label(k)} for k in (list(rows[0].keys()) if rows else cols)], "rows": rows}
+
+
+def tool_contacts_by_group(
+    sf,
+    roles: Optional[List[str]] = None,
+    title_contains: Optional[str] = None,
+    group_by: Literal["country","city"] = "country",
+    top_n: int = 1,
+):
+    if not sf:
+        raise HTTPException(400, "No SF session")
+    group_field = "Account.ShippingCountry" if group_by=="country" else "Account.ShippingCity"
+    role_filter = ""
+    if roles:
+        role_vals = ", ".join([f"'{r}'" for r in roles])
+        role_filter = f" AND Role__c IN ({role_vals})"
+    title_filter = ""
+    if title_contains:
+        title_filter = f" AND Contact.Title LIKE '%{title_contains.replace("'","\\'") }%'"
+    soql = f"""
+        SELECT {group_field} grp, Contact.Name, Contact.Email, Contact.Phone, Role__c, Contact.Title, LastModifiedDate
+        FROM AccountContactRelation
+        WHERE {group_field} != null {role_filter} {title_filter}
+        ORDER BY {group_field}, LastModifiedDate DESC
+    """
+    raw = tool_salesforce_query(sf, soql)
+    recs = raw.get("records", []) if isinstance(raw, dict) else []
+    out = {}
+    for r in recs:
+        g = r.get("Account", {}).get("ShippingCountry" if group_by=="country" else "ShippingCity")
+        out.setdefault(g, [])
+        if len(out[g]) < top_n:
+            out[g].append({
+                "group": g,
+                "contact_name": (r.get("Contact") or {}).get("Name"),
+                "email": (r.get("Contact") or {}).get("Email"),
+                "phone": (r.get("Contact") or {}).get("Phone"),
+                "role": r.get("Role__c"),
+                "title": (r.get("Contact") or {}).get("Title"),
+            })
+    rows = [item for sub in out.values() for item in sub]
+    return {"columns": [
+        {"key":"group","label": group_by.title()},
+        {"key":"contact_name","label":"Contact"},{"key":"email","label":"Email"},{"key":"phone","label":"Phone"},{"key":"role","label":"Role"},{"key":"title","label":"Title"}
+    ], "rows": rows}
+
+
+def tool_qual_search(
+    db: Session,
+    text: str,
+    limit: int = 50,
+):
+    """Semantic search over qualification comments using GIN tsv index."""
+    if not text or not text.strip():
+        return {"columns": [], "rows": []}
+    sql = """
+      WITH q AS (SELECT plainto_tsquery('simple', :q) AS query)
+      SELECT s.salesforce_account_id AS account_id,
+             s.name AS site,
+             s.country,
+             s.city,
+             ts_rank(sq.comments_tsv, q.query) AS rank,
+             ts_headline('simple', public.qual_concat_comments(sq.data), q.query) AS snippet
+      FROM public.site_qual sq
+      JOIN public.sites s ON s.id = sq.site_id, q
+      WHERE sq.comments_tsv @@ q.query
+      ORDER BY rank DESC
+      LIMIT :lim
+    """
+    out = tool_sql_query(db, sql, {"q": text, "lim": int(limit)})
+    c = out.get("columns") or []
+    rows = [{c[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
+    return {
+        "columns": [
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":"country","label":"Country"},
+            {"key":"city","label":"City"},
+            {"key":"rank","label":"Rank"},
+            {"key":"snippet","label":"Snippet"}
+        ],
+        "rows": rows,
+    }
+
+
+def tool_salesforce_assignments(sf, account_ids: List[str], active_only: bool = False, last_n_months: Optional[int] = None):
+    """Return assignments per Account using the existing extras core.
+    Filters: active_only by simple heuristic on stage; last_n_months by created date when available.
+    Also falls back to Opportunities with RecordType.DeveloperName='Activity' when the Assignment__c object is not populated.
+    """
+    if not account_ids:
+        raise HTTPException(400, "Missing account_ids")
+    out_rows: List[Dict[str, Any]] = []
+    from datetime import datetime, timedelta
+    cutoff = None
+    if last_n_months and last_n_months > 0:
+        cutoff = datetime.utcnow() - timedelta(days=int(last_n_months)*30)
+    for aid in account_ids:
+        acc_name: Optional[str] = None
+        try:
+            data = _account_extras_core(sf, aid)
+            acc_name = (data.get("member") or {}).get("name") or data.get("account_name")
+            assignments = data.get("assignments") or []
+            for a in assignments:
+                name = a.get("name") or a.get("opportunity_name") or a.get("id")
+                stage = a.get("stage") or a.get("type") or ""
+                created = a.get("created")
+                if cutoff and created:
+                    try:
+                        dt = datetime.fromisoformat(str(created).replace("Z","+00:00"))
+                        if dt < cutoff:
+                            continue
+                    except Exception:
+                        pass
+                if active_only and isinstance(stage, str) and stage:
+                    if any(s in stage.lower() for s in ("closed", "won", "lost", "inactive")):
+                        continue
+                out_rows.append({
+                    "account_id": aid,
+                    "site": acc_name,
+                    "assignment_name": name,
+                    "stage": a.get("stage"),
+                    "type": a.get("type"),
+                    "opportunity_name": a.get("opportunity_name"),
+                    "created": created,
+                })
+        except Exception as e:
+            _dbg("WARN: extras for %s failed: %s", aid, e)
+        # Fallback: Opportunities with RecordType 'Activity'
+        try:
+            fields = ["Id","Name","StageName","Type","CreatedDate","RecordType.DeveloperName"]
+            import os
+            rt_cfg = os.environ.get("SF_RT_ACTIVITY", "Activity").strip()
+            rt_list = [s.strip() for s in rt_cfg.split(",") if s.strip()]
+            if not rt_list:
+                rt_list = ["Activity"]
+            if len(rt_list) == 1:
+                rt_clause = f"RecordType.DeveloperName = '{rt_list[0]}'"
+            else:
+                rt_vals = ", ".join([f"'{x}'" for x in rt_list])
+                rt_clause = f"RecordType.DeveloperName IN ({rt_vals})"
+            soql = (
+                f"SELECT {', '.join(fields)} FROM Opportunity "
+                f"WHERE AccountId = '{aid}' AND {rt_clause} "
+                f"ORDER BY CreatedDate DESC LIMIT 200"
+            )
+            recs = sf.query_all(soql).get("records", [])
+            for r in recs:
+                created = r.get("CreatedDate")
+                if cutoff and created:
+                    try:
+                        dt = datetime.fromisoformat(str(created).replace("Z","+00:00"))
+                        if dt < cutoff:
+                            continue
+                    except Exception:
+                        pass
+                stage = r.get("StageName")
+                if active_only and isinstance(stage, str) and stage:
+                    if any(s in stage.lower() for s in ("closed", "won", "lost", "inactive")):
+                        continue
+                out_rows.append({
+                    "account_id": aid,
+                    "site": acc_name,
+                    "assignment_name": r.get("Name"),
+                    "stage": stage,
+                    "type": r.get("Type"),
+                    "opportunity_name": r.get("Name"),
+                    "created": created,
+                })
+        except Exception as e:
+            _dbg("WARN: activity opp fallback failed for %s: %s", aid, e)
+    table = {
+        "columns": [
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":"assignment_name","label":"Assignment"},
+            {"key":"stage","label":"Stage"},
+            {"key":"type","label":"Type"},
+            {"key":"opportunity_name","label":"Opportunity"},
+            {"key":"created","label":"Created"},
+        ],
+        "rows": out_rows,
+    }
+    return _normalize_table_for_ui(table)
 
 def tool_explorer_set_filters(request: Request, payload: Dict[str, Any]):
     return {"type": "explorer_action", "action": "set_filters", "payload": payload}
@@ -758,6 +1467,40 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
+            "name": "salesforce_account_contacts",
+            "description": "List contacts for an Account (optionally including child Accounts). Useful for PI/SC/Study Nurse lookups.",
+            "parameters": {
+                "type":"object",
+                "properties":{
+                    "account_id":{"type":"string"},
+                    "include_subaccounts":{"type":"boolean","default":false},
+                    "role_contains":{"type":"string","description":"Filter by Title/Department contains (fallback when roles not provided)"},
+                    "roles":{"type":"array","items":{"type":"string"},"description":"Filter by AccountContactRelation.Role__c; defaults to env SF_CONTACT_ROLES if set"},
+                    "title_contains":{"type":"string","description":"Filter by Contact.Title (e.g., 'Study Coordinator', 'Nurse')"}
+                },
+                "required":["account_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "salesforce_assignments",
+            "description": "List assignments per Account using Explorer extras (stage, type, opportunity, created).",
+            "parameters": {
+                "type":"object",
+                "properties":{
+                    "account_ids":{"type":"array","items":{"type":"string"}},
+                    "active_only":{"type":"boolean","default":false},
+                    "last_n_months":{"type":"integer","description":"Limit to recent assignments"}
+                },
+                "required":["account_ids"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explorer_set_filters",
             "description": "Tell the UI to update Explorer filters/columns per the given payload.",
             "parameters": {
@@ -803,13 +1546,143 @@ TOOLS_SPEC = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "rank_sites",
+            "description": "Top-N ranking of sites by a metric (works with SF fields or site_qual keys/aliases).",
+            "parameters": {
+                "type":"object",
+                "properties":{
+                    "metric":{"type":"string","description":"Alias or raw key (e.g., 'new T1D <18', 'C_Number_of_T1D_Patients_currently_U_18__c')"},
+                    "top_n":{"type":"integer","default":5},
+                    "order":{"type":"string","enum":["asc","desc"],"default":"desc"}
+                },
+                "required":["metric"]
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"rank_sites_by_group",
+            "description":"Top-N ranking per group (country/city) for a site_qual metric.",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "metric":{"type":"string"},
+                    "group_by":{"type":"string","enum":["country","city"],"default":"country"},
+                    "top_n":{"type":"integer","default":3},
+                    "order":{"type":"string","enum":["asc","desc"],"default":"desc"}
+                },
+                "required":["metric"]
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"group_count",
+            "description":"Count sites grouped by country/city with optional site_qual filter.",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "by":{"type":"array","items":{"type":"string","enum":["country","city"]}},
+                    "where":{"type":"object"}
+                },
+                "required":["by"]
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"group_count_agg",
+            "description":"Aggregations per country/city (avg/sum on site_qual metrics or ratio_exists).",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "by":{"type":"array","items":{"type":"string","enum":["country","city"]}},
+                    "metric":{"type":"string"},
+                    "agg":{"type":"string","enum":["avg","sum","ratio_exists"],"default":"avg"}
+                },
+                "required":["by","agg"]
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"time_series_sf",
+            "description":"Time series over Opportunity (SF) for a numeric field (sum/max/avg) grouped by month/quarter/year.",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "field":{"type":"string"},
+                    "date_field":{"type":"string","default":"CloseDate"},
+                    "period":{"type":"string","enum":["month","quarter","year"],"default":"month"},
+                    "agg":{"type":"string","enum":["sum","max","avg"],"default":"sum"},
+                    "last_n":{"type":"integer"}
+                },
+                "required":["field"]
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"sql_query_fill_sf",
+            "description":"Run SQL (must return account_id) and fill Account.* fields in batch from Salesforce.",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "sql":{"type":"string"},
+                    "account_fields":{"type":"array","items":{"type":"string"}},
+                    "params":{"type":"object"}
+                },
+                "required":["sql","account_fields"]
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"contacts_by_group",
+            "description":"Top-N contacts per country/city filtered by roles/title (AccountContactRelation).",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "roles":{"type":"array","items":{"type":"string"}},
+                    "title_contains":{"type":"string"},
+                    "group_by":{"type":"string","enum":["country","city"],"default":"country"},
+                    "top_n":{"type":"integer","default":1}
+                }
+            }
+        }
+    },
+    {
+        "type":"function",
+        "function":{
+            "name":"qual_search",
+            "description":"Semantic search over qualification comments (GIN tsv).",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "text":{"type":"string"},
+                    "limit":{"type":"integer","default":50}
+                },
+                "required":["text"]
+            }
+        }
+    },
 ]
 
 # ====== System prompt ======
 SCHEMA_HINT = """
 POSTGRES (warehouse):
 - public.sites(id, name, street, city, country, postcode, latitude, longitude, salesforce_account_id)
-- public.site_qual(site_id -> sites.id, data JSONB)  // Qualification/Profiling flattened key→value.
+- public.site_qual(site_id -> sites.id, data JSONB)  // Qualification flattened key→value.
+- public.profiling_kv(site_id -> sites.id, key TEXT, value TEXT)  // Profiling key-value store.
   Frequent keys:
     'C_Aware_of_any_Screening_Program__c', 'C_Center_for_Running_Early_Diagnosis__c',
     'C_Number_of_Stage1_Individuals_followed__c', 'C_Number_of_Stage2_Individuals_followed__c',
@@ -819,6 +1692,9 @@ POSTGRES (warehouse):
   JSONB tips:
     - Safe casts, e.g. COALESCE(NULLIF(sq.data->>'C_Number_of_T1D_Patients_currently_U_18__c','')::int, 0) AS t1d_u18
     - For YES/NO strings, normalize to LOWER and compare to 'yes'.
+  PROFILING_KV tips:
+    - Use LEFT JOIN profiling_kv ON profiling_kv.site_id = sites.id AND profiling_kv.key = :key
+    - Numeric cast: COALESCE(NULLIF(regexp_replace(profiling_kv.value,'[^0-9\\.\\-]','', 'g'),'')::numeric,0)
 
 SALESFORCE (runtime):
 - salesforce_query only for Opportunity (+Account.*) whitelisted fields.
@@ -840,8 +1716,12 @@ TOOLS — WHEN TO USE WHAT
 - sql_query → Postgres facts (sites, site_qual JSONB, questionnaires…). Use for country/city and any metric mirrored in the warehouse.
 - salesforce_query → Salesforce Opportunity (+ Account.*), only whitelisted fields.
 - salesforce_account_extras → Per-Account extras not in generic SOQL: PI (name/email/phone), CS flags, assignments count, latest new diagnoses.
+- salesforce_account_contacts → Contacts for an Account (optionally including child Accounts). Use when the user asks for contact details (PI, Study Coordinator, Study Nurse, etc.). You can filter by roles (AccountContactRelation.Role__c via SF_CONTACT_ROLES or 'roles' param) and/or by Contact.Title text.
+- salesforce_assignments → Assignments/ongoing trials per Account (stage/type/opportunity). Use for “what trials are they in?”.
 - explorer_set_filters → Reflect a result set in Explorer (filters + columns).
 - render_chart → Create a chart when asked or when visual comparison helps.
+- rank_sites_by_group → Ranking per country/city for a site_qual metric.
+- group_count → Counts per country/city with optional site_qual filter.
 - explorer_within_drive_km → **Use for distance/radius/nearby/within X km/drive time** requests. If the user says
   “from those sites …” and doesn't specify a base, pick the first site from the last results as the base
   (mention it in the bullets). Provide columns such as Account.Id/Name/Country/City plus requested metrics.
@@ -889,19 +1769,35 @@ DEFAULT COLUMNS (unless the user asks otherwise)
 
 SCENARIOS (patterns, adapt as needed)
 A) Top-N / Ranking
-   - Prefer Postgres (sites + site_qual) unless SF session is active **and** the metric is an allowed SF field.
-   - Order with DESC NULLS LAST (or equivalent) and LIMIT N.
-   - Table + optional bar chart (x=Site, y=the metric).
+   - Prefer the dedicated tool **rank_sites(metric, top_n, order)**. It accepts aliases or raw keys and works across SF and site_qual automatically.
+   - If a tool cannot be used, fall back to Postgres/SOQL following guards; still keep the same output shape.
 B) Screening overview
    - Show flags + Stage1/Stage2; filter where any screening flag true.
 C) Feature selection (e.g., onsite pharmacy & overnight stay)
    - Use booleans; otherwise derive from comments with case-insensitive search.
 D) PI / Assignments / CS flags
    - If AccountId known → salesforce_account_extras; return PIName/Email/Phone, flags, assignments_count, new_dx_u18/o18.
+   - For full contact lists → salesforce_account_contacts (offer to include child Accounts when the user mentions “sub-accounts” or “clinical sites”).
+   - For trial participation → salesforce_assignments (accept list of AccountIds).
+E) Report mode
+   - If the user asks for a “report” without specifics, ask 3 quick choices: dimensions (e.g., Country/City or Account), metrics (e.g., current patients <18/≥18, newly diagnosed, Stage1/2), and time window when applicable.
+   - Then build a compact table (grouped) using sql_query (warehouse) or salesforce_query (SOQL) and optionally a chart.
 
 STYLE
 - Be direct and neutral. Fall back gracefully between SF and Postgres and mention it briefly in bullets.
 - Do **not** show internal SQL/SOQL unless explicitly requested.
+
+CLARIFICATIONS
+- If the user mentions “patients” without specifying whether they mean “currently” vs “newly diagnosed” and the age group (<18, ≥18), ask a single clarification question first and wait. Offer options: Currently <18, Currently ≥18, Newly diagnosed <18, Newly diagnosed ≥18, and both variants.
+- Keep the clarification short (one sentence). Do not call any tools before the user chooses.
+
+SCENARIOS (extended)
+E) Screening program overview (all sites with screening program)
+   - Select flags from site_qual (e.g., Aware_of_any_Screening_Program, Center_for_Running_Early_Diagnosis).
+   - Include Stage1 and Stage2 counts, and, when relevant, newly diagnosed (<18, ≥18) and current patients (<18, ≥18).
+   - Columns: Account.Id/Name/Country/City + Stage1 + Stage2 + NewlyDx<18 + NewlyDx≥18 + Current<18 + Current≥18.
+F) Qualification features filter (onsite pharmacy, overnight stay)
+   - Filter using site_qual boolean/text keys; return a compact table with IDs + Name/Country/City + NewlyDx (both ages) + Current (both ages) + PI Name + assignments_count when available.
 
 Return only the data structures and short text described above; the UI handles rendering.
 """
@@ -929,6 +1825,86 @@ def _openai_chat(
 # ====== Endpoint ======
 @router.post("/chat")
 def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_db)):
+    # Clarificador: incluir subcuentas clínicas para roles/contactos
+    def _needs_contact_clarification(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        s = text.lower()
+        role_terms = [
+            "study coordinator","study nurse","principal investigator","pi","clinician","project manager","technician",
+            "member representative","contact person","associate scientist","post-doc","phd student","head","fellow"
+        ]
+        if not any(t in s for t in role_terms):
+            return None
+        if "subaccount" in s or "sub-account" in s or "child account" in s or "include sub" in s:
+            return None
+        return {
+            "answer": "<p>Need one more detail.</p>",
+            "clarify": {
+                "question": "Include clinical sub‑accounts when searching contacts?",
+                "options": [
+                    {"label":"Yes, include clinical sub‑accounts","query":"contacts: include_subaccounts=true"},
+                    {"label":"No, only the main account","query":"contacts: include_subaccounts=false"}
+                ]
+            }
+        }
+
+    # Clarificador: wizard de report
+    def _needs_report_wizard(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        s = text.lower()
+        if not re.search(r"\breport|summary|resumen|informe\b", s):
+            return None
+        return {
+            "answer": "<p>Select the report layout.</p>",
+            "clarify": {
+                "question": "Choose dimensions and metrics for the report.",
+                "options": [
+                    {"label":"By Country: Stage1 + Stage2","query":"Report: dim=country; metrics=stage1,stage2"},
+                    {"label":"By City: Newly Dx <18 + ≥18","query":"Report: dim=city; metrics=new_dx_u18,new_dx_o18"},
+                    {"label":"By Account: Current <18 + ≥18","query":"Report: dim=account; metrics=current_u18,current_o18"}
+                ]
+            }
+        }
+
+    # Clarificador determinista para consultas ambiguas de "pacientes"
+    def _needs_patient_clarification(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        s = (text or "").lower()
+        # Presencia del concepto pacientes
+        has_pat = re.search(r"\b(pacientes|patients)\b", s) is not None
+        if not has_pat:
+            return None
+        # Señales de desambiguación ya especificadas
+        specified_type = re.search(r"\b(new|newly|diagnos|dx|actual(es)?|current(ly)?)\b", s) is not None
+        specified_stage = re.search(r"\bstage\s*[12]\b", s) is not None
+        specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18)\b", s) is not None
+        if specified_type and (specified_age or specified_stage):
+            return None
+        # Construye objeto clarify
+        question = "¿A qué tipo de pacientes te refieres? Selecciona una opción para continuar."
+        options = [
+            {"label": "Currently <18", "query": "currently T1D patients under 18"},
+            {"label": "Currently ≥18", "query": "currently T1D patients over 18"},
+            {"label": "Newly diagnosed <18", "query": "newly diagnosed T1D patients under 18"},
+            {"label": "Newly diagnosed ≥18", "query": "newly diagnosed T1D patients over 18"},
+            {"label": "Currently (ambos <18 y ≥18)", "query": "currently T1D patients under 18 and 18 or older"},
+            {"label": "Newly diagnosed (ambos <18 y ≥18)", "query": "newly diagnosed T1D patients under 18 and 18 or older"},
+        ]
+        return {"answer": "<p>Necesito una pequeña aclaración.</p>", "clarify": {"question": question, "options": options}}
+
+    # Aplica clarificadores
+    try:
+        last_text = payload.messages[-1].content if payload.messages else ""
+        for _fn in (_needs_contact_clarification, _needs_report_wizard, _needs_patient_clarification):
+            clar = _fn(last_text)
+            if clar:
+                return clar
+    except Exception:
+        pass
+
     # Salesforce client (si hay sesión)
     try:
         sf = get_sf_client(request)
@@ -946,6 +1922,56 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         else:
             preview_items.append(f"{alias} => site_qual.{meta.get('key')}")
     INDEX_SNIPPET = " | ".join(preview_items)
+
+    # ===== Mini‑planificador determinista =====
+    def _try_planner(user_text: str) -> Optional[Dict[str, Any]]:
+        if not user_text:
+            return None
+        s = user_text.lower()
+        # Detectar group_by
+        group_by = None
+        if re.search(r"\b(por|per|by|cada)\s+(pa[ií]s|country)\b", s):
+            group_by = "country"
+        if re.search(r"\b(por|per|by|cada)\s+(ciudad|city)\b", s):
+            group_by = group_by or "city"
+        # Detectar conteo por grupo
+        wants_count = bool(re.search(r"\bcount|cu[aá]ntos|how\s+many\b", s))
+        # Detectar top/order
+        m_top = re.search(r"top\s*(\d{1,2})", s)
+        top_n = int(m_top.group(1)) if m_top else (3 if group_by else 5)
+        order = "desc" if re.search(r"(top|mayor|highest|largest|max)\b", s) else "asc" if re.search(r"(lowest|menor|min)\b", s) else "desc"
+        # Intentar encontrar una métrica/alias en el índice
+        best = _top_matches(s, list(kindex.keys()), k=1)
+        metric_alias = best[0] if best else None
+        # Plan A: rank per group (si hay group_by y métrica)
+        if group_by and metric_alias:
+            try:
+                table = tool_rank_sites_by_group(db, metric_alias, group_by, top_n, order)
+                ans = f"Ranked top {top_n} sites per {group_by} by '{metric_alias}'."
+                return {"answer": f"<p>{ans}</p>", "table": table}
+            except Exception:
+                pass
+        # Plan B: group count con filtro simple "with X"
+        if group_by and wants_count:
+            # buscar una posible condición exists: "with HLA typing", "with pharmacy"
+            cond = None
+            best2 = _top_matches(s, list(kindex.keys()), k=1)
+            if best2:
+                meta = kindex.get(best2[0], {})
+                if meta.get("source") == "site_qual":
+                    cond = {"key": meta.get("key"), "exists": True}
+            where = cond or {}
+            try:
+                table = tool_group_count(db, [group_by], where)
+                ans = f"Sites per {group_by}" + (f" with {best2[0]}" if cond else "")
+                return {"answer": f"<p>{ans}</p>", "table": table}
+            except Exception:
+                pass
+        return None
+
+    planned = _try_planner((payload.messages[-1].content if payload.messages else "") or "")
+    if planned:
+        return planned
 
     msgs: List[Dict[str, Any]] = [{"role":"system","content":SYSTEM_PROMPT}]
     msgs.append({
@@ -973,8 +1999,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if user_utterance:
             aliases = list(kindex.keys())
             best = _top_matches(user_utterance, aliases, k=5)
+            hints = []
             if best:
-                hints = []
                 for a in best:
                     meta = kindex.get(a, {})
                     if meta.get("source") == "sf":
@@ -986,6 +2012,32 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     else:
                         hints.append(f"{a} -> use sql_query over site_qual JSONB (key: {meta.get('key')}). "
                                      "Also SELECT sites.salesforce_account_id AS account_id.")
+            # Heurística de CONTACT ROLES / TITLES
+            role_map = {
+                r"study\\s*coordinator": ("Study Coordinator",),
+                r"study\\s*nurse|nurse": ("Study Nurse", "Nurse"),
+                r"principal\\s*investigator|\\bpi\\b": ("PI",),
+                r"clinician": ("Clinician",),
+                r"project\\s*manager": ("Project Manager",),
+                r"technician": ("Technician",),
+                r"member\\s*representative": ("Member Representative",),
+                r"contact\\s*person(\\s*cctu)?": ("Contact person CCTU","Contact Person"),
+                r"associate\\s*scientist": ("Associate Scientist",),
+                r"post-?doc": ("Post-doc",),
+                r"phd\\s*student": ("PhD student",),
+                r"head": ("Head",),
+                r"fellow": ("Fellow",),
+            }
+            matched_roles = []
+            for pat, roles in role_map.items():
+                if re.search(pat, user_utterance):
+                    matched_roles.extend(list(roles))
+            if matched_roles:
+                hints.append(
+                    "Contacts → use salesforce_account_contacts; roles=" + ", ".join(sorted(set(matched_roles))) +
+                    ". Consider include_subaccounts when they mention clinical sub-accounts."
+                )
+            if hints:
                 msgs.append({
                     "role":"system",
                     "content": (
@@ -993,6 +2045,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         "\nIf both SF and site_qual exist for the same concept, prefer SF."
                    )
                 })
+        
+        # Si hay intención de datos → obligamos tool-calls
+        tool_mode = "required" if data_intent else "auto"
         
         # Si hay intención de datos → obligamos tool-calls
         tool_mode = "required" if data_intent else "auto"
@@ -1125,6 +2180,128 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     out = tool_explorer_set_filters(request, args)
                     msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out)})
 
+                elif name == "salesforce_account_contacts":
+                    if not sf:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
+                    else:
+                        out = tool_salesforce_account_contacts(
+                            sf,
+                            args.get("account_id",""),
+                            bool(args.get("include_subaccounts") or False),
+                            args.get("role_contains"),
+                            args.get("roles"),
+                            args.get("title_contains")
+                        )
+                        last_table = out
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+
+                elif name == "salesforce_assignments":
+                    if not sf:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
+                    else:
+                        out = tool_salesforce_assignments(
+                            sf,
+                            args.get("account_ids") or [],
+                            bool(args.get("active_only") or False),
+                            args.get("last_n_months"),
+                        )
+                        last_table = out
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+
+                elif name == "rank_sites_by_group":
+                    try:
+                        out_table = tool_rank_sites_by_group(
+                            db,
+                            args.get("metric",""),
+                            (args.get("group_by") or "country"),
+                            int(args.get("top_n") or 3),
+                            args.get("order") or "desc",
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+                elif name == "group_count":
+                    try:
+                        out_table = tool_group_count(
+                            db,
+                            args.get("by") or ["country"],
+                            args.get("where") or {},
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+                elif name == "group_count_agg":
+                    try:
+                        out_table = tool_group_count_agg(
+                            db,
+                            args.get("by") or ["country"],
+                            args.get("metric"),
+                            args.get("agg") or "avg",
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+                elif name == "time_series_sf":
+                    try:
+                        out_table = tool_time_series_sf(
+                            sf,
+                            args.get("field",""),
+                            args.get("date_field") or "CloseDate",
+                            args.get("period") or "month",
+                            args.get("agg") or "sum",
+                            args.get("last_n"),
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+                elif name == "sql_query_fill_sf":
+                    try:
+                        out_table = tool_sql_query_fill_sf(
+                            db,
+                            sf,
+                            args.get("sql",""),
+                            args.get("account_fields") or [],
+                            args.get("params") or {},
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+                elif name == "contacts_by_group":
+                    try:
+                        out_table = tool_contacts_by_group(
+                            sf,
+                            args.get("roles") or [],
+                            args.get("title_contains"),
+                            args.get("group_by") or "country",
+                            int(args.get("top_n") or 1),
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+                elif name == "qual_search":
+                    try:
+                        out_table = tool_qual_search(
+                            db,
+                            args.get("text",""),
+                            int(args.get("limit") or 50),
+                        )
+                        last_table = out_table
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
                 elif name == "render_chart":
                     out = tool_render_chart(
                         args.get("kind"),
@@ -1159,6 +2336,21 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
                         except Exception as ee:
                             msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})                 
+                elif name == "rank_sites":
+                    try:
+                        out_table = tool_rank_sites(
+                            db,
+                            sf,
+                            args.get("metric",""),
+                            int(args.get("top_n") or 5),
+                            args.get("order") or "desc",
+                        )
+                        last_table = out_table
+                        # no devolvemos toda la tabla por el canal "tool" (ya va en last_table),
+                        # basta con confirmar ok para cerrar la ronda correctamente
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+                    except Exception as ee:
+                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
                 else:
                     msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": f"Unknown tool {name}"})})
 
@@ -1180,14 +2372,14 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 structured2 = _extract_structured(raw2)
                 # Etiquetado humano final (por si el modelo inventa columnas nuevas)
                 if structured2.get("table", {}).get("columns"):
-                    sf_fields_map = _INDEX_CACHE.get("sf_fields") or {}
                     human_cols = []
                     seen = set()
                     for c in structured2["table"]["columns"]:
                         key = c.get("key") if isinstance(c, dict) else str(c)
-                        if key in seen: continue
+                        if key in seen:
+                            continue
                         seen.add(key)
-                        human_cols.append({"key": key, "label": _pretty_label(key, sf_fields_map)})
+                        human_cols.append({"key": key, "label": _pretty_label(key)})
                     structured2["table"]["columns"] = human_cols
                 # Completar con lo que ya tenemos
                 if last_table and "table" not in structured2:
@@ -1284,3 +2476,143 @@ def _sanitize_soql_basic(soql: str) -> str:
     s = re.sub(r"\bNULL\b", "null", s)
     return s
 
+# ====== Generic metric resolver & Top-N ranking tool ======
+def _resolve_metric(alias_or_key: str, db: Session) -> Dict[str, Any]:
+    """
+    Resolve a free-text alias or raw key into:
+      - {"source":"sf","field":"<SF API name>","label":"<nice label>"}
+      - {"source":"site_qual","key":"<JSONB key>","label":"<nice label>"}
+    """
+    cache = _build_knowledge_index(db)
+    kidx = cache.get("index", {})
+    sf_fields = cache.get("sf_fields", {})
+
+    qn = _normalize(alias_or_key)
+    if qn in kidx:
+        meta = dict(kidx[qn])
+    else:
+        best = _top_matches(alias_or_key, list(kidx.keys()), k=1)
+        meta = dict(kidx.get(best[0], {})) if best else {}
+
+    # Fallbacks
+    if not meta and re.match(r"^[A-Za-z0-9_]+__c$", alias_or_key or ""):
+        meta = {"source":"sf","field": alias_or_key, "label": alias_or_key}
+    if not meta:
+        meta = {"source":"site_qual","key": alias_or_key, "label": alias_or_key}
+
+    if meta.get("source") == "sf":
+        f = meta.get("field","")
+        lab = (sf_fields.get(_normalize(f)) or {}).get("label")
+        if lab: meta["label"] = lab
+    return meta
+
+def tool_rank_sites(
+    db: Session,
+    sf,
+    metric: str,
+    top_n: int = 5,
+    order: Literal["asc","desc"] = "desc",
+):
+    """
+    Generic Top-N ranking across SF and site_qual.
+    Returns a normalized table with account_id, site, country, city and the metric column.
+    """
+    meta = _resolve_metric(metric, db)
+    dir_sql = "ASC" if str(order).lower() == "asc" else "DESC"
+
+    # -- site_qual path (warehouse) --
+    if meta.get("source") == "site_qual":
+        key = meta.get("key")
+        sql = f"""
+            SELECT
+                s.salesforce_account_id AS account_id,
+                s.name AS site,
+                s.country,
+                s.city,
+                COALESCE(
+                    NULLIF(regexp_replace(sq.data->>:key, '[^0-9\\.\\-]', '', 'g'), '')::numeric,
+                    0
+                ) AS "{key}"
+            FROM public.sites s
+            LEFT JOIN public.site_qual sq ON sq.site_id = s.id
+            ORDER BY "{key}" {dir_sql} NULLS LAST
+            LIMIT :top_n
+        """
+        out = tool_sql_query(db, sql, {"key": key, "top_n": int(top_n)})
+    elif meta.get("source") == "profiling_kv":
+        key = meta.get("key")
+        sql = f"""
+            SELECT
+                s.salesforce_account_id AS account_id,
+                s.name AS site,
+                s.country,
+                s.city,
+                COALESCE(
+                    NULLIF(regexp_replace(p.value, '[^0-9\\.\\-]', '', 'g'), '')::numeric,
+                    0
+                ) AS "{key}"
+            FROM public.sites s
+            LEFT JOIN public.profiling_kv p
+              ON p.site_id = s.id AND p.key = :key
+            ORDER BY "{key}" {dir_sql} NULLS LAST
+            LIMIT :top_n
+        """
+        out = tool_sql_query(db, sql, {"key": key, "top_n": int(top_n)})
+        cols = out.get("columns") or []
+        rows = [{cols[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
+        metric_key = f"qual.{key}"
+        for r in rows:
+            if key in r:
+                r[metric_key] = r.pop(key)
+        table = {
+            "columns": [
+                {"key":"account_id","label":"Account Id"},
+                {"key":"site","label":"Account Name"},
+                {"key":"country","label":"Country"},
+                {"key":"city","label":"City"},
+                {"key":metric_key,"label":_pretty_label(metric_key)},
+            ],
+            "rows": rows,
+        }
+        return _normalize_table_for_ui(table)
+
+    # -- SF path --
+    field = meta.get("field")
+    if not sf:
+        raise HTTPException(400, "No active Salesforce session for SF ranking")
+    soql = f"""
+        SELECT
+            Account.Id,
+            Account.Name,
+            Account.ShippingCountry,
+            Account.ShippingCity,
+            MAX({field}) metric
+        FROM Opportunity
+        WHERE {field} != null
+        GROUP BY Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity
+        ORDER BY metric {dir_sql} NULLS LAST
+        LIMIT {int(top_n)}
+    """
+    raw = tool_salesforce_query(sf, soql)
+    records = raw.get("records", []) if isinstance(raw, dict) else []
+    rows = []
+    for r in records:
+        acc = r.get("Account") or {}
+        rows.append({
+            "account_id": acc.get("Id"),
+            "site": acc.get("Name"),
+            "country": acc.get("ShippingCountry"),
+            "city": acc.get("ShippingCity"),
+            f"sf.{field}": r.get("expr0") or r.get("metric"),
+        })
+    table = {
+        "columns": [
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":"country","label":"Country"},
+            {"key":"city","label":"City"},
+            {"key":f"sf.{field}","label":_pretty_label(f"sf.{field}")},
+        ],
+        "rows": rows,
+    }
+    return _normalize_table_for_ui(table)
