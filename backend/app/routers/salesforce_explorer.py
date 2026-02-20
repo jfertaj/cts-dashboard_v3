@@ -1029,10 +1029,23 @@ def _build_sf_where(q: FilterQuery) -> str:
     clauses: List[str] = []
     for r in q.rules:
         f = _safe_field(r.field)
+        # Normalize special parent-field to direct lookup where appropriate
+        if f == "Account.Id":
+            f = "AccountId"
         op_raw = r.operator
         op = _OP_SYNONYM.get(op_raw, op_raw).lower()
         f_no_prefix = f
         ftype = _field_type(f_no_prefix)
+
+        # Guardrail: AccountId must NOT use LIKE ops (contains/starts/ends) and must not be empty
+        if f == "AccountId":
+            val_str = str(r.value or "").strip()
+            if not val_str:
+                # skip empty AccountId filters to avoid LIKE '%%' or invalid operators
+                continue
+            if op in ("contains","not_contains","starts_with","ends_with"):
+                # skip unsupported id operators
+                continue
 
         # Null checks
         if op in ("is_null","isnull"):
@@ -1089,6 +1102,27 @@ def _build_sf_where(q: FilterQuery) -> str:
         # Comparaciones y equals
         sop = _OP_MAP.get(op)
         if sop:
+            # Special case: equals/not_equals with comma-separated list → IN/NOT IN
+            if op in ("equals", "not_equals"):
+                raw_val = r.value
+                # Accept list/tuple/set or comma-separated string
+                is_listy = isinstance(raw_val, (list, tuple, set))
+                as_str = str(raw_val or "")
+                if is_listy or ("," in as_str):
+                    seq = list(raw_val) if is_listy else [p.strip() for p in as_str.split(",")]
+                    seq = [x for x in seq if (str(x).strip() if not isinstance(x, (int,float,bool)) else True)]
+                    vals_parts: List[str] = []
+                    for v in seq:
+                        if is_numeric_field(f_no_prefix):
+                            vv, ok = _coerce_value_for_field(f_no_prefix, v)
+                            vals_parts.append(str(vv) if ok and isinstance(vv, (int,float)) else f"'{_escape_quotes(str(v))}'")
+                        elif ftype in DATE_TYPES:
+                            vals_parts.append(_soql_quote(v, is_datetime=(ftype=='datetime')))
+                        else:
+                            vals_parts.append(f"'{_escape_quotes(str(v))}'")
+                    vals = ", ".join(vals_parts)
+                    clauses.append(f"{f} {'IN' if op=='equals' else 'NOT IN'} ({vals})")
+                    continue
             # boolean
             if ftype in BOOL_TYPES:
                 v = r.value
@@ -1305,14 +1339,46 @@ def _build_account_map(sf, acc_ids: List[str]) -> Dict[str, Dict]:
 
 # =============== GEOCODING (con cache + persistencia) ===============
 
-# Cache en memoria (address -> (lat, lng, expires_at))
+# Cache en memoria (address -> (lat, lng, expires_at)) + persistencia en JSON
 _GEO_CACHE: Dict[str, Tuple[Optional[float], Optional[float], float]] = {}
-_GEO_TTL_SECONDS = 60 * 60 * 24  # 24h
+# Persist across restarts; expiración muy larga para evitar llamadas repetidas
+_GEO_TTL_SECONDS = 60 * 60 * 24 * 365 * 10  # 10 años
 _CACHE_LOCK = threading.RLock()
+from pathlib import Path
+_GEO_CACHE_FILE = (Path(__file__).parent.parent / "cache" / "geocode_cache.json").resolve()
+_GEO_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 def _geo_key(city: Optional[str], country: Optional[str]) -> str:
     parts = [(city or "").strip().lower(), (country or "").strip().lower()]
     return "|".join(parts)
+
+# Carga inicial desde disco
+try:
+    if _GEO_CACHE_FILE.exists():
+        import json as _json
+        with _GEO_CACHE_FILE.open("r", encoding="utf-8") as fh:
+            raw = _json.load(fh) or {}
+        with _CACHE_LOCK:
+            now_ts = time.time()
+            for k, pair in raw.items():
+                # pair = [lat, lng]
+                lat, lng = (pair or [None, None])[:2]
+                _GEO_CACHE[k] = (lat, lng, now_ts + _GEO_TTL_SECONDS)
+except Exception:
+    pass
+
+def _save_geo_cache_file() -> None:
+    try:
+        import json as _json
+        with _CACHE_LOCK:
+            blob = {k: [lat, lng] for k, (lat, lng, _exp) in _GEO_CACHE.items()}
+        tmp = _GEO_CACHE_FILE.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as fh:
+            _json.dump(blob, fh)
+        tmp.replace(_GEO_CACHE_FILE)
+    except Exception:
+        # no romper por IO
+        pass
 
 def _geo_cache_get(city: Optional[str], country: Optional[str]) -> Tuple[Optional[float], Optional[float]] | None:
     k = _geo_key(city, country)
@@ -1324,6 +1390,7 @@ def _geo_cache_get(city: Optional[str], country: Optional[str]) -> Tuple[Optiona
     if time.time() > exp:
         with _CACHE_LOCK:
             _GEO_CACHE.pop(k, None)
+        _save_geo_cache_file()
         return None
     return (lat, lng)
 
@@ -1331,6 +1398,7 @@ def _geo_cache_put(city: Optional[str], country: Optional[str], lat: Optional[fl
     k = _geo_key(city, country)
     with _CACHE_LOCK:
         _GEO_CACHE[k] = (lat, lng, time.time() + _GEO_TTL_SECONDS)
+    _save_geo_cache_file()
 
 def _extract_result_country_iso(result: dict) -> Optional[str]:
     try:
@@ -2095,19 +2163,34 @@ async def map_bootstrap(request: Request, db: Session = Depends(get_db)):
 
     try:
         sf = _get_sf(request)
-        opps = _sf_query_all(sf, f"""
-            SELECT Id, Name, Type, StageName, IsClosed, CloseDate, AccountId,
-                   C_Number_of_new_T1D_diagnosed_U_18__c, C_Number_of_new_T1D_diagnosed_O_18__c
-            FROM Opportunity
-            WHERE Type IN ({TYPE_IN}) AND AccountId != null
+        # 1) Trae TODAS las subcuentas clínicas activas (sitios) directamente de Account
+        acc_recs = _sf_query_all(sf, f"""
+            SELECT Id
+            FROM Account
+            WHERE RecordType.DeveloperName = 'SubAccount'
+              AND C_Type__c = 'Clinical'
+              AND (Account_Inactive__c = false OR Account_Inactive__c = null)
+              AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)
         """)
-        if not opps:
+        if not acc_recs:
             return []
 
-        acc_ids = sorted({o.get("AccountId") for o in opps if o.get("AccountId")})
+        acc_ids = [str(a.get("Id")) for a in acc_recs if a.get("Id")]
         acc_map = _build_account_map(sf, acc_ids)
         active_acc_ids = list(acc_map.keys())
         extras_map = batch_fetch_account_extras(sf, active_acc_ids) if active_acc_ids else {}
+
+        # 2) Opcional: enriquecer con Opportunities (para badges y métricas) limitando a esas cuentas
+        if active_acc_ids:
+            vals = ", ".join(f"'{x}'" for x in active_acc_ids)
+            opps = _sf_query_all(sf, f"""
+                SELECT Id, Name, Type, StageName, IsClosed, CloseDate, AccountId,
+                       C_Number_of_new_T1D_diagnosed_U_18__c, C_Number_of_new_T1D_diagnosed_O_18__c
+                FROM Opportunity
+                WHERE Type IN ({TYPE_IN}) AND AccountId IN ({vals})
+            """)
+        else:
+            opps = []
 
         badges: Dict[str, Dict[str, bool]] = {}
         nd_counts: Dict[str, Dict[str, Optional[int]]] = {}
@@ -2292,6 +2375,29 @@ def explorer_fields(db: Session = Depends(get_db)):
 
     # --- sf.* (ya curado) ---
     sf_fields = FIELD_CONFIG  # mantiene tus grupos y metadatos actuales
+    # Oculta duplicados que ya existen como columnas fijas (Country/City) y campos no deseados
+    sf_fields = [
+        f for f in sf_fields
+        if (
+            f.get("key")
+            not in {
+                "sf.Account.ShippingCountry",
+                "sf.Account.ShippingCity",
+                "sf.Account.ShippingLatitude",
+                "sf.Account.ShippingLongitude",
+                "sf.C_Account_Verified__c",
+                "sf.AccountId",
+            }
+        )
+    ]
+    # Prefer a single identifier: sf.Account.Id (relationship Id)
+    has_acc_id = any((f.get("key") or "") == "sf.Account.Id" for f in sf_fields)
+    if not has_acc_id:
+        sf_fields = list(sf_fields) + [
+            {"key": "sf.Account.Id", "label": "Account Id", "type": "string", "source": "sf", "group": "Salesforce"},
+        ]
+    # Añade Member (Account) como clave sf.MemberName (desde lookup C_Member__c)
+    sf_fields.append({"key": "sf.MemberName", "label": "Member (Account)", "type": "string", "source": "sf", "group": "Salesforce"})
 
     # --- qual.* de JSONB + grupos desde QA ---
     qual_fields = _infer_qual_fields(db)
@@ -2324,6 +2430,9 @@ def explorer_fields(db: Session = Depends(get_db)):
     # --- Account.* extras visibles en UI (los que ya tenías) ---
     account_fields_cfg: List[Dict[str, Any]] = []
     for name, meta in ACCOUNT_EXTRA_FIELDS.items():
+        # Hide fields not desired in the table selector
+        if name in {"C_Account_Verified__c", "C_Contribution_to_INNODIA__c", "ShippingAddress"}:
+            continue
         account_fields_cfg.append({
             "key":   f"Account.{name}",
             "label": meta.get("label") or name.replace("_", " "),
@@ -2331,7 +2440,7 @@ def explorer_fields(db: Session = Depends(get_db)):
             "source":"account",
             "group": "Account",
         })
-    # Conveniencia: MemberName (Account.*)
+    # Conveniencia: MemberName (Account.*) — también exponemos sf.MemberName en sf_fields
     account_fields_cfg += [
         {"key": "Account.MemberName", "label": "Member (lookup name)", "type": "string",  "source": "account", "group": "Account"},
     ]
@@ -2343,9 +2452,12 @@ def explorer_fields(db: Session = Depends(get_db)):
         {"key": "extra.PIEmail",                         "label": "PI Email",                         "type": "string",  "source": "extra", "group": "Salesforce Extras"},
         {"key": "extra.PIPhone",                         "label": "PI Phone",                         "type": "string",  "source": "extra", "group": "Salesforce Extras"},
 
-        # Métrica útil
+        # Metrics
         {"key": "extra.AssignmentsCount",                "label": "Assignments (count)",              "type": "number",  "source": "extra", "group": "Salesforce Extras"},
         {"key": "extra.AssignmentsNames",                "label": "Assignments (names)",              "type": "string",  "source": "extra", "group": "Salesforce Extras"},
+        {"key": "extra.ActivitiesCount",                 "label": "Activities (count)",               "type": "number",  "source": "extra", "group": "Salesforce Extras"},
+        {"key": "extra.ActivitiesNames",                 "label": "Activities (names)",               "type": "string",  "source": "extra", "group": "Salesforce Extras"},
+        {"key": "extra.HasActivity",                     "label": "Has Activity",                      "type": "boolean", "source": "extra", "group": "Salesforce Extras"},
     ]
 
     # Unificar y deduplicar manteniendo el primero que aparezca
@@ -2516,7 +2628,16 @@ async def explorer_search(
     ACT_RT = ("Activity", "RT_Activity")
     _rt_in = ", ".join("'" + x.replace("'", "\\'") + "'" for x in ACT_RT)
 
-    act_where = "WHERE AccountId != null AND RecordType.DeveloperName IN (" + _rt_in + ")"
+    # Asegura universo de subcuentas clínicas activas y tolera variantes: Type='Activity' o RT contiene 'Activity'
+    act_where = (
+        "WHERE AccountId != null "
+        "AND (RecordType.DeveloperName IN (" + _rt_in + ") OR Type = 'Activity') "
+        "AND AccountId IN (SELECT Id FROM Account "
+        "  WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
+        "    AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
+        "    AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)"
+        ")"
+    )
     if extra_where:
         act_where += f" AND {extra_where}"
 
@@ -2526,6 +2647,19 @@ async def explorer_search(
     )
     if debug: print("[/search][SOQL activities]", soql_acts)
     activities = _sf_query_all(sf, soql_acts) or []
+
+    # Mapa de nombres de Activity por subcuenta (aunque no existan Assignment__c)
+    activities_names_by_acc: Dict[str, List[str]] = defaultdict(list)
+    for a in activities:
+        aid = str(a.get("AccountId") or "")
+        nm = (a.get("Name") or "").strip()
+        if not aid or not nm:
+            continue
+        if nm in activities_names_by_acc[aid]:
+            continue
+        if len(activities_names_by_acc[aid]) >= 15:
+            continue
+        activities_names_by_acc[aid].append(nm)
 
     assignments_by_opp: Dict[str, List[Dict[str, Any]]] = {}
     nd_counts_by_acc: Dict[str, Dict[str, Optional[int]]] = {}
@@ -2636,16 +2770,18 @@ async def explorer_search(
                 acc_id = a.get("account_id")
                 if not acc_id:
                     continue
-                name = (a.get("name") or "").strip()
-                if not name:
+                base = (a.get("name") or "").strip()
+                if not base:
                     continue
+                act = (a.get("opportunity_name") or "").strip()
+                label = f"{base} ({act})" if act else base
                 key = str(acc_id)
                 bucket = names_map.setdefault(key, [])
-                if name in bucket:
+                if label in bucket:
                     continue
                 if len(bucket) >= 15:
                     continue
-                bucket.append(name)
+                bucket.append(label)
         assignments_names_by_acc = names_map
 
     for o in opps:
@@ -2754,6 +2890,15 @@ async def explorer_search(
             entry = extras_map.setdefault(str(acc_id), {})
             entry["extra.AssignmentsNames"] = "; ".join(names)
             entry.setdefault("extra.AssignmentsCount", len(names))
+    # Injeta también Activities (sin Assignment)
+    if activities_names_by_acc:
+        for acc_id, names in activities_names_by_acc.items():
+            if not names:
+                continue
+            entry = extras_map.setdefault(str(acc_id), {})
+            entry["extra.ActivitiesNames"] = "; ".join(names)
+            entry.setdefault("extra.ActivitiesCount", len(names))
+            entry.setdefault("extra.HasActivity", True)
 
     # ===========================================================
     # 6) Helpers de filtrado post-query
@@ -2766,8 +2911,8 @@ async def explorer_search(
             if rule.field == "site.city":    val = (acc.get("city") or "") or ""
             if rule.field == "site.country": val = (acc.get("country") or "") or ""
             op = _op_norm(rule.operator); s = _str(rule.value)
-            if   op in ("equals","="):      return val == s
-            elif op in ("not_equals","!="): return val != s
+            if   op in ("equals","="):      return val.lower() == s.lower()
+            elif op in ("not_equals","!="): return val.lower() != s.lower()
             elif op == "contains":          return s.lower() in val.lower()
             elif op == "not_contains":      return s.lower() not in val.lower()
             elif op == "starts_with":       return val.lower().startswith(s.lower())
@@ -2874,7 +3019,13 @@ async def explorer_search(
                 elif sub in {"MemberName"}:        data[k] = member_by_acc.get(str(aid)) if need_member else None
                 # HasPI removed
                 else:
-                    data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
+                    # First from direct Account extras fetch
+                    val = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
+                    # Fallback to batch extras (same booleans used in the map)
+                    if val is None and sub in {"INNODIA_Clinical_Trial_Site__c","Referral_Outreach_Site_Non_CTS__c","Elegible_for_DETECT_Site__c","Clinical_Site_CS__c"}:
+                        ex = (extras_map.get(str(aid), {}) or {})
+                        val = ex.get(f"extra.{sub}")
+                    data[k] = val
                 continue
 
             # qual.*
@@ -2920,6 +3071,11 @@ async def explorer_search(
         if names_for_acc:
             data.setdefault("extra.AssignmentsNames", "; ".join(names_for_acc))
             data.setdefault("extra.AssignmentsCount", len(names_for_acc))
+        act_for_acc = activities_names_by_acc.get(str(aid), [])
+        if act_for_acc:
+            data.setdefault("extra.ActivitiesNames", "; ".join(act_for_acc))
+            data.setdefault("extra.ActivitiesCount", len(act_for_acc))
+            data.setdefault("extra.HasActivity", True)
 
         _flatten_sf_inplace(data)
         rows.append({
@@ -3014,7 +3170,11 @@ async def explorer_search(
                         elif sub in {"MemberName"}:        data[k] = member_by_acc.get(str(aid)) if need_member else None
                         elif sub in {"HasPI"}:             data[k] = None
                         else:
-                            data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
+                            val = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
+                            if val is None and sub in {"INNODIA_Clinical_Trial_Site__c","Referral_Outreach_Site_Non_CTS__c","Elegible_for_DETECT_Site__c","Clinical_Site_CS__c"}:
+                                ex = (extras_map.get(str(aid), {}) or {})
+                                val = ex.get(f"extra.{sub}")
+                            data[k] = val
                         continue
                     if k.startswith("qual."):   data[k] = qual_data.get(k[5:]); continue
                     if k.startswith("extra."):
@@ -3033,6 +3193,7 @@ async def explorer_search(
                 if names_for_acc:
                     data.setdefault("extra.AssignmentsNames", "; ".join(names_for_acc))
                     data.setdefault("extra.AssignmentsCount", len(names_for_acc))
+                    data.setdefault("extra.HasActivity", True)
 
                 _flatten_sf_inplace(data)
 
@@ -3042,6 +3203,81 @@ async def explorer_search(
                     "country": acc.get("country"),
                     "city": acc.get("city"),
                     "opportunity_type": "Activity (Assignment)",
+                    "data": data,
+                })
+                present.add(aid)
+
+        # 9b) Filas sintéticas por subcuentas con Activities aunque no haya Assignment
+        if activities:
+            accs_with_acts = {str(a.get("AccountId")) for a in activities if a.get("AccountId")}
+            for aid in sorted(accs_with_acts):
+                if not aid or aid in present:  # ya añadida arriba
+                    continue
+                if aid not in acc_map:
+                    continue  # filtradas por inactividad
+                acc = acc_map.get(aid) or {}
+                if not pass_site(acc):
+                    continue
+                site_info = site_by_acc.get(str(aid))
+                site_id   = site_info["site_id"] if site_info else None
+                qual_data = qual_by_site.get(site_id, {}) if site_id else {}
+                if not pass_qual(qual_data): continue
+                if not pass_member(aid):     continue
+                if not pass_account(aid):    continue
+                if not pass_extra(aid):      continue
+
+                # Proxy SF fields from most recent non-Activity, if requested
+                proxy = sf_proxy_by_acc.get(str(aid), {})
+                data: Dict[str, Any] = {}
+                for k in requested_cols:
+                    if k == "site.city":        data[k] = acc.get("city");    continue
+                    if k == "site.country":     data[k] = acc.get("country"); continue
+                    if k.startswith("Account."):
+                        sub = k[8:]
+                        if   sub == "Id":                 data[k] = aid
+                        elif sub == "Name":               data[k] = acc.get("name")
+                        elif sub == "ShippingCity":       data[k] = acc.get("city")
+                        elif sub == "ShippingCountry":    data[k] = acc.get("country")
+                        elif sub == "ShippingLatitude":   data[k] = acc.get("lat")
+                        elif sub == "ShippingLongitude":  data[k] = acc.get("lng")
+                        elif sub in {"BillingCity","BillingCountry","BillingLatitude","BillingLongitude"}:
+                            if   sub == "BillingCity":      data[k] = acc.get("city")
+                            elif sub == "BillingCountry":   data[k] = acc.get("country")
+                            elif sub == "BillingLatitude":  data[k] = acc.get("lat")
+                            elif sub == "BillingLongitude": data[k] = acc.get("lng")
+                        elif sub in {"Member__c"}:         data[k] = None
+                        elif sub in {"MemberName"}:        data[k] = member_by_acc.get(str(aid)) if need_member else None
+                        else:
+                            data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
+                        continue
+                    if k.startswith("qual."):   data[k] = qual_data.get(k[5:]); continue
+                    if k.startswith("extra."):
+                        data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
+                        continue
+                    if k.startswith("sf."):
+                        fld = k[3:]
+                        if fld == "Name":
+                            # usa el primer activity name como nombre de Opp
+                            data[k] = (activities_names_by_acc.get(str(aid)) or [None])[0]
+                        else:
+                            data[k] = proxy.get(fld) if proxy else None
+                        continue
+                    data[k] = None
+
+                # Añade etiquetas de Activities
+                names_for_acc = activities_names_by_acc.get(str(aid), [])
+                if names_for_acc:
+                    data.setdefault("extra.ActivitiesNames", "; ".join(names_for_acc))
+                    data.setdefault("extra.ActivitiesCount", len(names_for_acc))
+
+                _flatten_sf_inplace(data)
+
+                rows.append({
+                    "account_id": aid,
+                    "account_name": acc.get("name"),
+                    "country": acc.get("country"),
+                    "city": acc.get("city"),
+                    "opportunity_type": "Activity",
                     "data": data,
                 })
                 present.add(aid)
@@ -3078,6 +3314,13 @@ async def explorer_search(
             entry = extra_batch_map.setdefault(str(acc_id), {})
             entry["extra.AssignmentsNames"] = "; ".join(names)
             entry.setdefault("extra.AssignmentsCount", len(names))
+    if activities_names_by_acc:
+        for acc_id, names in activities_names_by_acc.items():
+            if not names:
+                continue
+            entry = extra_batch_map.setdefault(str(acc_id), {})
+            entry["extra.ActivitiesNames"] = "; ".join(names)
+            entry.setdefault("extra.ActivitiesCount", len(names))
 
     rows = collapse_rows_by_account(rows)
 
@@ -3115,14 +3358,23 @@ async def explorer_search(
                 if m is None:
                     m = member_by_acc.get(aid)
                 data["Account.MemberName"] = m
+                data["sf.MemberName"] = m
                 # also expose as extra.MemberName if not present
                 if "extra.MemberName" not in data:
                     data["extra.MemberName"] = m
+
+            # 3b) Always expose Account Id in both notations for table compatibility
+            data.setdefault("Account.Id", aid)
+            data.setdefault("sf.Account.Id", aid)
 
             names_for_acc = assignments_names_by_acc.get(aid, [])
             if names_for_acc:
                 data.setdefault("extra.AssignmentsNames", "; ".join(names_for_acc))
                 data.setdefault("extra.AssignmentsCount", len(names_for_acc))
+            acts_for_acc = activities_names_by_acc.get(aid, [])
+            if acts_for_acc:
+                data.setdefault("extra.ActivitiesNames", "; ".join(acts_for_acc))
+                data.setdefault("extra.ActivitiesCount", len(acts_for_acc))
 
     badges: Dict[str, Dict[str, bool]] = {}
     for r in rows:
@@ -3494,6 +3746,9 @@ async def explorer_fill_columns(
                     data[k] = o.get(fld)
                 elif _exists_on_account(fld):
                     data[k] = (o.get("Account") or {}).get(fld)
+                elif fld == "MemberName":
+                    # Lookup name from Account.C_Member__r.Name (pre-fetched into member_by_acc or extras)
+                    data[k] = member_by_acc.get(str(aid)) or (extras_map.get(str(aid), {}) or {}).get("extra.MemberName")
                 else:
                     data[k] = None
                 continue
@@ -3531,7 +3786,11 @@ async def explorer_fill_columns(
     account_extras_map: Dict[str, Dict[str, Any]] = {}
     if need_account_extras and requested_account_cols:
         try:
-            account_extras_map = _fetch_account_extras(sf, active_acc_ids, requested_account_cols)
+            safe_fields = {f for f in requested_account_cols if f in ACCOUNT_EXTRA_FIELDS or f == "ShippingAddress"}
+            if safe_fields:
+                account_extras_map = _fetch_account_extras(sf, active_acc_ids, safe_fields)
+            else:
+                account_extras_map = {}
         except Exception as e:
             log.warning("/explorer/search: _fetch_account_extras failed: %s", e)
             account_extras_map = {}
@@ -3568,6 +3827,17 @@ async def explorer_fill_columns(
                 ex_vals = (extra_batch_map.get(aid, {}) or {})
                 for full_key in requested_extra_cols:
                     fetched = ex_vals.get(full_key)
+                    if fetched is None:
+                        # Fallback mirror for Account CS booleans so filters work even if requested via extra.* or Account.*
+                        if full_key in {"extra.INNODIA_Clinical_Trial_Site__c","extra.Referral_Outreach_Site_Non_CTS__c","extra.Elegible_for_DETECT_Site__c"}:
+                            # derive from acc_map.cs flags when extras didn’t return explicitly
+                            fld = full_key.split(".",1)[1]
+                            fetched = (extra_batch_map.get(aid, {}) or {}).get(full_key)
+                            if fetched is None:
+                                cs_flags = (acc_map.get(aid, {}) or {}).get("cs") or {}
+                                if fld == "INNODIA_Clinical_Trial_Site__c": fetched = bool(cs_flags.get("clinical"))
+                                if fld == "Referral_Outreach_Site_Non_CTS__c": fetched = bool(cs_flags.get("referral"))
+                                if fld == "Elegible_for_DETECT_Site__c": fetched = bool(cs_flags.get("detect"))
                     if fetched is not None:
                         if full_key not in data or data.get(full_key) in (None, "", []):
                             data[full_key] = fetched
@@ -3581,9 +3851,15 @@ async def explorer_fill_columns(
                 if m is None:
                     m = member_by_acc.get(aid)
                 data["Account.MemberName"] = m
+                data["sf.MemberName"] = m
                 # also expose as extra.MemberName if not present
                 if "extra.MemberName" not in data:
                     data["extra.MemberName"] = m
+
+            # 3b) Always expose Account Id in both notations for table compatibility
+            # Force-set to avoid previous None values from earlier branches
+            data["Account.Id"] = aid
+            data["sf.Account.Id"] = aid
 
             names_val = (extra_batch_map.get(aid, {}) or {}).get("extra.AssignmentsNames")
             if names_val:
@@ -3837,7 +4113,10 @@ async def explorer_search_within_drive_km(
             need_batch_extras = True
         elif f.startswith("sf."):
             nf = f[3:]
-            if nf.startswith("Account."):
+            # Special: sf.Account.Id → WHERE on Opportunity.AccountId
+            if nf == "Account.Id":
+                sf_rules.append(Rule(field="AccountId", operator=op, value=val))
+            elif nf.startswith("Account."):
                 fld = nf.split(".", 1)[1]
                 account_rules.append(Rule(field=fld, operator=op, value=val))
                 need_account_fields = True
@@ -3846,10 +4125,13 @@ async def explorer_search_within_drive_km(
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
         elif f.startswith("Account."):
             fld = f.split(".",1)[1]
-            account_rules.append(Rule(field=fld, operator=op, value=val))
-            need_account_fields = True
-            need_account_extras = True
-            account_fields_needed.add(fld)
+            if fld == "Id":
+                sf_rules.append(Rule(field="AccountId", operator=op, value=val))
+            else:
+                account_rules.append(Rule(field=fld, operator=op, value=val))
+                need_account_fields = True
+                need_account_extras = True
+                account_fields_needed.add(fld)
         else:
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
                 sf_rules.append(Rule(field=f, operator=op, value=val))
@@ -4175,8 +4457,8 @@ async def explorer_search_within_drive_km(
             if rule.field == "site.city":    val = (acc.get("city")    or "")
             if rule.field == "site.country": val = (acc.get("country") or "")
             op = _OP_SYNONYM.get(rule.operator, rule.operator); s = str(rule.value or "")
-            if op in ("equals","="): return val == s
-            if op in ("not_equals","!="): return val != s
+            if op in ("equals","="): return val.lower() == s.lower()
+            if op in ("not_equals","!="): return val.lower() != s.lower()
             if op == "contains": return s.lower() in val.lower()
             if op == "not_contains": return s.lower() not in val.lower()
             if op == "starts_with": return val.lower().startswith(s.lower())

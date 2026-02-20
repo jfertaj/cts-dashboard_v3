@@ -20,12 +20,24 @@ export type ChatResponse = {
   clarify?: { question: string; options: Array<{ label: string; query: string }> };
 };
 
-export async function askAI(prompt: string): Promise<ChatResponse> {
+export async function askAI(
+  prompt: string,
+  lastTable?: TablePayload | null
+): Promise<ChatResponse> {
+  const payload: any = {
+    messages: [{ role: "user", content: prompt }],
+  };
+  
+  // Incluir last_table si está disponible para follow-ups eficientes
+  if (lastTable && lastTable.rows && lastTable.rows.length > 0) {
+    payload.last_table = lastTable;
+  }
+  
   const res = await fetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();

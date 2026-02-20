@@ -11,3 +11,5 @@ export interface ResponseRecord {
   city?: string;
   country?: string;
 }
+
+export type Tab = "upload" | "explorer" | "chat";

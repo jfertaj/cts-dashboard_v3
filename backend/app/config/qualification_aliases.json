@@ -1,48 +1,12 @@
 {
   "aliases": [
     {
-      "alias": "screening program",
-      "key": "C_Aware_of_any_Screening_Program__c"
-    },
-    {
-      "alias": "early diagnosis center",
-      "key": "C_Center_for_Running_Early_Diagnosis__c"
-    },
-    {
-      "alias": "stage 1 followed",
-      "key": "C_Number_of_Stage1_Individuals_followed__c"
-    },
-    {
-      "alias": "stage 2 followed",
-      "key": "C_Number_of_Stage2_Individuals_followed__c"
-    },
-    {
-      "alias": "current patients under 18",
-      "key": "C_Number_of_T1D_Patients_currently_U_18__c"
-    },
-    {
-      "alias": "current patients over 18",
-      "key": "C_Number_of_T1D_Patients_currently_O_18__c"
-    },
-    {
-      "alias": "newly diagnosed under 18",
-      "key": "C_Number_of_new_T1D_diagnosed_U_18__c"
-    },
-    {
-      "alias": "newly diagnosed over 18",
-      "key": "C_Number_of_new_T1D_diagnosed_O_18__c"
-    },
-    {
       "alias": "onsite pharmacy",
       "key": "onsite_pharmacy"
     },
     {
       "alias": "overnight stay",
       "key": "overnight_stay"
-    },
-    {
-      "alias": "hla typing",
-      "key": "C_Is_HLA_typing_performed__c"
     },
     {
       "alias": "Acceptable Process",

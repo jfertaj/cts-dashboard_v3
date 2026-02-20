@@ -89,7 +89,7 @@ def batch_fetch_account_extras(sf, account_ids: List[str]) -> Dict[str, Dict[str
     for chunk in _chunked(account_ids, 150):
         ids = ",".join([f"'{i}'" for i in chunk])
         soql = (
-            "SELECT C_Account__c, Name "
+            "SELECT C_Account__c, Name, C_Opportunity_Name__r.Name "
             "FROM Assignment__c "
             f"WHERE C_Account__c IN ({ids}) "
             "ORDER BY CreatedDate DESC"
@@ -102,12 +102,14 @@ def batch_fetch_account_extras(sf, account_ids: List[str]) -> Dict[str, Dict[str
             name = (r.get("Name") or "").strip()
             if not name:
                 continue
+            opp = ((r.get("C_Opportunity_Name__r") or {}).get("Name") or "").strip()
+            label = f"{name} ({opp})" if opp else name
             bucket = names_by_acc.setdefault(str(aid), [])
-            if name in bucket:
+            if label in bucket:
                 continue
             if len(bucket) >= 15:
                 continue
-            bucket.append(name)
+            bucket.append(label)
 
     for aid, cnt in counts_by_acc.items():
         out.setdefault(aid, {})["extra.AssignmentsCount"] = cnt

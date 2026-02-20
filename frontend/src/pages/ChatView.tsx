@@ -48,10 +48,11 @@ export default function ChatView() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lastUserQ, setLastUserQ] = useState<string>("");
+  const [lastTableForAI, setLastTableForAI] = useState<{columns: any[], rows: any[]} | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Chart state (reuse your ChartModal)
-  type ChartType = "bar" | "line";
+  type ChartType = "bar" | "line" | "pie";
   const [chartOpen, setChartOpen] = useState(false);
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [chartTitle, setChartTitle] = useState<string>("Explorer Chart");
@@ -231,10 +232,11 @@ export default function ChatView() {
           r["sf.AccountId"] ||
           r["Account.Id"] ||
           r["account_id"] ||
-          (r?.data?.["sf.Account.Id"] || r?.data?.["sf.AccountId"])
+          r["Account Id"] ||
+          (r?.data?.["sf.Account.Id"] || r?.data?.["sf.AccountId"]) 
       )
       .filter(Boolean)
-      .map(String);
+      .map((x) => String(x).trim());
 
     const handleHighlight = () => {
       if (!accIds.length) return;
@@ -340,28 +342,28 @@ export default function ChatView() {
           <button
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
             onClick={exportCSV}
-            title="Exportar a CSV"
-            aria-label="Exportar a CSV"
+            title="Export to CSV"
+            aria-label="Export to CSV"
           >
-            ⬇️ <span>Exportar CSV</span>
+            ⬇️ <span>Export CSV</span>
           </button>
           {accIds.length > 0 && (
             <>
               <button
                 className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
                 onClick={handleHighlight}
-                title="Resaltar estos centros en el mapa/tabla del Explorer"
-                aria-label="Resaltar en Explorer"
+                title="Highlight these sites in the Explorer map/table"
+                aria-label="Highlight in Explorer"
               >
-                🔦 <span>Highlight en Explorer</span>
+                🔦 <span>Highlight in Explorer</span>
               </button>
               <button
                 className="inline-flex items-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
                 onClick={handleOpenFiltered}
-                title="Abrir Explorer filtrado a estos centros"
-                aria-label="Abrir Explorer filtrado"
+                title="Open Explorer filtered to these sites"
+                aria-label="Open Explorer filtered"
               >
-                🎯 <span>Abrir en Explorer (filtrar)</span>
+                🎯 <span>Open in Explorer (filter)</span>
               </button>
             </>
           )}
@@ -369,10 +371,10 @@ export default function ChatView() {
             <button
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
               onClick={handleAddColumns}
-              title="Añadir estas columnas a la tabla del Explorer"
-              aria-label="Añadir columnas al Explorer"
+              title="Add these columns to the Explorer table"
+              aria-label="Add columns to Explorer"
             >
-              ➕ <span>Añadir columnas al Explorer</span>
+              ➕ <span>Add columns to Explorer</span>
             </button>
           )}
         </div>
@@ -439,7 +441,7 @@ export default function ChatView() {
           ]);
           setBusy(true);
           try {
-            const next = await askAI(`${lastUserQ}. Clarification: ${opt.query}`);
+            const next = await askAI(`${lastUserQ}. Clarification: ${opt.query}`, lastTableForAI);
             handleArtifacts(next);
           } catch (e: any) {
             setMessages((m) => [
@@ -474,27 +476,41 @@ export default function ChatView() {
       return;
     }
 
-    // 2) Tabla
+    // 2) Visualizaciones (prioritario): si hay gráfico, abrirlo y NO mostrar tabla duplicada
+    if (resp?.visualization?.data && resp.visualization?.xKey) {
+      const v = resp.visualization as any;
+      const type: ChartType = v.type === "line" ? "line" : v.type === "pie" ? "pie" : "bar";
+      const xKey: string = v.xKey;
+      let yKeys: string[] = Array.isArray(v.yKeys) ? v.yKeys : [];
+      let data: Array<Record<string, any>> = Array.isArray(v.data) ? v.data : [];
+      if (!yKeys.length) yKeys = autoYKeys(data, xKey);
+      data = coerceNumeric(data, yKeys);
+      setChartType(type);
+      setChartXKey(xKey);
+      setChartYKeys(yKeys);
+      setChartData(data);
+      setChartTitle(v.meta?.title || "Explorer Chart");
+      setChartOpen(true);
+      // No añadir tabla si viene también en la misma respuesta; el gráfico es suficiente
+      return;
+    }
+
+    // 3) Tabla
     if ((resp as any)?.table?.columns && (resp as any)?.table?.rows) {
       let { columns, rows } = (resp as any).table;
       if (Array.isArray(columns) && typeof columns[0] === "string") {
         columns = (columns as string[]).map((k) => ({ key: k, label: prettyLabel(k) }));
       }
 
-      // Evita duplicados: compara con la última tabla persistida
-      let isDuplicate = false;
-      try {
-        const prevRaw = sessionStorage.getItem(TABLE_KEY);
-        if (prevRaw) {
-          const prev = JSON.parse(prevRaw);
-          const prevCols = JSON.stringify(prev?.columns ?? null);
-          const prevRows = JSON.stringify(prev?.rows ?? null);
-          if (prevCols === JSON.stringify(columns) && prevRows === JSON.stringify(rows)) {
-            isDuplicate = true;
-          }
-        }
-      } catch {}
+      // Si no hay filas, no mostrar tabla ni persistir
+      const hasRows = Array.isArray(rows) && rows.length > 0;
+      if (!hasRows) {
+        // aún podemos mostrar el texto del modelo ya añadido arriba; no añadimos tabla vacía
+        return;
+      }
 
+      // Guardar para AI follow-ups eficientes y persistir para restaurar tras navegación
+      setLastTableForAI({ columns, rows });
       try {
         const accountIds = (rows || [])
           .map(
@@ -512,40 +528,23 @@ export default function ChatView() {
         );
       } catch {}
 
-      if (!isDuplicate) {
-        setMessages((m) => [
-          ...m,
-          {
-            role: "assistant",
-            content: (
-              <ActionableTable
-                columns={columns}
-                rows={rows}
-                explorerKeySet={explorerKeySet}
-              />
-            ),
-          },
-        ]);
-      }
+      // Siempre renderiza inmediatamente la tabla recibida
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: (
+            <ActionableTable
+              columns={columns}
+              rows={rows}
+              explorerKeySet={explorerKeySet}
+            />
+          ),
+        },
+      ]);
     }
 
-    // 3) Visualizaciones
-    if (resp?.visualization?.data && resp.visualization?.xKey) {
-      const v = resp.visualization as any;
-      const type: ChartType = v.type === "line" ? "line" : "bar";
-      const xKey: string = v.xKey;
-      let yKeys: string[] = Array.isArray(v.yKeys) ? v.yKeys : [];
-      let data: Array<Record<string, any>> = Array.isArray(v.data) ? v.data : [];
-      if (!yKeys.length) yKeys = autoYKeys(data, xKey);
-      data = coerceNumeric(data, yKeys);
-      setChartType(type);
-      setChartXKey(xKey);
-      setChartYKeys(yKeys);
-      setChartData(data);
-      setChartTitle(v.meta?.title || "Explorer Chart");
-      setChartOpen(true);
-      return;
-    }
+    // (visualization handled above)
 
     // 4) Retrocompat
     const arts = (resp as any)?.artifacts;
@@ -554,7 +553,8 @@ export default function ChatView() {
         if (a?.type === "chart") {
           const v = a.data || a.options || {};
           const type: ChartType =
-            a.chart_kind === "line" || v.type === "line" ? "line" : "bar";
+            a.chart_kind === "line" || v.type === "line" ? "line" : 
+            a.chart_kind === "pie" || v.type === "pie" ? "pie" : "bar";
           if (v?.xKey && v?.data) {
             let yKeys: string[] = Array.isArray(v.yKeys) ? v.yKeys : [];
             let data: Array<Record<string, any>> = Array.isArray(v.data)
@@ -595,7 +595,7 @@ export default function ChatView() {
         return;
       }
       // LLM
-      const resp: ChatResponse = await askAI(text);
+      const resp: ChatResponse = await askAI(text, lastTableForAI);
       handleArtifacts(resp);
     } catch (e: any) {
       setMessages((m) => [
@@ -616,7 +616,7 @@ export default function ChatView() {
     { label: "Time series: Amount (quarter, 8)", prompt: "Time series (quarter) of Opportunity Amount last 8 quarters" },
     { label: "Top 3 by Stage2 per country", prompt: "Top 3 sites per country by Stage 2" },
     { label: "% with HLA typing per country", prompt: "% of sites per country with HLA typing" },
-    { label: "Study Coordinator (subaccounts)", prompt: "Who is the Study Coordinator for <SITE>? include subaccounts" },
+    { label: "Top 5 sites with most patients", prompt: "Show me the top 5 sites with most patients per year" },
   ];
 
   const runTemplate = async (text: string) => {
@@ -625,7 +625,7 @@ export default function ChatView() {
     setLastUserQ(text);
     setBusy(true);
     try {
-      const resp: ChatResponse = await askAI(text);
+      const resp: ChatResponse = await askAI(text, lastTableForAI);
       handleArtifacts(resp);
     } catch (e: any) {
       setMessages((m) => [
@@ -967,7 +967,7 @@ export default function ChatView() {
         role: "assistant",
         content: (
           <>
-            Hi, I’m Moby{" "}
+            Hi, I'm Moby{" "}
             <img
               src={Moby}
               alt="Moby the cat"
@@ -979,6 +979,7 @@ export default function ChatView() {
         ),
       },
     ]);
+    setLastTableForAI(null);
     try {
       sessionStorage.removeItem(MSGS_KEY);
       sessionStorage.removeItem(INPUT_KEY);

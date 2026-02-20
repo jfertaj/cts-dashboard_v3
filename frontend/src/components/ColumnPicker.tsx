@@ -138,7 +138,7 @@ export default function ColumnPicker({
       if (section && subsection) return `${section} › ${subsection}`;
       if (section) return section;
       if (subsection) return subsection;
-      return "Qualification";
+      return "Qualification forms";
     }
     if (f.group) return f.group;
     if (f.source) return f.source.toString();
@@ -308,54 +308,64 @@ export default function ColumnPicker({
 
           {/* Lista agrupada */}
           <div className="max-h-[320px] overflow-auto rounded-md border">
-            {groupedEntries.map(([groupName, keys]) => (
-              <div key={groupName}>
-                <div className="bg-gray-50 border-b px-3 py-2 sticky top-0 z-10">
-                  {renderGroupHeader ? (
-                    renderGroupHeader(groupName)
-                  ) : (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-gray-700">{groupName}</span>
-                      <button
-                        type="button"
-                        onClick={() => toggleAll(keys)}
-                        className="text-xs rounded-md border px-2 py-0.5 hover:bg-white"
-                      >
-                        {keys.every((k) => value.includes(k)) ? "Deselect group" : "Select group"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <table className="min-w-full text-sm">
-                  <tbody>
-                    {keys.map((k) => {
-                      const checked = value.includes(k);
-                      return (
-                        <tr key={k} className="border-t hover:bg-gray-50">
-                          <td className="px-3 py-2 w-10">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4"
-                              checked={checked}
-                              onChange={() => toggleKey(k)}
-                            />
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap">{labelByKey.get(k) ?? k}</td>
-                          <td className="px-3 py-2 text-gray-500">{k}</td>
-                        </tr>
-                      );
-                    })}
-                    {keys.length === 0 && (
-                      <tr>
-                        <td className="px-3 py-6 text-center text-gray-500" colSpan={3}>
-                          No fields in this group
-                        </td>
-                      </tr>
+            {groupedEntries.map(([groupName, keys]) => {
+              const isQualGroup = keys.some((k) => k.startsWith("qual."));
+              return (
+                <div key={groupName}>
+                  <div className="bg-gray-50 border-b px-3 py-2 sticky top-0 z-10" title={isQualGroup ? "Qualification forms" : groupName}>
+                    {renderGroupHeader ? (
+                      renderGroupHeader(groupName)
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                          {groupName}
+                          {isQualGroup && (
+                            <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200" title="Qualification forms">
+                              Qualification forms
+                            </span>
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleAll(keys)}
+                          className="text-xs rounded-md border px-2 py-0.5 hover:bg-white"
+                        >
+                          {keys.every((k) => value.includes(k)) ? "Deselect group" : "Select group"}
+                        </button>
+                      </div>
                     )}
-                  </tbody>
-                </table>
-              </div>
-            ))}
+                  </div>
+                  <table className="min-w-full text-sm">
+                    <tbody>
+                      {keys.map((k) => {
+                        const checked = value.includes(k);
+                        return (
+                          <tr key={k} className="border-t hover:bg-gray-50">
+                            <td className="px-3 py-2 w-10">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={checked}
+                                onChange={() => toggleKey(k)}
+                              />
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">{labelByKey.get(k) ?? k}</td>
+                            <td className="px-3 py-2 text-gray-500">{k}</td>
+                          </tr>
+                        );
+                      })}
+                      {keys.length === 0 && (
+                        <tr>
+                          <td className="px-3 py-6 text-center text-gray-500" colSpan={3}>
+                            No fields in this group
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
             {groupedEntries.length === 0 && (
               <div className="px-3 py-6 text-center text-gray-500">No fields match your search</div>
             )}

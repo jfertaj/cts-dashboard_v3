@@ -39,6 +39,8 @@ function getKind(f?: FieldDef) {
 const OPS_STRING = [
   { v: "equals", label: "=" },
   { v: "not_equals", label: "≠" },
+  { v: "in", label: "is one of" },
+  { v: "not_in", label: "is NOT one of" },
   { v: "contains", label: "contains" },
   { v: "not_contains", label: "not contains" },
   { v: "starts_with", label: "starts with" },
@@ -48,6 +50,8 @@ const OPS_STRING = [
 const OPS_NUMBER = [
   { v: "equals", label: "=" },
   { v: "not_equals", label: "≠" },
+  { v: "in", label: "is one of" },
+  { v: "not_in", label: "is NOT one of" },
   { v: ">", label: ">" },
   { v: ">=", label: "≥" },
   { v: "<", label: "<" },
@@ -87,7 +91,7 @@ function groupName(f: FieldDef): string {
     const group = f.group?.trim();
     if (section && group) return `${section} › ${group}`;
     if (section) return section;
-    return group || "Qualification";
+    return group || "Qualification forms";
   }
   return "Other";
 }
@@ -326,6 +330,7 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
         <input
           type="text"
           className="border rounded-md px-2 py-1 text-sm w-64"
+          placeholder={rule.operator === "in" || rule.operator === "not_in" || /\.Id$|Id$/i.test(rule.field) ? "value1, value2, …" : undefined}
           value={rule.value ?? ""}
           onChange={(e) => updateAt(path, (r) => ({ ...(r as Rule), value: e.target.value }))}
         />
@@ -377,6 +382,7 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
               value: e.target.value === "between" ? ["", ""] : "",
             }))
           }
+          title={rule.operator === "in" || rule.operator === "not_in" ? "Use comma-separated values" : undefined}
         >
           {ops.map((o) => (
             <option key={o.v} value={o.v}>
@@ -400,6 +406,22 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
 
   const renderGroup = (group: FilterGroup, path: number[] = []) => {
     const isRoot = path.length === 0;
+
+    const scaffoldTwoGroups = (logic: "AND" | "OR") => {
+      // Replace current group content with two empty subgroups under chosen logic
+      const root = structuredClone(value) as FilterGroup;
+      // Navigate to target group
+      const getNode = (p: number[]): FilterGroup => {
+        let g: FilterGroup = root;
+        for (let i = 0; i < p.length; i++) g = g.rules[p[i]] as FilterGroup;
+        return g;
+      };
+      const target = getNode(path);
+      target.logic = logic;
+      target.rules = [ { logic: "AND", rules: [] }, { logic: "AND", rules: [] } ] as any;
+      onChange(root);
+    };
+
     return (
       <div className="space-y-3 border rounded-lg p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -419,6 +441,25 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
           <button className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50" onClick={() => addGroupTo(path)}>
             + Group
           </button>
+
+          {isRoot && (
+            <>
+              <button
+                className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
+                title="Scaffold ( … ) AND ( … )"
+                onClick={() => scaffoldTwoGroups("AND")}
+              >
+                Scaffold: ( … ) AND ( … )
+              </button>
+              <button
+                className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
+                title="Scaffold ( … ) OR ( … )"
+                onClick={() => scaffoldTwoGroups("OR")}
+              >
+                Scaffold: ( … ) OR ( … )
+              </button>
+            </>
+          )}
 
           {!isRoot && (
             <button

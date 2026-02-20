@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
 import Header from "./components/Header";
-import UploadLinkView from "./pages/UploadLinkView";
+import LinkAuthView from "./pages/UploadLinkView";
 import ChatView from "./pages/ChatView";
 import ExplorerView from "./pages/ExplorerView";
-import { sfMe, sfLogout } from "./lib/salesforce";
+import { sfLoginRedirect } from "./lib/salesforce";
+import { useSalesforceAuth } from "./hooks/useSalesforceAuth";
+import { useIdleTimer } from "./hooks/useIdleTimer";
+import { Tab } from "./types";
 
-type Tab = "upload" | "explorer" | "chat";
+
 
 function getTabFromURL(): Tab {
   // 1) Permite /explorer y /chat directamente en la URL
@@ -20,64 +23,12 @@ function getTabFromURL(): Tab {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(getTabFromURL());
-  const [authed, setAuthed] = useState<boolean | null>(null); // null -> unknown
-  const [expired, setExpired] = useState(false);
 
-  // Lee auth al cargar
-  useEffect(() => {
-    (async () => {
-      const me = await sfMe();
-      setAuthed(!!me.authenticated);
-      if (!me.authenticated) setExpired(true);
-    })();
-  }, []);
+  // Custom hooks for Auth & Idle
+  const { authed, sessionExpired, setSessionExpired } = useSalesforceAuth();
+  useIdleTimer(sessionExpired, setSessionExpired);
 
-  // Auto-logout por inactividad de pestaña
-  useEffect(() => {
-    const IDLE_LIMIT_MS = 60 * 60 * 1000; // 1h
-    let last = Date.now();
-    const mark = () => { last = Date.now(); };
-    const events = ["mousemove","mousedown","keydown","scroll","touchstart","visibilitychange","focus"]; 
-    events.forEach(ev => window.addEventListener(ev, mark, { passive: true }));
 
-    const t = window.setInterval(async () => {
-      if (expired) return; // ya expirado
-      const diff = Date.now() - last;
-      if (diff >= IDLE_LIMIT_MS) {
-        try { await sfLogout(); } catch {}
-        setExpired(true);
-      }
-    }, 60 * 1000); // comprueba cada minuto
-
-    return () => {
-      window.clearInterval(t);
-      events.forEach(ev => window.removeEventListener(ev, mark));
-    };
-  }, [expired]);
-
-  // Sondeo periódico de sesión SF: si cae, muestra overlay
-  useEffect(() => {
-    const poll = window.setInterval(async () => {
-      try {
-        const me = await sfMe();
-        setAuthed(!!me.authenticated);
-        if (!me.authenticated) setExpired(true);
-      } catch {
-        // si falla el fetch, no cambiamos estado
-      }
-    }, 5 * 60 * 1000); // cada 5 minutos
-
-    const onSfAuth = (e: Event) => {
-      const ok = (e as CustomEvent<{ ok: boolean }>).detail?.ok;
-      if (ok === false) setExpired(true);
-    };
-    window.addEventListener("sf-auth", onSfAuth as EventListener);
-
-    return () => {
-      window.clearInterval(poll);
-      window.removeEventListener("sf-auth", onSfAuth as EventListener);
-    };
-  }, []);
 
   // Escucha cambios del historial (back/forward)
   useEffect(() => {
@@ -110,21 +61,21 @@ export default function App() {
   return (
     <div className="min-h-screen relative bg-[#f6f9fb] text-[#0f172a]">
       {/* Blur overlay when expired */}
-      {expired && (
-        <div className="absolute inset-0 z-[2000]">
-          <div className="absolute inset-0 backdrop-blur-sm bg-black/20" />
-          <div className="absolute inset-0 flex items-center justify-center p-4">
+      {sessionExpired && (
+        <div className="fixed inset-0 z-[2000]">
+          <div className="fixed inset-0 backdrop-blur-sm bg-black/20" />
+          <div className="fixed inset-0 flex items-center justify-center p-4">
             <div className="max-w-md w-full rounded-xl bg-white shadow-2xl border p-5 text-center">
-              <h2 className="text-lg font-semibold text-gray-900">Sesión expirada</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Session Expired</h2>
               <p className="mt-2 text-sm text-gray-700">
-                Tu sesión de Salesforce ha caducado por inactividad o desconexión. Refresca la página para volver a iniciar sesión.
+                Your Salesforce session has expired due to inactivity or disconnection. Please log in again to continue.
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
                   className="rounded-md bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90"
-                  onClick={() => window.location.reload()}
+                  onClick={() => sfLoginRedirect()}
                 >
-                  Refrescar página
+                  Log In Again
                 </button>
               </div>
             </div>
@@ -134,17 +85,17 @@ export default function App() {
 
       {/* Main content (dimmed visually by overlay above) */}
       <Header active={tab} onTab={goTab} />
-      <main className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6" aria-hidden={expired}>
+      <main className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6" aria-hidden={sessionExpired}>
         {authed === false && (
           <div className="p-3 rounded bg-amber-50 border border-amber-200 text-sm">
-            No estás conectado a Salesforce. Algunas vistas pueden mostrar menos datos.
+            You are not connected to Salesforce. Some views may show limited data.
           </div>
         )}
-        {tab === "upload" && <UploadLinkView />}
+        {tab === "upload" && <LinkAuthView />}
         {tab === "explorer" && <ExplorerView />}
         {tab === "chat" && <ChatView />}
       </main>
-      <footer className="mt-10 py-6 text-center text-xs text-slate-500" aria-hidden={expired}>
+      <footer className="mt-10 py-6 text-center text-xs text-slate-500" aria-hidden={sessionExpired}>
         © {new Date().getFullYear()} INNODIA — Clinical Trial Support
       </footer>
     </div>

@@ -414,7 +414,7 @@ export default function MapView({
   if (!apiKey || apiKey.trim() === "") {
     return (
       <div className="p-3 border rounded bg-amber-50 text-amber-900">
-        Falta <code>VITE_GOOGLE_MAPS_API_KEY</code>. El mapa está desactivado, pero la tabla funciona.
+        Missing <code>VITE_GOOGLE_MAPS_API_KEY</code>. Map is disabled, but the table works.
       </div>
     );
   }
@@ -723,11 +723,11 @@ export default function MapView({
   if (loadError) {
     return (
       <div className="p-3 border rounded bg-rose-50 text-rose-900">
-        Error cargando Google Maps. Revisa la API key. La tabla sigue operativa.
+        Error loading Google Maps. Check the API key. The table is still working.
       </div>
     );
   }
-  if (!isLoaded) return <div className="p-3">Cargando mapa…</div>;
+  if (!isLoaded) return <div className="p-3">Loading map…</div>;
 
   return (
     <GoogleMap

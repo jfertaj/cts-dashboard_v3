@@ -167,7 +167,9 @@ const COLOR_NEUTRAL = "#9ca3af";
 
 // ========== Columnas visibles por defecto ==========
 const DEFAULT_VISIBLE_COLUMNS: string[] = [
-  "sf.Account.Name"
+  "sf.Account.Name",
+  "sf.Account.ShippingCountry",
+  "sf.Account.ShippingCity",
 ];
 
 // ========== PRESETS base (SF) ==========
@@ -195,8 +197,7 @@ const PRESETS = {
     "sf.Account.Name",
     "sf.Account.ShippingCountry",
     "sf.Account.ShippingCity",
-    "sf.Account.ShippingLatitude",
-    "sf.Account.ShippingLongitude",
+    // Removed lat/lng from default presets to avoid clutter
   ],
   QualificationDates: [
     "sf.C_Profiling_Complete__c",
@@ -259,16 +260,77 @@ const PRESETS = {
 
 // ========== Mapa preset -> lista de keys SF ==========
 const SF_GROUPS: Record<string, string[]> = {
-  Basic: PRESETS.Basic,
-  "Opportunity Core": PRESETS.OpportunityCore,
-  "Account Basics": PRESETS.AccountBasics,
-  "Qualification (SF dates)": PRESETS.QualificationDates,
-  "Clinical Details": PRESETS.ClinicalCapacity,
-  "Notes & Verification": PRESETS.NotesAndVerification,
-  "Trial Phases": PRESETS.TrialPhases,
-  "Screening Programs": PRESETS.ScreeningPrograms,
-  "Staff Training": PRESETS.StaffTraining,
-  "Patient Population": PRESETS.PatientPopulation,
+  // OnBoarding
+  "OnBoarding": [
+    "sf.Name",
+    "sf.StageName",
+    "sf.C_Profiling_Complete__c",
+    "sf.Qualification_Close_Date__c",
+    "sf.Account.Id",
+    "sf.Account.Name",
+  ],
+  // Profiling Basics
+  "Profiling Basics": [
+    "sf.C_Number_of_T1D_Patients_currently_U_18__c",
+    "sf.C_Number_of_T1D_Patients_currently_O_18__c",
+    "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
+    "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+    "sf.C_PI_Experience_with_Immuno_Med__c",
+    "sf.C_Site_Has_A_Study_Nurse__c",
+    "sf.C_Interestedinconducting_clinical_trials__c",
+    "sf.C_SC_Dedicate_To_The_Research_Center__c",
+    "sf.C_Nbr_of_related_site_sub_Investigator__c",
+    "sf.C_Nbr_of_studies_PI_is_involved_PI_Sub_I__c",
+    "sf.C_Comments__c",
+    "sf.C_All_Research_Staff_Needed_for_GCP__c",
+    "sf.C_Aware_of_any_Screening_Program__c",
+    "sf.C_Center_for_Running_Early_Diagnosis__c",
+    "sf.C_Centralized_Clinical_Trial_Facility__c",
+    "sf.C_Lead_Study_Nurse_Dedicated_to_the_cent__c",
+    "sf.C_Primarily_Caring_for_all_study__c",
+    "sf.C_Site_Linked_with_Patient_Org_or_PAC__c",
+    "sf.C_Centralized_Facility_Contact_Person__c",
+    "sf.C_Immuno_Medi_trial_names_or_sponsors__c",
+    "sf.C_Lead_Study_Coordinator_SC__c",
+    "sf.C_Lead_Study_Nurse__c",
+    "sf.C_List_of_Organization_or_PAC_names__c",
+    "sf.C_List_of_trial_name_or_sponsors_NonTyp1__c",
+    "sf.C_List_of_trial_name_or_sponsors_Type1__c",
+    "sf.C_Phase_III_NonType1__c",
+    "sf.C_Phase_III_Type1__c",
+    "sf.C_Phase_II_NonType1__c",
+    "sf.C_Phase_II_Type1__c",
+    "sf.C_Phase_I_NonType1__c",
+    "sf.C_Phase_I_Type1__c",
+    "sf.C_Principal_Investigator__c",
+    "sf.C_SC_Experience_in_T1D_Clinicla_Research__c",
+    "sf.C_SC_Situation_Explanation__c",
+    "sf.C_Services_Provided_by_Centralized_Unit__c",
+    "sf.C_Study_Nurse_Situation_Explanation__c",
+    "sf.C_Study_Nurse_Specialities__c",
+    "sf.C_Send_patients_to_other_CTS_nearby__c",
+    "sf.C_List_of_nearby_CTS__c",
+  ],
+  // Screening
+  "Screening": [
+    "sf.C_Number_of_Individuals_screened_intotal__c",
+    "sf.C_Number_of_Stage1_Individuals_followed__c",
+    "sf.C_Number_of_Stage2_Individuals_followed__c",
+    "sf.C_Is_HLA_typing_performed__c",
+    "sf.C_Population_Origin__c",
+    "sf.C_Additional_Comments__c",
+    "sf.C_Interest_about_setting_up_a_program__c",
+    "sf.C_Contact_Provided__c",
+    "sf.C_The_Funding_for_the_screening_program__c",
+    "sf.C_Under_Which_Program__c",
+  ],
+  // Account basics always available
+  "Account Basics": [
+    "sf.Account.Id",
+    "sf.Account.Name",
+    "sf.Account.ShippingCountry",
+    "sf.Account.ShippingCity",
+  ],
 };
 
 type LocalFieldDef = FieldDef & { group?: string };
@@ -313,6 +375,8 @@ const UNFILLABLE_COLUMNS = new Set<string>([
 const EXCLUDED_VISIBLE_COLUMNS = new Set<string>([
   "sf.Account.ShippingCountry",
   "sf.Account.ShippingCity",
+  "sf.Account.ShippingLatitude",
+  "sf.Account.ShippingLongitude",
 ]);
 
 function useDebouncedEffect(fn: () => void, deps: any[], delay = 250) {
@@ -935,6 +999,18 @@ function readDataCell(row: any, key: string) {
   const k3 = base.replace(/\./g, "_");
   if (d[k3] !== undefined && d[k3] !== null && String(d[k3]).trim() !== "") return d[k3];
 
+  // 4) fallbacks a propiedades de fila "planas" (el backend ya las trae así)
+  //    - sf.Account.Name / Account.Name  -> row.account_name
+  //    - sf.Account.Id   / Account.Id    -> row.account_id
+  //    - country, city (o sus variantes SF) -> row.country / row.city
+  const kb = base.toLowerCase();
+  if (kb === 'account.name') return row?.account_name ?? undefined;
+  if (kb === 'account.id') return row?.account_id ?? undefined;
+  if (key === 'sf.Account.Name') return row?.account_name ?? undefined;
+  if (key === 'sf.Account.Id')   return row?.account_id ?? undefined;
+  if (kb === 'country' || kb === 'account.shippingcountry') return row?.country ?? undefined;
+  if (kb === 'city'    || kb === 'account.shippingcity')    return row?.city ?? undefined;
+
   // ⚠️ Importante: devolver undefined para que TanStack Table pueda aplicar sortUndefined: 'last'
   return undefined;
 }
@@ -987,6 +1063,10 @@ function mergeFilledCells(
         if (!newData) newData = { ...prevData };
         newData[k] = v;
         rowChanged = true;
+      }
+      // Extra: si rellenamos sf.Account.Id y falta account_id en la fila, sincronízalo
+      if ((k === "sf.Account.Id" || k === "Account.Id") && (!row.account_id || String(row.account_id).trim() === "")) {
+        (row as any).account_id = String(v || "");
       }
     }
 
@@ -1045,7 +1125,7 @@ function enrichFieldsWithGroups(fields: FieldDef[], sfKeyToGroupMap: Map<string,
     const src = (f.source || "").toLowerCase();
     if (src === "qual") {
       if (!out.group || !out.group.trim()) {
-        out.group = f.qual_section || "Qualification";
+        out.group = f.qual_section || "Qualification forms";
       }
       return out;
     }
@@ -2072,6 +2152,15 @@ export default function ExplorerView() {
         enableSorting: true,
         enableColumnFilter: true,
         filterFn: containsCI,
+        // Render booleans and empties nicely
+        cell: ({ getValue }) => {
+          const v = getValue<any>();
+          if (typeof v === 'boolean') return v ? '✓' : '—';
+          if (v === null || v === undefined) return '';
+          const s = String(v).trim();
+          if (s === '' || s === '__' || s === 'null' || s === 'undefined') return '';
+          return s;
+        },
         // Delega el orden a TanStack: alphanumeric + sortUndefined:'last' asegura que los vacíos
         // se queden SIEMPRE al final tanto en asc como en desc.
         sortingFn: 'alphanumeric',
@@ -2171,13 +2260,30 @@ export default function ExplorerView() {
     xKey: string,
     yKeys: string[]
   ) => {
+    // If X is 'country' or 'city', aggregate values by that dimension (sum per group)
+    const wantGroup = (xKey === 'country' || xKey === 'city');
+    if (wantGroup) {
+      const buckets = new Map<string, Record<string, any>>();
+      for (const r of rowsIn) {
+        const key = String(readDataCell(r as any, xKey) ?? '').trim() || '(empty)';
+        const bucket = buckets.get(key) || { [xKey]: key };
+        for (const y of yKeys) {
+          const raw = readDataCell(r as any, y);
+          const n = Number(String(raw ?? '').replace(/,/g, ''));
+          bucket[y] = (Number.isFinite(n) ? (bucket[y] || 0) + n : (bucket[y] || 0));
+        }
+        buckets.set(key, bucket);
+      }
+      return Array.from(buckets.values());
+    }
+    // Default: row-wise dataset
     const arr: Array<Record<string, any>> = [];
     for (const r of rowsIn) {
       const row: Record<string, any> = {};
       row[xKey] = readDataCell(r as any, xKey) ?? "";
       for (const y of yKeys) {
         const raw = readDataCell(r as any, y);
-        const n = Number(raw);
+        const n = Number(String(raw ?? '').replace(/,/g, ''));
         row[y] = Number.isFinite(n) ? n : null;
       }
       arr.push(row);
@@ -2660,7 +2766,7 @@ export default function ExplorerView() {
             return base;
           }, [fieldDefs])}
           defaultOpen={false}
-          showPresets={true}
+showPresets={false}
           sortKeys={(allKeys, presets) => orderKeysByPresets(allKeys, presets as any)}
           renderPresetHeader={(preset) => {
             if (preset.id === "qual_dyn") {
@@ -2702,7 +2808,7 @@ export default function ExplorerView() {
           {table.getFilteredRowModel().rows.length.toLocaleString()} result
           {table.getFilteredRowModel().rows.length === 1 ? "" : "s"}
           {sorting[0] ? (
-            <> · sorted by <strong>{sorting[0].id}</strong> ({sorting[0].desc ? "desc" : "asc"})</>
+            <> · sorted by <strong>{labelByKey.get(sorting[0].id) ?? (sorting[0].id === 'country' ? 'Country' : sorting[0].id === 'city' ? 'City' : prettyLabelFromKeyLabel(String(sorting[0].id)))}</strong> ({sorting[0].desc ? "desc" : "asc"})</>
           ) : null}
           {nearbyActive ? <> · Nearby ≤ <strong>{nearbyMeta?.max_km ?? "—"}</strong> km</> : null}
         </div>
@@ -2743,10 +2849,10 @@ export default function ExplorerView() {
             className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
             onClick={() =>
               askAIAndMaybeShowChart(
-                "Dime los 5 centros con más pacientes al año y muéstralo en una tabla y gráfico de barras"
+                "Show me the top 5 sites with most patients per year in a table and bar chart"
               )
             }
-            title="Pedir al agente y abrir el gráfico si procede"
+            title="Ask AI agent and open chart if applicable"
           >
             Ask AI →
           </button>
