@@ -11,7 +11,7 @@ export default function LoginBanner() {
         <div className="flex-1">
           <h3 className="font-semibold text-lg text-[#0f172a]">Connect with Salesforce</h3>
           <p className="text-sm text-slate-600 mt-1">
-            Inicia sesión para buscar cuentas, vincular sitios y explorar datos de profiling / qualification.
+            Log in to search accounts, link sites, and explore profiling/qualification data.
           </p>
         </div>
         <button

@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
 import Header from "./components/Header";
-import UploadLinkView from "./pages/UploadLinkView";
+import LinkAuthView from "./pages/UploadLinkView";
 import ChatView from "./pages/ChatView";
 import ExplorerView from "./pages/ExplorerView";
-import { sfMe } from "./lib/salesforce";
+import { sfLoginRedirect } from "./lib/salesforce";
+import { useSalesforceAuth } from "./hooks/useSalesforceAuth";
+import { useIdleTimer } from "./hooks/useIdleTimer";
+import { Tab } from "./types";
 
-type Tab = "upload" | "explorer" | "chat";
+
 
 function getTabFromURL(): Tab {
   // 1) Permite /explorer y /chat directamente en la URL
@@ -20,15 +23,12 @@ function getTabFromURL(): Tab {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>(getTabFromURL());
-  const [authed, setAuthed] = useState<boolean | null>(null); // null -> unknown
 
-  // Lee auth al cargar
-  useEffect(() => {
-    (async () => {
-      const me = await sfMe();
-      setAuthed(!!me.authenticated);
-    })();
-  }, []);
+  // Custom hooks for Auth & Idle
+  const { authed, sessionExpired, setSessionExpired } = useSalesforceAuth();
+  useIdleTimer(sessionExpired, setSessionExpired);
+
+
 
   // Escucha cambios del historial (back/forward)
   useEffect(() => {
@@ -59,19 +59,43 @@ export default function App() {
 
 
   return (
-    <div className="min-h-screen bg-[#f6f9fb] text-[#0f172a]">
+    <div className="min-h-screen relative bg-[#f6f9fb] text-[#0f172a]">
+      {/* Blur overlay when expired */}
+      {sessionExpired && (
+        <div className="fixed inset-0 z-[2000]">
+          <div className="fixed inset-0 backdrop-blur-sm bg-black/20" />
+          <div className="fixed inset-0 flex items-center justify-center p-4">
+            <div className="max-w-md w-full rounded-xl bg-white shadow-2xl border p-5 text-center">
+              <h2 className="text-lg font-semibold text-gray-900">Session Expired</h2>
+              <p className="mt-2 text-sm text-gray-700">
+                Your Salesforce session has expired due to inactivity or disconnection. Please log in again to continue.
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  className="rounded-md bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90"
+                  onClick={() => sfLoginRedirect()}
+                >
+                  Log In Again
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main content (dimmed visually by overlay above) */}
       <Header active={tab} onTab={goTab} />
-      <main className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6">
+      <main className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6" aria-hidden={sessionExpired}>
         {authed === false && (
           <div className="p-3 rounded bg-amber-50 border border-amber-200 text-sm">
-            You are not logged in in Salesfoce. Some views can missing data.
+            You are not connected to Salesforce. Some views may show limited data.
           </div>
         )}
-        {tab === "upload" && <UploadLinkView />}
+        {tab === "upload" && <LinkAuthView />}
         {tab === "explorer" && <ExplorerView />}
         {tab === "chat" && <ChatView />}
       </main>
-      <footer className="mt-10 py-6 text-center text-xs text-slate-500">
+      <footer className="mt-10 py-6 text-center text-xs text-slate-500" aria-hidden={sessionExpired}>
         © {new Date().getFullYear()} INNODIA — Clinical Trial Support
       </footer>
     </div>

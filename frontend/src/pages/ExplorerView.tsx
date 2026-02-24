@@ -34,6 +34,136 @@ import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
 
+const OP_LABELS: Record<string, string> = {
+  equals: "=", not_equals: "≠", contains: "contains", not_contains: "!contains",
+  starts_with: "starts with", ends_with: "ends with",
+  ">": ">", ">=": "≥", "<": "<", "<=": "≤",
+  between: "between", in: "in", not_in: "not in",
+  is_empty: "is empty", is_not_empty: "is not empty",
+};
+
+/** ================================================
+ * Human‑friendly label dictionary (explicit overrides)
+ * Keys can be with or without the "sf." prefix; matching is
+ * case-insensitive and also supports a normalized form
+ * (lowercase, no "__c", no dots/underscores/spaces).
+ * ================================================ */
+const FRIENDLY_LABEL_OVERRIDES = new Map<string, string>([
+  // ---- New dx T1D (last year) ----
+  ["sf.C_Number_of_new_T1D_diagnosed_U_18__c", "New diagnosed T1D <18"],
+  ["C_Number_of_new_T1D_diagnosed_U_18__c", "New diagnosed T1D <18"],
+  ["sf.C_Number_of_new_T1D_diagnosed_O_18__c", "New diagnosed T1D ≥18"],
+  ["C_Number_of_new_T1D_diagnosed_O_18__c", "New diagnosed T1D ≥18"],
+
+  // ---- Current T1D population ----
+  ["sf.C_Number_of_T1D_Patients_currently_U_18__c", "T1D patients <18 (current)"],
+  ["C_Number_of_T1D_Patients_currently_U_18__c", "T1D patients <18 (current)"],
+  ["sf.C_Number_of_T1D_Patients_currently_O_18__c", "T1D patients ≥18 (current)"],
+  ["C_Number_of_T1D_Patients_currently_O_18__c", "T1D patients ≥18 (current)"],
+
+  // ---- Screening / stages ----
+  ["sf.C_Number_of_Individuals_screened_intotal__c", "Individuals screened (total)"],
+  ["C_Number_of_Individuals_screened_intotal__c", "Individuals screened (total)"],
+  ["sf.C_Number_of_Stage1_Individuals_followed__c", "Stage 1 individuals followed"],
+  ["C_Number_of_Stage1_Individuals_followed__c", "Stage 1 individuals followed"],
+  ["sf.C_Number_of_Stage2_Individuals_followed__c", "Stage 2 individuals followed"],
+  ["C_Number_of_Stage2_Individuals_followed__c", "Stage 2 individuals followed"],
+
+  // ---- Common SF basics (examples) ----
+  ["sf.Account.Name", "Account Name"],
+  ["Account.Name", "Account Name"],
+  ["sf.Account.ShippingCountry", "Country"],
+  ["Account.ShippingCountry", "Country"],
+  ["sf.Account.ShippingCity", "City"],
+  ["Account.ShippingCity", "City"],
+]);
+
+// Build a normalized lookup for resilient matching
+function __normKeyForDict(k?: string): string {
+  if (!k) return "";
+  return String(k)
+    .trim()
+    .replace(/^sf\./i, "")
+    .replace(/__c$/i, "")
+    .replace(/[._\s]/g, "")
+    .toLowerCase();
+}
+const __FRIENDLY_LABEL_OVERRIDES_NORM = (() => {
+  const m = new Map<string, string>();
+  for (const [k, v] of FRIENDLY_LABEL_OVERRIDES.entries()) {
+    m.set(__normKeyForDict(k), v);
+  }
+  return m;
+})();
+
+// ---- Label prettifier (SF -> human) ----
+function prettyLabelFromKeyLabel(key: string, incoming?: string | null): string {
+  // 0) Dictionary overrides (highest priority)
+  // Try exact key (with/without sf.), then normalized key
+  const exact =
+    FRIENDLY_LABEL_OVERRIDES.get(key) ||
+    FRIENDLY_LABEL_OVERRIDES.get(key.replace(/^sf\./i, ""));
+  if (exact) return exact;
+
+  const normHit = __FRIENDLY_LABEL_OVERRIDES_NORM.get(__normKeyForDict(key));
+  if (normHit) return normHit;
+
+  // 1) Prefer the incoming label if present; otherwise derive from the key
+  const raw0 = (incoming && String(incoming).trim().length ? String(incoming) : String(key)) || "";
+
+  // 2) Strip SF adornments
+  let s = raw0
+    .replace(/^sf\./i, "")
+    .replace(/__c$/i, "")
+    .replace(/\./g, " ")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // 3) Remove leading technical prefixes like "C " or "CS "
+  s = s.replace(/^(C|CS|Ct|Fld)\s+/i, "");
+
+  // 4) Title-case with preserved acronyms
+  const ACRONYMS = new Set(["T1D", "GCP", "PI", "CTS", "PAC", "CS"]);
+  const words = s.split(" ").filter(Boolean);
+  s = words
+    .map((w) => {
+      const up = w.toUpperCase();
+      if (ACRONYMS.has(up)) return up;
+      const small = ["of", "and", "or", "for", "to", "in", "on", "with", "by"];
+      if (small.includes(w.toLowerCase())) return w.toLowerCase();
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(" ");
+
+  // 5) Domain tweaks
+  s = s
+    // U 18 / O 18 → <18 / ≥18 (allow variants with/without spaces/underscores)
+    .replace(/\bU\s*[_]?\s*18\b/gi, "<18")
+    .replace(/\bO\s*[_]?\s*18\b/gi, "≥18")
+    // Remove boilerplate "Number of"
+    .replace(/\bNumber\s+of\b/gi, "")
+    // Normalize phrasing "T1D Diagnosed" → "Diagnosed T1D"
+    .replace(/\bT1D\s+Diagnosed\b/gi, "Diagnosed T1D")
+    // Collapse spaces
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  // 6) Specific phrasing polish
+  s = s
+    .replace(/^Number\s+/i, "")
+    .replace(/\bDiagnosed\b/gi, "diagnosed")
+    .replace(/\bNew\s+(?:T1D\s+)?diagnosed\b/gi, "New diagnosed")
+    .replace(/\bdiagnosed\s+T1D\b/gi, "diagnosed T1D");
+
+  // 7) Final touch: ensure "New T1D" segment (if present) is leading
+  if (/New\s+T1D/i.test(s) && !/^New\s+T1D/i.test(s)) {
+    s = s.replace(/.*?(New\s+T1D.*)$/i, "$1");
+  }
+
+  return s;
+}
+
 
 // import { explorerFillColumns } from "../lib/api";
 
@@ -45,7 +175,9 @@ const COLOR_NEUTRAL = "#9ca3af";
 
 // ========== Columnas visibles por defecto ==========
 const DEFAULT_VISIBLE_COLUMNS: string[] = [
-  "sf.Account.Name"
+  "sf.Account.Name",
+  "sf.Account.ShippingCountry",
+  "sf.Account.ShippingCity",
 ];
 
 // ========== PRESETS base (SF) ==========
@@ -73,8 +205,7 @@ const PRESETS = {
     "sf.Account.Name",
     "sf.Account.ShippingCountry",
     "sf.Account.ShippingCity",
-    "sf.Account.ShippingLatitude",
-    "sf.Account.ShippingLongitude",
+    // Removed lat/lng from default presets to avoid clutter
   ],
   QualificationDates: [
     "sf.C_Profiling_Complete__c",
@@ -137,16 +268,77 @@ const PRESETS = {
 
 // ========== Mapa preset -> lista de keys SF ==========
 const SF_GROUPS: Record<string, string[]> = {
-  Basic: PRESETS.Basic,
-  "Opportunity Core": PRESETS.OpportunityCore,
-  "Account Basics": PRESETS.AccountBasics,
-  "Qualification (SF dates)": PRESETS.QualificationDates,
-  "Clinical Details": PRESETS.ClinicalCapacity,
-  "Notes & Verification": PRESETS.NotesAndVerification,
-  "Trial Phases": PRESETS.TrialPhases,
-  "Screening Programs": PRESETS.ScreeningPrograms,
-  "Staff Training": PRESETS.StaffTraining,
-  "Patient Population": PRESETS.PatientPopulation,
+  // OnBoarding
+  "OnBoarding": [
+    "sf.Name",
+    "sf.StageName",
+    "sf.C_Profiling_Complete__c",
+    "sf.Qualification_Close_Date__c",
+    "sf.Account.Id",
+    "sf.Account.Name",
+  ],
+  // Profiling Basics
+  "Profiling Basics": [
+    "sf.C_Number_of_T1D_Patients_currently_U_18__c",
+    "sf.C_Number_of_T1D_Patients_currently_O_18__c",
+    "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
+    "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+    "sf.C_PI_Experience_with_Immuno_Med__c",
+    "sf.C_Site_Has_A_Study_Nurse__c",
+    "sf.C_Interestedinconducting_clinical_trials__c",
+    "sf.C_SC_Dedicate_To_The_Research_Center__c",
+    "sf.C_Nbr_of_related_site_sub_Investigator__c",
+    "sf.C_Nbr_of_studies_PI_is_involved_PI_Sub_I__c",
+    "sf.C_Comments__c",
+    "sf.C_All_Research_Staff_Needed_for_GCP__c",
+    "sf.C_Aware_of_any_Screening_Program__c",
+    "sf.C_Center_for_Running_Early_Diagnosis__c",
+    "sf.C_Centralized_Clinical_Trial_Facility__c",
+    "sf.C_Lead_Study_Nurse_Dedicated_to_the_cent__c",
+    "sf.C_Primarily_Caring_for_all_study__c",
+    "sf.C_Site_Linked_with_Patient_Org_or_PAC__c",
+    "sf.C_Centralized_Facility_Contact_Person__c",
+    "sf.C_Immuno_Medi_trial_names_or_sponsors__c",
+    "sf.C_Lead_Study_Coordinator_SC__c",
+    "sf.C_Lead_Study_Nurse__c",
+    "sf.C_List_of_Organization_or_PAC_names__c",
+    "sf.C_List_of_trial_name_or_sponsors_NonTyp1__c",
+    "sf.C_List_of_trial_name_or_sponsors_Type1__c",
+    "sf.C_Phase_III_NonType1__c",
+    "sf.C_Phase_III_Type1__c",
+    "sf.C_Phase_II_NonType1__c",
+    "sf.C_Phase_II_Type1__c",
+    "sf.C_Phase_I_NonType1__c",
+    "sf.C_Phase_I_Type1__c",
+    "sf.C_Principal_Investigator__c",
+    "sf.C_SC_Experience_in_T1D_Clinicla_Research__c",
+    "sf.C_SC_Situation_Explanation__c",
+    "sf.C_Services_Provided_by_Centralized_Unit__c",
+    "sf.C_Study_Nurse_Situation_Explanation__c",
+    "sf.C_Study_Nurse_Specialities__c",
+    "sf.C_Send_patients_to_other_CTS_nearby__c",
+    "sf.C_List_of_nearby_CTS__c",
+  ],
+  // Screening
+  "Screening": [
+    "sf.C_Number_of_Individuals_screened_intotal__c",
+    "sf.C_Number_of_Stage1_Individuals_followed__c",
+    "sf.C_Number_of_Stage2_Individuals_followed__c",
+    "sf.C_Is_HLA_typing_performed__c",
+    "sf.C_Population_Origin__c",
+    "sf.C_Additional_Comments__c",
+    "sf.C_Interest_about_setting_up_a_program__c",
+    "sf.C_Contact_Provided__c",
+    "sf.C_The_Funding_for_the_screening_program__c",
+    "sf.C_Under_Which_Program__c",
+  ],
+  // Account basics always available
+  "Account Basics": [
+    "sf.Account.Id",
+    "sf.Account.Name",
+    "sf.Account.ShippingCountry",
+    "sf.Account.ShippingCity",
+  ],
 };
 
 type LocalFieldDef = FieldDef & { group?: string };
@@ -191,6 +383,18 @@ const UNFILLABLE_COLUMNS = new Set<string>([
 const EXCLUDED_VISIBLE_COLUMNS = new Set<string>([
   "sf.Account.ShippingCountry",
   "sf.Account.ShippingCity",
+  "sf.Account.ShippingLatitude",
+  "sf.Account.ShippingLongitude",
+]);
+
+// --- Campos que NO mostramos en el FilterBuilder ---
+// - ShippingCountry/City → redundantes con site.country / site.city (que sí funcionan)
+// - Lat/Lng → no tienen sentido como filtro de texto
+const EXCLUDED_FILTER_FIELDS = new Set<string>([
+  "sf.Account.ShippingCountry",
+  "sf.Account.ShippingCity",
+  "sf.Account.ShippingLatitude",
+  "sf.Account.ShippingLongitude",
 ]);
 
 function useDebouncedEffect(fn: () => void, deps: any[], delay = 250) {
@@ -249,7 +453,7 @@ function DetailsModal({
     newDxUnder18?: number | null;
     newDxOver18?: number | null;
     csContribution?: {
-      Clinical_Site_CS__c?: boolean | null;
+      INNODIA_Clinical_Trial_Site__c?: boolean | null;
       Referral_Outreach_Site_Non_CTS__c?: boolean | null;
       Elegible_for_DETECT_Site__c?: boolean | null;
     } | null;
@@ -294,7 +498,7 @@ function DetailsModal({
             opportunity: json?.opportunity ?? null,
             newDxUnder18: json?.newDxUnder18 ?? json?.opportunity?.new_dx_u18 ?? null,
             newDxOver18: json?.newDxOver18 ?? json?.opportunity?.new_dx_o18 ?? null,
-            csContribution: json?.csContribution ?? { Clinical_Site_CS__c: null, Referral_Outreach_Site_Non_CTS__c: null, Elegible_for_DETECT_Site__c: null },
+            csContribution: json?.csContribution ?? { INNODIA_Clinical_Trial_Site__c: null, Referral_Outreach_Site_Non_CTS__c: null, Elegible_for_DETECT_Site__c: null },
             assignments: Array.isArray(json?.assignments) ? json.assignments : [],
           };
           setExtras(normalized);
@@ -389,7 +593,7 @@ function DetailsModal({
           {/* CS Contribution to INNODIA */}
           <hr className="my-2" />
           <div className="text-sm font-semibold text-gray-800">CS Contribution to INNODIA</div>
-          {line("INNODIA Clinical Trial Site", bool(cs?.Clinical_Site_CS__c))}
+          {line("INNODIA Clinical Trial Site", bool(cs?.INNODIA_Clinical_Trial_Site__c))}
           {line("Referral & Outreach Site (Non-CTS)", bool(cs?.Referral_Outreach_Site_Non_CTS__c))}
           {line("Eligible for DETECT Site", bool(cs?.Elegible_for_DETECT_Site__c))}
           {/* Assignments */}
@@ -714,7 +918,7 @@ function NearbyDrawer({
 
             {useSeparateNearbyFilters ? (
               <div className="p-3">
-                <FilterBuilder value={filtersNearby} onChange={onChangeFiltersNearby} fields={fields} />
+                <FilterBuilder value={filtersNearby} onChange={onChangeFiltersNearby} fields={fields.filter((f: any) => !EXCLUDED_FILTER_FIELDS.has(f.key))} />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700"
@@ -813,6 +1017,18 @@ function readDataCell(row: any, key: string) {
   const k3 = base.replace(/\./g, "_");
   if (d[k3] !== undefined && d[k3] !== null && String(d[k3]).trim() !== "") return d[k3];
 
+  // 4) fallbacks a propiedades de fila "planas" (el backend ya las trae así)
+  //    - sf.Account.Name / Account.Name  -> row.account_name
+  //    - sf.Account.Id   / Account.Id    -> row.account_id
+  //    - country, city (o sus variantes SF) -> row.country / row.city
+  const kb = base.toLowerCase();
+  if (kb === 'account.name') return row?.account_name ?? undefined;
+  if (kb === 'account.id') return row?.account_id ?? undefined;
+  if (key === 'sf.Account.Name') return row?.account_name ?? undefined;
+  if (key === 'sf.Account.Id')   return row?.account_id ?? undefined;
+  if (kb === 'country' || kb === 'account.shippingcountry') return row?.country ?? undefined;
+  if (kb === 'city'    || kb === 'account.shippingcity')    return row?.city ?? undefined;
+
   // ⚠️ Importante: devolver undefined para que TanStack Table pueda aplicar sortUndefined: 'last'
   return undefined;
 }
@@ -866,6 +1082,10 @@ function mergeFilledCells(
         newData[k] = v;
         rowChanged = true;
       }
+      // Extra: si rellenamos sf.Account.Id y falta account_id en la fila, sincronízalo
+      if ((k === "sf.Account.Id" || k === "Account.Id") && (!row.account_id || String(row.account_id).trim() === "")) {
+        (row as any).account_id = String(v || "");
+      }
     }
 
     if (!rowChanged) return row;
@@ -879,10 +1099,30 @@ function mergeFilledCells(
 }
 
 const containsCI = (row: any, columnId: string, filterValue: string) => {
-  const v = row.getValue<any>(columnId);
-  if (v === null || v === undefined) return false;
-  const s = String(v).toLowerCase();
-  return s.includes(String(filterValue ?? "").toLowerCase());
+  try {
+    // TanStack passes a Row object with getValue, but some callers (or older bundles) might
+    // pass a plain object. Be defensive: try row.getValue first, otherwise fall back to
+    // reading from original via our readDataCell helper or direct property access.
+    let v: any = undefined;
+    if (row && typeof row.getValue === "function") {
+      v = row.getValue<any>(columnId);
+    } else if (row && row.original) {
+      // columnId might be the key like "sf.Account.Name" or a simple id
+      v = readDataCell(row.original as any, columnId);
+    } else if (row && typeof row === "object") {
+      v = (row as any)[columnId];
+    }
+
+    if (v === null || v === undefined) return false;
+    const s = String(v).toLowerCase();
+    return s.includes(String(filterValue ?? "").toLowerCase());
+  } catch (e) {
+    // Any unexpected error should not break typing in the filter box — treat as no-match
+    // and surface a console.debug for debugging.
+    // eslint-disable-next-line no-console
+    console.debug("containsCI fallback due to error:", e);
+    return false;
+  }
 };
 
 type Preset = { id: string; label: string; keys: string[] };
@@ -900,11 +1140,16 @@ function orderKeysByPresets(allKeys: string[], presets: Preset[]): string[] {
 function enrichFieldsWithGroups(fields: FieldDef[], sfKeyToGroupMap: Map<string,string>): LocalFieldDef[] {
   return fields.map((f) => {
     const out: LocalFieldDef = { ...f };
-    if (out.group && out.group.trim()) return out;
     const src = (f.source || "").toLowerCase();
+    if (src === "qual") {
+      if (!out.group || !out.group.trim()) {
+        out.group = f.qual_section || "Qualification forms";
+      }
+      return out;
+    }
+    if (out.group && out.group.trim()) return out;
     if (src === "site") out.group = "Site";
     else if (src === "sf") out.group = sfKeyToGroupMap.get(f.key) || "Salesforce (other)";
-    else if (src === "qual") out.group = "Qualification";
     else out.group = "Other";
     return out;
   });
@@ -945,10 +1190,104 @@ function needsFill(rows: ExplorerRow[], cols: string[]): boolean {
 
 
 function getAccountNameFromRow(r: ExplorerRow): string {
-  const v = readDataCell(r as any, "sf.Account.Name");
-  return (v !== undefined && v !== null && String(v).trim() !== "") ? String(v) : (r.account_name || "");
+  try {
+    const v = readDataCell(r as any, "sf.Account.Name");
+    if (v !== undefined && v !== null && String(v).trim() !== "") return String(v);
+    return (r && (r.account_name || "")) || "";
+  } catch (e) {
+    // Defensive: any unexpected shape should not break sorting/filtering
+    // eslint-disable-next-line no-console
+    console.debug("getAccountNameFromRow fallback due to error:", e);
+    try { return String((r && r.account_name) || ""); } catch { return ""; }
+  }
 }
 
+// ===== Helpers to filter by a list of Account IDs (from ChatView or URL) =====
+function getAccountIdFilterKey(fields: FieldDef[]): string | null {
+  // Prefer a true SF Account.Id if present, otherwise fall back to site/account id keys if exposed
+  const keys = new Set((fields || []).map(f => f.key));
+  if (keys.has("sf.Account.Id")) return "sf.Account.Id";
+  if (keys.has("site.account_id")) return "site.account_id";
+  if (keys.has("account_id")) return "account_id";
+  return null;
+}
+
+function buildAccountIdsFilter(fieldKey: string, ids: string[]): FilterGroup {
+  // FilterBuilder no representa bien el operador "in" y termina dejando un único
+  // campo con valores separados por comas. Para que funcione y se vea como en la
+  // UI de la captura, generamos un grupo OR con una regla de igualdad por id.
+  const unique = Array.from(new Set(ids.map(String).filter(Boolean)));
+  return {
+    logic: "OR",
+    rules: unique.map((id) => ({
+      field: fieldKey,
+      operator: "=",
+      value: id,
+    })) as any[],
+  };
+}
+
+// Convierte filtros donde el value trae IDs separados por comas
+// en un grupo OR con reglas = por cada id.
+function normalizeAccountIdCsvToOr(f: FilterGroup): FilterGroup {
+  // Deep-walk: if a rule has a string value with commas, expand it into an OR group
+  // preserving existing nested AND/OR groups.
+  const clone = (obj: any) => JSON.parse(JSON.stringify(obj || { logic: "AND", rules: [] }));
+
+  const expandNode = (node: any): any => {
+    // If it's a group
+    if (node && Array.isArray(node.rules)) {
+      const children = node.rules.map(expandNode);
+
+      // If any direct child expansion returned a "csv-expanded" marker, we should OR them
+      const hasCsv = children.some((c: any) => c && c.__csvExpanded === true);
+
+      return {
+        logic: hasCsv ? "OR" : (node.logic === "OR" ? "OR" : "AND"),
+        rules: children.map((c: any) => (c && c.__csvExpanded === true ? c.rules : c)).flat(),
+      };
+    }
+
+    // Leaf rule
+    const val = node?.value;
+    if (typeof val === "string" && val.includes(",")) {
+      const parts = val.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        return {
+          __csvExpanded: true,
+          logic: "OR",
+          rules: parts.map((p) => ({
+            field: node.field,
+            operator: node.operator ?? "=",
+            value: p,
+          })),
+        };
+      }
+    }
+    return node;
+  };
+
+  try {
+    const root = clone(f);
+    const expanded = expandNode(root);
+    // expandNode can return a leaf; enforce group shape at root
+    if (expanded && !Array.isArray(expanded.rules)) {
+      return { logic: "AND", rules: [expanded as any] } as FilterGroup;
+    }
+    // Strip internal marker if present
+    const strip = (n: any): any => {
+      if (!n) return n;
+      if (Array.isArray(n.rules)) {
+        return { logic: n.logic, rules: n.rules.map(strip) };
+      }
+      const { __csvExpanded, ...rest } = n;
+      return rest;
+    };
+    return strip(expanded);
+  } catch {
+    return f;
+  }
+}
 
 /* ================= Nearby API ================= */
 type NearbyResult = {
@@ -1056,6 +1395,7 @@ export default function ExplorerView() {
 
   const [useSeparateNearbyFilters, setUseSeparateNearbyFilters] = useState(false);
   const [filtersNearby, setFiltersNearby] = useState<FilterGroup>({ logic: "AND", rules: [] });
+  const [autoSearchTrigger, setAutoSearchTrigger] = useState(0);
   const [lastNearbyParams, setLastNearbyParams] = useState<{ baseAccountId: string; maxKm: number } | null>(null);
 
   // ===== Details state (NEW) =====
@@ -1075,7 +1415,18 @@ export default function ExplorerView() {
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnOrder, JSON.stringify(columnOrder)); }, [columnOrder]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbyLayout, JSON.stringify(nearbyLayout)); }, [nearbyLayout]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbySideWidth, JSON.stringify(nearbySideWidth)); }, [nearbySideWidth]);
-  
+
+  // Auto-search when all filter rules are removed so the map restores full results
+  const prevFiltersRulesLenRef = useRef(0);
+  useEffect(() => {
+    const prev = prevFiltersRulesLenRef.current;
+    prevFiltersRulesLenRef.current = filters.rules.length;
+    if (prev > 0 && filters.rules.length === 0 && !busy && bootDone) {
+      onSearch();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.rules.length]);
+
   const idsSig = useMemo(() => {
     const currentRows = nearbyActive ? fullNearbyRows : fullRows;
     const ids = Array.from(new Set((currentRows || []).map(r => r.account_id).filter(Boolean)));
@@ -1324,11 +1675,29 @@ export default function ExplorerView() {
 
     const { flds, allKeys, resp } = bootData;
     const fldsWithGroup = enrichFieldsWithGroups(flds, sfKeyToGroupMap);
-    setFieldDefs(fldsWithGroup as any);
+
+    const pts = Array.isArray(resp?.points) ? resp.points : [];
+    const rws = Array.isArray(resp?.rows) ? resp.rows : [];
+    const hasQualificationData =
+      pts.some((p: any) => p?.badges?.qualification) ||
+      rws.some((row: any) => {
+        const data = row?.data || {};
+        return Object.entries(data).some(
+          ([k, v]) => k.startsWith("qual.") && v != null && v !== "" && v !== false
+        );
+      });
+
+    const fieldDefsForUi = hasQualificationData
+      ? fldsWithGroup
+      // Si no hay ningún dato de Qualification, ocultamos automáticamente todos los campos qual.*
+      // para evitar que aparezca una sección vacía en el selector de columnas.
+      : fldsWithGroup.filter((f) => !(f.key || "").startsWith("qual."));
+
+    setFieldDefs(fieldDefsForUi as any);
     setAllColumnKeys(allKeys);
 
     setVisibleColumns((prev) => {
-      const allowed = new Set(allKeys);
+      const allowed = new Set(fieldDefsForUi.map((f) => f.key));
       const base = prev && Array.isArray(prev) ? prev : DEFAULT_VISIBLE_COLUMNS;
       // No excluimos a la fuerza ShippingCity/ShippingCountry aquí;
       // si no deseas mostrarlas, ocúltalas en la lista de `fields` del ColumnPicker.
@@ -1340,13 +1709,26 @@ export default function ExplorerView() {
     });
 
     // Rellena caché completa y la vista actual
-    const pts = Array.isArray(resp?.points) ? resp.points : [];
-    const rws = Array.isArray(resp?.rows) ? resp.rows : [];
+    // Instrumentation: trace whether `cs` is present on points coming from the server
+    try {
+      const withCs = pts.filter((p: any) => p && p.cs !== undefined).length;
+      const sample = pts.find((p: any) => p?.account_id === "001Vg00000UGORhIAP");
+      console.info("[CTS][DEBUG] bootstrap -> setting fullPoints:", { total: pts.length, withCs, sampleId: sample?.account_id ?? null, sampleHasCs: sample ? (sample.cs !== undefined) : null, sample });
+    } catch (e) {
+      console.info("[CTS][DEBUG] bootstrap -> setting fullPoints: (instrumentation failed)", e);
+    }
     setFullPoints(pts); 
     setFullRows(rws);
     // ⬇️ DEBUG
     ;(window as any).__rows_search = rws;
     console.log("[CTS][DEBUG] onSearch rows sample:", rws?.[0]);
+    try {
+      const withCs2 = pts.filter((p: any) => p && p.cs !== undefined).length;
+      const sample2 = pts.find((p: any) => p?.account_id === "001Vg00000UGORhIAP");
+      console.info("[CTS][DEBUG] bootstrap -> setting points:", { total: pts.length, withCs: withCs2, sampleId: sample2?.account_id ?? null, sampleHasCs: sample2 ? (sample2.cs !== undefined) : null, sample: sample2 });
+    } catch (e) {
+      console.info("[CTS][DEBUG] bootstrap -> setting points: (instrumentation failed)", e);
+    }
     setPoints(pts); 
     setRows(rws);
     setBootDone(true);
@@ -1378,9 +1760,25 @@ export default function ExplorerView() {
   const labelByKey = useMemo(() => {
     const m = new Map<string, string>();
     const arr = Array.isArray(fieldDefs) ? (fieldDefs as any[]) : [];
-    arr.forEach((f: any) => { if (f && typeof f.key === "string") m.set(f.key, f.label ?? f.key.replace(/^sf\./, "")); });
+    for (const f of arr) {
+      if (!f || typeof f.key !== "string") continue;
+      const pretty = prettyLabelFromKeyLabel(f.key, (f as any).label);
+      m.set(f.key, pretty);
+    }
     return m;
   }, [fieldDefs]);
+
+  const activeRuleCount = useMemo(() => {
+    const count = (g: { rules?: any[] }): number => {
+      let n = 0;
+      for (const r of (g.rules ?? [])) {
+        if (r && typeof (r as any).field === "string") n++;
+        else n += count(r as any);
+      }
+      return n;
+    };
+    return count(filters);
+  }, [filters]);
 
   const qualPresetKeys = useMemo(
     () => (Array.isArray(fieldDefs) ? (fieldDefs as FieldDef[]).filter(f => String(f.key).startsWith("qual.")).map(f => f.key) : []),
@@ -1412,44 +1810,115 @@ export default function ExplorerView() {
 
   // Buscar con filtros (no cerramos nearby)
   const onSearch = async () => {
-    setBusy(true); setErr(null);
+    setBusy(true);
+    setErr(null);
+    fillBusyRef.current = true;
     try {
-      // Pedimos SIEMPRE TODAS las columnas
-      const resp = await explorerSearch({
-        filters,
-        columns: allColumnKeys,
-      } as any);
+      console.groupCollapsed("[CTS] Search triggered");
+      console.log("Current filters:", filters);
+      console.log("All columns:", allColumnKeys.length);
+
+      // Normalizamos filtros
+      const normalizedFilters = normalizeAccountIdCsvToOr(filters);
+      const payload = { filters: normalizedFilters, columns: allColumnKeys };
+
+      // Ejecuta fetch directo sin interferencia de caches previas
+      const res = await fetch("/api/explorer/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+      }
+
+      // Clonamos el body antes de parsear JSON
+      const textBody = await res.text();
+      let json: any;
+      try {
+        json = JSON.parse(textBody);
+      } catch (e) {
+        console.error("❌ JSON parse failed:", e, textBody.slice(0, 300));
+        throw new Error("Invalid JSON in response");
+      }
+
+      // Exit nearby mode and clear last fill signature before updating points/rows
+      setNearbyActive(false);
+      setNearbyPanelOpen(false);
+
+      const pts = Array.isArray(json?.points) ? json.points : [];
+      const rws = Array.isArray(json?.rows) ? json.rows : [];
+
       setSfAuthOk(true);
       window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: true } }));
-      const pts = Array.isArray(resp?.points) ? resp.points : [];
-      const rws = Array.isArray(resp?.rows) ? resp.rows : [];
-      setFullPoints(pts); 
+
+      // Instrumentation: check `cs` presence on search results
+      try {
+        const withCs = pts.filter((p: any) => p && p.cs !== undefined).length;
+        const sample = pts.find((p: any) => p?.account_id === "001Vg00000UGORhIAP");
+        console.info("[CTS][DEBUG] search -> setting fullPoints:", { total: pts.length, withCs, sampleId: sample?.account_id ?? null, sampleHasCs: sample ? (sample.cs !== undefined) : null, sample });
+      } catch (e) {
+        console.info("[CTS][DEBUG] search -> setting fullPoints: (instrumentation failed)", e);
+      }
+
+      setFullPoints(pts);
       setFullRows(rws);
-      // ⬇️ DEBUG
-      ;(window as any).__rows_search = rws;
-      console.log("[CTS][DEBUG] onSearch rows sample:", rws?.[0]);
-      setPoints(pts); setRows(rws);
+
+      try {
+        const withCs2 = pts.filter((p: any) => p && p.cs !== undefined).length;
+        const sample2 = pts.find((p: any) => p?.account_id === "001Vg00000UGORhIAP");
+        console.info("[CTS][DEBUG] search -> setting points:", { total: pts.length, withCs: withCs2, sampleId: sample2?.account_id ?? null, sampleHasCs: sample2 ? (sample2.cs !== undefined) : null, sample: sample2 });
+      } catch (e) {
+        console.info("[CTS][DEBUG] search -> setting points: (instrumentation failed)", e);
+      }
+
+      setPoints(pts);
+      setRows(rws);
+      lastFillSigRef.current = "";
+
+      console.table(rws.slice(0, 5).map(r => ({
+        id: r.account_id,
+        name: r.account_name,
+        country: r.country,
+        city: r.city
+      })));
+      console.groupEnd();
     } catch (e: any) {
-      // Silencia errores de timeout para no mostrar "Timeout" en rojo
+      console.error("[CTS] Search error:", e);
       if (isTimeoutErr(e)) {
-        console.warn("Search timeout — ignoring UI error", e);
-        // mantenemos rows/points como estén
-        setBusy(false);
+        console.warn("⏱ Timeout ignored");
         return;
       }
       const status = e?.status ?? e?.response?.status ?? Number(String(e?.message || "").match(/HTTP\s+(\d{3})/)?.[1] || NaN);
       if (status === 401 || status === 403) {
-    
         setSfAuthOk(false);
         window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
         setErr(null);
       } else {
-        console.error(e); setErr(e?.message || "Refresh error");
+        setErr(e?.message || "Search failed");
       }
-    
-      setPoints([]); setRows([]); setPageIndex(0);
-    } finally { setBusy(false); }
+      setPoints([]);
+      setRows([]);
+    } finally {
+      fillBusyRef.current = false;
+      setBusy(false);
+    }
   };
+
+  // Remove a single top-level filter rule by index and re-trigger search
+  const removeRuleAtIndex = useCallback((idx: number) => {
+    setFilters(prev => ({ ...prev, rules: prev.rules.filter((_, i) => i !== idx) }));
+    setAutoSearchTrigger(t => t + 1);
+  }, []);
+
+  // Auto-search when a chip removal triggers it (state is already updated by then)
+  useEffect(() => {
+    if (autoSearchTrigger > 0) onSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSearchTrigger]);
 
   // Reset (sí cerramos nearby)
   const onReset = async () => {
@@ -1471,10 +1940,24 @@ export default function ExplorerView() {
       window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: true } }));
       const pts = Array.isArray(resp?.points) ? resp.points : [];
       const rws = Array.isArray(resp?.rows) ? resp.rows : [];
+      try {
+        const withCs = pts.filter((p: any) => p && p.cs !== undefined).length;
+        const sample = pts.find((p: any) => p?.account_id === "001Vg00000UGORhIAP");
+        console.info("[CTS][DEBUG] reset -> setting fullPoints:", { total: pts.length, withCs, sampleId: sample?.account_id ?? null, sampleHasCs: sample ? (sample.cs !== undefined) : null, sample });
+      } catch (e) {
+        console.info("[CTS][DEBUG] reset -> setting fullPoints: (instrumentation failed)", e);
+      }
       setFullPoints(pts); 
       setFullRows(rws);
       ;(window as any).__rows_search = rws;
       console.log("[CTS][DEBUG] onSearch rows sample:", rws?.[0]);
+      try {
+        const withCs2 = pts.filter((p: any) => p && p.cs !== undefined).length;
+        const sample2 = pts.find((p: any) => p?.account_id === "001Vg00000UGORhIAP");
+        console.info("[CTS][DEBUG] reset -> setting points:", { total: pts.length, withCs: withCs2, sampleId: sample2?.account_id ?? null, sampleHasCs: sample2 ? (sample2.cs !== undefined) : null, sample: sample2 });
+      } catch (e) {
+        console.info("[CTS][DEBUG] reset -> setting points: (instrumentation failed)", e);
+      }
       setPoints(pts); setRows(rws);
       setNearbyActive(false);
       setNearbyPanelOpen(false);
@@ -1659,7 +2142,7 @@ export default function ExplorerView() {
       if (k === "sf.Account.Name") {
         return {
           id: k,
-          header: labelByKey.get(k) ?? "Account Name",
+          header: labelByKey.get(k) ?? prettyLabelFromKeyLabel(k, "Account Name"),
           accessorFn: (r: any) => readDataCell(r, k),
           enableSorting: true,
           enableColumnFilter: true,
@@ -1718,11 +2201,20 @@ export default function ExplorerView() {
       }
       return {
         id: k,
-        header: labelByKey.get(k) ?? k.replace(/^sf\./, ""),
+        header: labelByKey.get(k) ?? prettyLabelFromKeyLabel(k),
         accessorFn: (r: any) => readDataCell(r, k),
         enableSorting: true,
         enableColumnFilter: true,
         filterFn: containsCI,
+        // Render booleans and empties nicely
+        cell: ({ getValue }) => {
+          const v = getValue<any>();
+          if (typeof v === 'boolean') return v ? '✓' : '—';
+          if (v === null || v === undefined) return '';
+          const s = String(v).trim();
+          if (s === '' || s === '__' || s === 'null' || s === 'undefined') return '';
+          return s;
+        },
         // Delega el orden a TanStack: alphanumeric + sortUndefined:'last' asegura que los vacíos
         // se queden SIEMPRE al final tanto en asc como en desc.
         sortingFn: 'alphanumeric',
@@ -1730,6 +2222,26 @@ export default function ExplorerView() {
       } as ColumnDef<ExplorerRow>;
     })
   , [visibleColumns, labelByKey]);
+  // Consume pending account-ids left by ChatView (sessionStorage) and apply filter immediately
+  useEffect(() => {
+    if (!bootDone || bootLoading) return;
+    try {
+      const raw = sessionStorage.getItem("cts:explorer:pending-account-ids");
+      if (!raw) return;
+      sessionStorage.removeItem("cts:explorer:pending-account-ids");
+      const ids: string[] = Array.from(new Set(JSON.parse(raw))).map(String).filter(Boolean);
+      if (!ids.length) return;
+      const fk = getAccountIdFilterKey(fieldDefs as FieldDef[]);
+      if (!fk) return;
+      const fg = buildAccountIdsFilter(fk, ids);
+      setFilters(fg);
+      // run the search (with all columns)
+      setTimeout(() => { void onSearch(); }, 0);
+      // and highlight for convenience
+      setHighlightIds(ids);
+      firstHighlightRef.current = ids[0] || null;
+    } catch {}
+  }, [bootDone, bootLoading, fieldDefs]);
 
   const columns = useMemo<ColumnDef<ExplorerRow>[]>(() => [...fixedDefs, ...dynamicDefs], [fixedDefs, dynamicDefs]);
 
@@ -1802,13 +2314,30 @@ export default function ExplorerView() {
     xKey: string,
     yKeys: string[]
   ) => {
+    // If X is 'country' or 'city', aggregate values by that dimension (sum per group)
+    const wantGroup = (xKey === 'country' || xKey === 'city');
+    if (wantGroup) {
+      const buckets = new Map<string, Record<string, any>>();
+      for (const r of rowsIn) {
+        const key = String(readDataCell(r as any, xKey) ?? '').trim() || '(empty)';
+        const bucket = buckets.get(key) || { [xKey]: key };
+        for (const y of yKeys) {
+          const raw = readDataCell(r as any, y);
+          const n = Number(String(raw ?? '').replace(/,/g, ''));
+          bucket[y] = (Number.isFinite(n) ? (bucket[y] || 0) + n : (bucket[y] || 0));
+        }
+        buckets.set(key, bucket);
+      }
+      return Array.from(buckets.values());
+    }
+    // Default: row-wise dataset
     const arr: Array<Record<string, any>> = [];
     for (const r of rowsIn) {
       const row: Record<string, any> = {};
       row[xKey] = readDataCell(r as any, xKey) ?? "";
       for (const y of yKeys) {
         const raw = readDataCell(r as any, y);
-        const n = Number(raw);
+        const n = Number(String(raw ?? '').replace(/,/g, ''));
         row[y] = Number.isFinite(n) ? n : null;
       }
       arr.push(row);
@@ -1933,24 +2462,40 @@ export default function ExplorerView() {
     });
   };
 
-  // === NEW: listeners para eventos del Chat ===
+  // === NEW: listeners para eventos del Chat y legacy ===
   useEffect(() => {
+    function onFilterByIds(e: Event) {
+      const ev = e as CustomEvent<{ account_ids?: string[] }>;
+      const ids = (ev.detail?.account_ids || []).map(String).filter(Boolean);
+      if (!ids.length) return;
+      const fk = getAccountIdFilterKey(fieldDefs as FieldDef[]);
+      if (!fk) {
+        console.warn("[Explorer] No account-id filter key available in fieldDefs");
+        return;
+      }
+      const fg = buildAccountIdsFilter(fk, ids);
+      setFilters(fg);
+      // highlight for convenience
+      setHighlightIds(ids);
+      firstHighlightRef.current = ids[0] || null;
+      setSelectedAccountId(ids[0] || null);
+      // run search with all columns
+      setTimeout(() => { void onSearch(); }, 0);
+    }
     function onHighlight(e: Event) {
       const ev = e as CustomEvent<{ account_ids?: string[] }>;
       const ids = (ev.detail?.account_ids || []).map(String).filter(Boolean);
       if (!ids.length) return;
       setHighlightIds(ids);
-      // selecciona y recuerda la primera para autoscroll
       firstHighlightRef.current = ids[0];
-      setSelectedAccountId(ids[0]);
-      // Si tienes un MapView que escucha un evento propio, puedes propagar:
-      // window.dispatchEvent(new CustomEvent("cts:explorer:highlight", { detail: { account_ids: ids } }));
+      setSelectedAccountId(ids[0] || null);
+      // Broadcast a generic event for MapView or other listeners
+      window.dispatchEvent(new CustomEvent("cts:explorer:highlight", { detail: { account_ids: ids } }));
     }
     function onSetFilters(e: Event) {
       const ev = e as CustomEvent<{ filters?: FilterGroup }>;
       if (ev.detail?.filters) {
         setFilters(ev.detail.filters);
-        // buscamos con TODO el set actual de columnas
         setTimeout(() => { void onSearch(); }, 0);
       }
     }
@@ -1958,7 +2503,6 @@ export default function ExplorerView() {
       const ev = e as CustomEvent<{ columns?: string[] }>;
       const cols = (ev.detail?.columns || []).map(String).filter(Boolean);
       if (!cols.length) return;
-      // Sólo añadir si existen en catálogo
       const allowed = new Set(allColumnKeys);
       const next = [...visibleColumns];
       for (const k of cols) {
@@ -1968,15 +2512,82 @@ export default function ExplorerView() {
         applyVisibleColumns(next);
       }
     }
+    function onExplorerSet(e: Event) {
+      const ev = e as CustomEvent<{ filters?: FilterGroup }>;
+      if (!ev.detail?.filters) return;
+      const incoming = normalizeAccountIdCsvToOr(ev.detail.filters);
+      setFilters(incoming);
+      // ejecuta la búsqueda con todas las columnas
+      setTimeout(() => { void onSearch(); }, 0);
+    }
+    // Listen to both legacy ("cts:explorer:*") and chat-prefixed ("cts:chat:explorer:*") events
+    window.addEventListener("cts:explorer:filter-ids", onFilterByIds as EventListener);
+    window.addEventListener("cts:chat:explorer:filter-ids", onFilterByIds as EventListener);
     window.addEventListener("cts:chat:explorer:highlight", onHighlight as EventListener);
+    window.addEventListener("cts:explorer:highlight", onHighlight as EventListener);
     window.addEventListener("cts:chat:explorer:set", onSetFilters as EventListener);
+    window.addEventListener("cts:explorer:set", onSetFilters as EventListener);
     window.addEventListener("cts:chat:explorer:columns:add", onColumnsAdd as EventListener);
+    window.addEventListener("cts:explorer:columns:add", onColumnsAdd as EventListener);
+    window.addEventListener("cts:chat:explorer:set", onExplorerSet);
     return () => {
+      window.removeEventListener("cts:explorer:filter-ids", onFilterByIds as EventListener);
+      window.removeEventListener("cts:chat:explorer:filter-ids", onFilterByIds as EventListener);
       window.removeEventListener("cts:chat:explorer:highlight", onHighlight as EventListener);
+      window.removeEventListener("cts:explorer:highlight", onHighlight as EventListener);
       window.removeEventListener("cts:chat:explorer:set", onSetFilters as EventListener);
+      window.removeEventListener("cts:explorer:set", onSetFilters as EventListener);
       window.removeEventListener("cts:chat:explorer:columns:add", onColumnsAdd as EventListener);
+      window.removeEventListener("cts:explorer:columns:add", onColumnsAdd as EventListener);
+      window.removeEventListener("cts:chat:explorer:set", onExplorerSet);
     };
-  }, [allColumnKeys, visibleColumns, applyVisibleColumns, onSearch, setFilters]);
+  }, [allColumnKeys, visibleColumns, applyVisibleColumns, onSearch, setFilters, fieldDefs]);
+
+
+  // Apply account_id filter from URL or sessionStorage on initial load
+  useEffect(() => {
+    if (!bootDone || bootLoading) return;
+
+    // 1) URL params (support several aliases)
+    const url = new URL(window.location.href);
+    const raw =
+      url.searchParams.get("account_ids") ||
+      url.searchParams.get("accountIds") ||
+      url.searchParams.get("ids") ||
+      url.searchParams.get("acc_ids") ||
+      "";
+
+    let ids: string[] = [];
+    if (raw) {
+      ids = raw.split(",").map(s => s.trim()).filter(Boolean);
+    } else {
+      // 2) Fallback: sessionStorage (ChatView can write here before navigating)
+      try {
+        const ss = sessionStorage.getItem("cts:explorer:pending-account-ids");
+        if (ss) {
+          const parsed = JSON.parse(ss);
+          if (Array.isArray(parsed)) ids = parsed.map(String).filter(Boolean);
+          sessionStorage.removeItem("cts:explorer:pending-account-ids");
+        }
+      } catch { /* noop */ }
+    }
+
+    if (!ids.length) return;
+
+    const fk = getAccountIdFilterKey(fieldDefs as FieldDef[]);
+    if (!fk) {
+      console.warn("[Explorer] account_ids provided but no filter key available in fieldDefs");
+      return;
+    }
+    const fg = buildAccountIdsFilter(fk, ids);
+    setFilters(fg);
+    setHighlightIds(ids);
+    firstHighlightRef.current = ids[0] || null;
+
+    // Ensure we're on page 0 and run the search (with all columns)
+    setPageIndex(0);
+    setTimeout(() => { void onSearch(); }, 0);
+  }, [bootDone, bootLoading, fieldDefs]);
 
   const visiblePoints = nearbyActive ? fullNearbyPoints : fullPoints;
 
@@ -2027,7 +2638,14 @@ export default function ExplorerView() {
       {/* Header filtros */}
       <div className="rounded-xl border bg-white shadow-sm">
         <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Filters (nested AND/OR)</h2>
+          <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+            Filters (nested AND/OR)
+            {activeRuleCount > 0 && (
+              <span className="inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 min-w-[20px]">
+                {activeRuleCount}
+              </span>
+            )}
+          </h2>
           <div className="flex gap-2 items-center">
             {nearbyActive && (
               <span className="hidden md:inline-flex items-center gap-2 mr-2 text-sm rounded-full border px-3 py-1 bg-emerald-50 text-emerald-700">
@@ -2089,8 +2707,52 @@ export default function ExplorerView() {
           <FilterBuilder
             value={filters}
             onChange={setFilters}
-            fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : []}
+            fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]).filter(f => !EXCLUDED_FILTER_FIELDS.has(f.key)) : []}
           />
+          {/* Active filter chips */}
+          {filters.rules.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+              {filters.rules.map((r, i) => {
+                const isRule = r && typeof (r as any).field === "string";
+                const rule = r as any;
+                let chipLabel: string;
+                if (isRule) {
+                  const fieldLabel = labelByKey.get(rule.field) ?? (rule.field as string).split(".").pop() ?? rule.field;
+                  const opLabel = OP_LABELS[rule.operator] ?? rule.operator;
+                  const noValue = rule.operator === "is_empty" || rule.operator === "is_not_empty";
+                  let valStr = "";
+                  if (!noValue) {
+                    if (Array.isArray(rule.value)) valStr = (rule.value as any[]).filter(Boolean).join(" – ");
+                    else valStr = String(rule.value ?? "");
+                  }
+                  chipLabel = noValue
+                    ? `${fieldLabel} ${opLabel}`
+                    : `${fieldLabel} ${opLabel} ${valStr}`.trim();
+                } else {
+                  const sub = r as any;
+                  const n = (sub.rules ?? []).length;
+                  chipLabel = `Group (${n} rule${n === 1 ? "" : "s"})`;
+                }
+                return (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-0.5"
+                  >
+                    <span className="max-w-[240px] truncate" title={chipLabel}>{chipLabel}</span>
+                    <button
+                      className="ml-0.5 rounded-full hover:bg-blue-200 p-0.5 text-blue-600 flex-shrink-0"
+                      title="Remove filter"
+                      onClick={() => removeRuleAtIndex(i)}
+                    >
+                      <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" aria-hidden>
+                        <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 items-center">
             <button
               onClick={onSearch}
@@ -2209,7 +2871,7 @@ export default function ExplorerView() {
             return base;
           }, [fieldDefs])}
           defaultOpen={false}
-          showPresets={true}
+showPresets={false}
           sortKeys={(allKeys, presets) => orderKeysByPresets(allKeys, presets as any)}
           renderPresetHeader={(preset) => {
             if (preset.id === "qual_dyn") {
@@ -2251,7 +2913,7 @@ export default function ExplorerView() {
           {table.getFilteredRowModel().rows.length.toLocaleString()} result
           {table.getFilteredRowModel().rows.length === 1 ? "" : "s"}
           {sorting[0] ? (
-            <> · sorted by <strong>{sorting[0].id}</strong> ({sorting[0].desc ? "desc" : "asc"})</>
+            <> · sorted by <strong>{labelByKey.get(sorting[0].id) ?? (sorting[0].id === 'country' ? 'Country' : sorting[0].id === 'city' ? 'City' : prettyLabelFromKeyLabel(String(sorting[0].id)))}</strong> ({sorting[0].desc ? "desc" : "asc"})</>
           ) : null}
           {nearbyActive ? <> · Nearby ≤ <strong>{nearbyMeta?.max_km ?? "—"}</strong> km</> : null}
         </div>
@@ -2292,10 +2954,10 @@ export default function ExplorerView() {
             className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
             onClick={() =>
               askAIAndMaybeShowChart(
-                "Dime los 5 centros con más pacientes al año y muéstralo en una tabla y gráfico de barras"
+                "Show me the top 5 sites with most patients per year in a table and bar chart"
               )
             }
-            title="Pedir al agente y abrir el gráfico si procede"
+            title="Ask AI agent and open chart if applicable"
           >
             Ask AI →
           </button>

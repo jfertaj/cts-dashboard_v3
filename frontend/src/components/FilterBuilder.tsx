@@ -7,6 +7,7 @@ export type FieldDef = {
   type?: string;
   source?: "sf" | "site" | "qual" | string;
   group?: string;
+  qual_section?: string;
 };
 
 export type Rule = {
@@ -38,6 +39,10 @@ function getKind(f?: FieldDef) {
 const OPS_STRING = [
   { v: "equals", label: "=" },
   { v: "not_equals", label: "≠" },
+  { v: "is_empty", label: "is empty" },
+  { v: "is_not_empty", label: "is not empty" },
+  { v: "in", label: "is one of" },
+  { v: "not_in", label: "is NOT one of" },
   { v: "contains", label: "contains" },
   { v: "not_contains", label: "not contains" },
   { v: "starts_with", label: "starts with" },
@@ -47,6 +52,10 @@ const OPS_STRING = [
 const OPS_NUMBER = [
   { v: "equals", label: "=" },
   { v: "not_equals", label: "≠" },
+  { v: "is_empty", label: "is empty" },
+  { v: "is_not_empty", label: "is not empty" },
+  { v: "in", label: "is one of" },
+  { v: "not_in", label: "is NOT one of" },
   { v: ">", label: ">" },
   { v: ">=", label: "≥" },
   { v: "<", label: "<" },
@@ -69,6 +78,43 @@ const OPS_BOOL = [
   { v: "not_equals", label: "≠" },
 ];
 
+/** Extracts numeric section prefix e.g. "3.5.1" → [3,5,1] for sorting */
+function sectionParts(name: string): number[] | null {
+  const m = name.trim().match(/^(\d+(?:\.\d+)*)(?:\s|$)/);
+  if (!m) return null;
+  return m[1].split(".").map((x) => parseInt(x, 10));
+}
+
+/** Same comparator used in ColumnPicker — numeric section names first, then alphabetical */
+function compareGroupNames(a: string, b: string): number {
+  const pa = sectionParts(a);
+  const pb = sectionParts(b);
+  if (pa && pb) {
+    const n = Math.max(pa.length, pb.length);
+    for (let i = 0; i < n; i++) {
+      const va = pa[i] ?? -1;
+      const vb = pb[i] ?? -1;
+      if (va !== vb) return va - vb;
+    }
+    return 0;
+  }
+  if (pa) return -1;
+  if (pb) return 1;
+  return a.localeCompare(b);
+}
+
+/** Explicit rank for known SF groups — mirrors the order in ExplorerView's SF_GROUPS */
+const SF_GROUP_RANK: Record<string, number> = {
+  "Site":               0,
+  "Account Basics":     1,
+  "OnBoarding":         2,
+  "Profiling Basics":   3,
+  "Screening":          4,
+  "Salesforce (other)": 5,
+  "Salesforce":         6,
+  "Other":              7,
+};
+
 function getFieldBadge(f: { key: string; source?: string }) {
   const src = (f.source || "").toLowerCase();
   if (src === "qual" || f.key.startsWith("qual.")) return "[qual]";
@@ -81,7 +127,13 @@ function groupName(f: FieldDef): string {
   const s = (f.source || "").toLowerCase();
   if (s === "site") return "Site";
   if (s === "sf") return "Salesforce";
-  if (s === "qual") return "Qualification";
+  if (s === "qual") {
+    const section = f.qual_section?.trim();
+    const group = f.group?.trim();
+    if (section && group) return `${section} › ${group}`;
+    if (section) return section;
+    return group || "Qualification forms";
+  }
   return "Other";
 }
 
@@ -154,12 +206,14 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(f);
     }
-    const orderRank = (g: string) => (g === "Site" ? 0 : g === "Salesforce" ? 1 : g === "Qualification" ? 2 : 10);
+    const rankOf = (g: string) => SF_GROUP_RANK[g] ?? 50; // qual sections (numeric) get 50, sorted by compareGroupNames
     const sorted = [...map.entries()]
       .sort((a, b) => {
-        const ra = orderRank(a[0]);
-        const rb = orderRank(b[0]);
-        return ra !== rb ? ra - rb : a[0].localeCompare(b[0]);
+        const ra = rankOf(a[0]);
+        const rb = rankOf(b[0]);
+        if (ra !== rb) return ra - rb;
+        // Both unknown (qual sections with numeric prefix) → sort numerically
+        return compareGroupNames(a[0], b[0]);
       })
       .map(([name, list]) => [name, list.sort((x, y) => (x.label || x.key).localeCompare(y.label || y.key))] as const);
     return sorted;
@@ -253,6 +307,10 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
         );
       }
 
+      if (rule.operator === "is_empty" || rule.operator === "is_not_empty") {
+        return null; // no value needed for these operators
+      }
+
       if (rule.operator === "between") {
         const [a, b] = Array.isArray(rule.value) ? rule.value : ["", ""];
         if (kind === "date") {
@@ -319,6 +377,7 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
         <input
           type="text"
           className="border rounded-md px-2 py-1 text-sm w-64"
+          placeholder={rule.operator === "in" || rule.operator === "not_in" || /\.Id$|Id$/i.test(rule.field) ? "value1, value2, …" : undefined}
           value={rule.value ?? ""}
           onChange={(e) => updateAt(path, (r) => ({ ...(r as Rule), value: e.target.value }))}
         />
@@ -367,9 +426,12 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
             updateAt(path, (r) => ({
               ...(r as Rule),
               operator: e.target.value,
-              value: e.target.value === "between" ? ["", ""] : "",
+              value: e.target.value === "between" ? ["", ""]
+                   : (e.target.value === "is_empty" || e.target.value === "is_not_empty") ? null
+                   : "",
             }))
           }
+          title={rule.operator === "in" || rule.operator === "not_in" ? "Use comma-separated values" : undefined}
         >
           {ops.map((o) => (
             <option key={o.v} value={o.v}>
@@ -393,6 +455,22 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
 
   const renderGroup = (group: FilterGroup, path: number[] = []) => {
     const isRoot = path.length === 0;
+
+    const scaffoldTwoGroups = (logic: "AND" | "OR") => {
+      // Replace current group content with two empty subgroups under chosen logic
+      const root = structuredClone(value) as FilterGroup;
+      // Navigate to target group
+      const getNode = (p: number[]): FilterGroup => {
+        let g: FilterGroup = root;
+        for (let i = 0; i < p.length; i++) g = g.rules[p[i]] as FilterGroup;
+        return g;
+      };
+      const target = getNode(path);
+      target.logic = logic;
+      target.rules = [ { logic: "AND", rules: [] }, { logic: "AND", rules: [] } ] as any;
+      onChange(root);
+    };
+
     return (
       <div className="space-y-3 border rounded-lg p-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -412,6 +490,25 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
           <button className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50" onClick={() => addGroupTo(path)}>
             + Group
           </button>
+
+          {isRoot && (
+            <>
+              <button
+                className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
+                title="Scaffold ( … ) AND ( … )"
+                onClick={() => scaffoldTwoGroups("AND")}
+              >
+                Scaffold: ( … ) AND ( … )
+              </button>
+              <button
+                className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
+                title="Scaffold ( … ) OR ( … )"
+                onClick={() => scaffoldTwoGroups("OR")}
+              >
+                Scaffold: ( … ) OR ( … )
+              </button>
+            </>
+          )}
 
           {!isRoot && (
             <button

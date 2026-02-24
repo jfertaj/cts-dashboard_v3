@@ -64,8 +64,8 @@ def _account_extras_core(sf, account_id: str) -> Dict[str, Any]:
     member_name: Optional[str] = None
     member_id: Optional[str] = None
     cs_contrib = {
-        # Claves que espera tu UI (mantenemos nombres “antiguos” pero rellenamos con el campo correcto)
-        "Clinical_Site_CS__c": None,
+        # Use the real Salesforce API name as primary key exposed to clients
+        "INNODIA_Clinical_Trial_Site__c": None,
         "Referral_Outreach_Site_Non_CTS__c": None,
         "Elegible_for_DETECT_Site__c": None,
     }
@@ -75,7 +75,7 @@ def _account_extras_core(sf, account_id: str) -> Dict[str, Any]:
         member_id = rec.get("C_Member__c")
         member_name = (rec.get("C_Member__r") or {}).get("Name")
         cs_contrib = {
-            "Clinical_Site_CS__c": rec.get(API_INNODIA_CLINICAL_TRIAL),
+            "INNODIA_Clinical_Trial_Site__c": rec.get(API_INNODIA_CLINICAL_TRIAL),
             "Referral_Outreach_Site_Non_CTS__c": rec.get(API_REFERRAL_OUTREACH),
             "Elegible_for_DETECT_Site__c": rec.get(API_ELIGIBLE_DETECT),
         }
@@ -226,7 +226,7 @@ def _account_extras_core(sf, account_id: str) -> Dict[str, Any]:
         "newDxUnder18": opportunity.get("new_dx_u18") if opportunity else None,
         "newDxOver18":  opportunity.get("new_dx_o18") if opportunity else None,
         # CS Contribution (booleans) -> claves “antiguas” pero valores correctos
-        "csContribution": cs_contrib,
+            "csContribution": cs_contrib,
         # debug
         "_debug": {
             "acc_soql": acc_soql,
@@ -407,6 +407,7 @@ def account_extras_alias(account_id: str, request: Request = None) -> Dict[str, 
                 "member": None, "pi": None, "opportunity": None, "assignments": [],
                 "newDxUnder18": None, "newDxOver18": None,
                 "csContribution": {
+                    "INNODIA_Clinical_Trial_Site__c": None,
                     "Clinical_Site_CS__c": None,
                     "Referral_Outreach_Site_Non_CTS__c": None,
                     "Elegible_for_DETECT_Site__c": None,
@@ -419,6 +420,7 @@ def account_extras_alias(account_id: str, request: Request = None) -> Dict[str, 
             "member": None, "pi": None, "opportunity": None, "assignments": [],
             "newDxUnder18": None, "newDxOver18": None,
             "csContribution": {
+                "INNODIA_Clinical_Trial_Site__c": None,
                 "Clinical_Site_CS__c": None,
                 "Referral_Outreach_Site_Non_CTS__c": None,
                 "Elegible_for_DETECT_Site__c": None,
@@ -431,6 +433,7 @@ def account_extras_alias(account_id: str, request: Request = None) -> Dict[str, 
             "member": None, "pi": None, "opportunity": None, "assignments": [],
             "newDxUnder18": None, "newDxOver18": None,
             "csContribution": {
+                "INNODIA_Clinical_Trial_Site__c": None,
                 "Clinical_Site_CS__c": None,
                 "Referral_Outreach_Site_Non_CTS__c": None,
                 "Elegible_for_DETECT_Site__c": None,

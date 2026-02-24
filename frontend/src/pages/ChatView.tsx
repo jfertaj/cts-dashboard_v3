@@ -47,10 +47,12 @@ export default function ChatView() {
 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [lastUserQ, setLastUserQ] = useState<string>("");
+  const [lastTableForAI, setLastTableForAI] = useState<{columns: any[], rows: any[]} | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Chart state (reuse your ChartModal)
-  type ChartType = "bar" | "line";
+  type ChartType = "bar" | "line" | "pie";
   const [chartOpen, setChartOpen] = useState(false);
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [chartTitle, setChartTitle] = useState<string>("Explorer Chart");
@@ -67,6 +69,50 @@ export default function ChatView() {
     () => new Set(explorerFields.map((f) => f.key)),
     [explorerFields]
   );
+
+  // --- labelMap and prettyLabel ---
+  // Human‑friendly label overrides for known SF metrics
+  const OVERRIDE_LABELS: Record<string, string> = {
+    // Canonical SF keys
+    "sf.C_Number_of_new_T1D_diagnosed_U_18__c": "New T1D diagnosed < 18",
+    "sf.C_Number_of_new_T1D_diagnosed_O_18__c": "New T1D diagnosed ≥ 18",
+    "sf.C_Number_of_T1D_Patients_currently_U_18__c": "Current T1D < 18",
+    "sf.C_Number_of_T1D_Patients_currently_O_18__c": "Current T1D ≥ 18",
+    // Sometimes the agent sends the label text instead of the key — normalize those too
+    "C Number Of New T1D Diagnosed U 18": "New T1D diagnosed < 18",
+    "C Number Of New T1D Diagnosed O 18": "New T1D diagnosed ≥ 18",
+  };
+
+  function prettifyRawLabel(raw: string): string {
+    let lbl = String(raw || "")
+      .replace(/^sf\./, "")
+      .replace(/^C[\s_]+/i, "")         // drop leading "C " or "C_"
+      .replace(/[_\.]+/g, " ")          // underscores/dots -> space
+      .replace(/\bU[\s_]*18\b/gi, "< 18")
+      .replace(/\bO[\s_]*18\b/gi, "≥ 18")
+      .replace(/\bNumber\s+Of\b/gi, "Number of")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    // Title case (keep math symbols intact)
+    lbl = lbl.replace(/\b([a-z])/g, (s) => s.toUpperCase());
+    return lbl;
+  }
+
+  const labelMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of explorerFields) {
+      if (!f?.key) continue;
+      const base = OVERRIDE_LABELS[f.key] || OVERRIDE_LABELS[f.label || ""] || f.label || f.key;
+      m.set(f.key, prettifyRawLabel(base));
+    }
+    return m;
+  }, [explorerFields]);
+
+  const prettyLabel = (key: string) =>
+    OVERRIDE_LABELS[key] ||
+    labelMap.get(key) ||
+    prettifyRawLabel(key);
 
   useEffect(() => {
     (async () => {
@@ -113,13 +159,17 @@ export default function ChatView() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.columns && parsed.rows) {
+          const cols =
+            Array.isArray(parsed.columns) && typeof parsed.columns[0] === "string"
+              ? (parsed.columns as string[]).map((k) => ({ key: k, label: prettyLabel(k) }))
+              : parsed.columns;
           setMessages((m) => [
             ...m,
             {
               role: "assistant",
               content: (
                 <ActionableTable
-                  columns={parsed.columns}
+                  columns={cols}
                   rows={parsed.rows}
                   explorerKeySet={explorerKeySet}
                 />
@@ -130,7 +180,7 @@ export default function ChatView() {
         }
       }
     } catch {}
-  }, [explorerFields, explorerKeySet]);
+  }, [explorerFields, explorerKeySet, prettyLabel]);
 
   // --- persist on change ---
   useEffect(() => {
@@ -168,6 +218,11 @@ export default function ChatView() {
 
     const knownCols = colKeys.filter((c) => explorerKeySet.has(c));
     const hasKnownCols = knownCols.length > 0;
+    try {
+      if (hasKnownCols) {
+        sessionStorage.setItem("cts:explorer:pending-columns", JSON.stringify(knownCols));
+      }
+    } catch {}
 
     // buscamos account ids en diferentes formatos
     const accIds: string[] = (rows || [])
@@ -177,10 +232,11 @@ export default function ChatView() {
           r["sf.AccountId"] ||
           r["Account.Id"] ||
           r["account_id"] ||
-          (r?.data?.["sf.Account.Id"] || r?.data?.["sf.AccountId"])
+          r["Account Id"] ||
+          (r?.data?.["sf.Account.Id"] || r?.data?.["sf.AccountId"]) 
       )
       .filter(Boolean)
-      .map(String);
+      .map((x) => String(x).trim());
 
     const handleHighlight = () => {
       if (!accIds.length) return;
@@ -189,30 +245,69 @@ export default function ChatView() {
           detail: { account_ids: accIds },
         })
       );
+      // Legacy event for older Explorer listeners
+      window.dispatchEvent(
+        new CustomEvent("cts:explorer:highlight", {
+          detail: { account_ids: accIds },
+        })
+      );
     };
 
     const handleOpenFiltered = () => {
       if (!accIds.length) return;
+
+      // 1) Build filters by Account Id
       const detail = {
         filters: {
           logic: "AND",
           rules: [{ field: "sf.Account.Id", operator: "in", value: accIds }],
         },
       };
+
+      // 2) Persist intent so Explorer can pick it up even if the event is missed
       try {
-        sessionStorage.setItem(
-          "cts:explorer:pending:set",
-          JSON.stringify(detail)
-        );
+        sessionStorage.setItem("cts:explorer:pending:set", JSON.stringify(detail));
+        sessionStorage.setItem("cts:explorer:pending-ids", JSON.stringify(accIds));
+        sessionStorage.setItem("cts:explorer:pending-account-ids", JSON.stringify(accIds));
       } catch {}
-      window.dispatchEvent(
-        new CustomEvent("cts:chat:explorer:set", { detail })
-      );
-      setTimeout(() => {
-        if (!document.body.getAttribute("data-explorer-listening")) {
-          window.location.href = "/explorer";
-        }
-      }, 50);
+
+      // 3) Switch SPA tab to Explorer (so the listener mounts)
+      try {
+        // Use path-based navigation so App.tsx's getTabFromURL() picks it up
+        const base = `${window.location.origin}`;
+        window.history.pushState({}, "", base + "/explorer");
+        // notify App to change tab
+        window.dispatchEvent(new Event("popstate"));
+      } catch {}
+
+      // 4) Dispatch events (once now, and once after a short delay to ensure Explorer is mounted)
+      const fire = () => {
+        // 1️⃣ Filter the IDs (map + table filtering in Explorer)
+        window.dispatchEvent(
+          new CustomEvent("cts:explorer:filter-ids", {
+            detail: { account_ids: accIds },
+          })
+        );
+        // New event name variant for Explorer listeners
+        window.dispatchEvent(
+          new CustomEvent("cts:chat:explorer:filter-ids", {
+            detail: { account_ids: accIds },
+          })
+        );
+        // 2️⃣ Apply full filter object to Explorer (keeps filters panel in sync)
+        window.dispatchEvent(new CustomEvent("cts:chat:explorer:set", { detail }));
+        // 3️⃣ Optional: highlight these accounts
+        window.dispatchEvent(
+          new CustomEvent("cts:chat:explorer:highlight", {
+            detail: { account_ids: accIds },
+          })
+        );
+      };
+
+      // Fire immediately (in case Explorer is already mounted)
+      fire();
+      // Fire again shortly after tab switch to catch fresh listeners
+      setTimeout(fire, 100);
     };
 
     const handleAddColumns = () => {
@@ -224,40 +319,65 @@ export default function ChatView() {
       );
     };
 
+    const exportCSV = () => {
+      try {
+        const header = colKeys.map((k) => (columns as any).find((c: any) => c.key === k)?.label || k);
+        const csvRows = [header.join(",")].concat(
+          (rows || []).map((r) => colKeys.map((k) => JSON.stringify(r[k] ?? "")).join(","))
+        );
+        const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "moby_results.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch {}
+    };
+
     return (
       <div className="space-y-2">
         <AIResultTable columns={columns as any} rows={rows} />
-        {(accIds.length > 0 || hasKnownCols) && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {accIds.length > 0 && (
-              <>
-                <button
-                  className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-gray-50"
-                  onClick={handleHighlight}
-                  title="Resaltar estos centros en el mapa/tabla del Explorer"
-                >
-                  🔦 Highlight en Explorer
-                </button>
-                <button
-                  className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-gray-50"
-                  onClick={handleOpenFiltered}
-                  title="Abrir Explorer filtrado a estos centros"
-                >
-                  🎯 Abrir en Explorer (filtrar)
-                </button>
-              </>
-            )}
-            {hasKnownCols && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            onClick={exportCSV}
+            title="Export to CSV"
+            aria-label="Export to CSV"
+          >
+            ⬇️ <span>Export CSV</span>
+          </button>
+          {accIds.length > 0 && (
+            <>
               <button
-                className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-gray-50"
-                onClick={handleAddColumns}
-                title="Añadir estas columnas a la tabla del Explorer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+                onClick={handleHighlight}
+                title="Highlight these sites in the Explorer map/table"
+                aria-label="Highlight in Explorer"
               >
-                ➕ Añadir columnas al Explorer
+                🔦 <span>Highlight in Explorer</span>
               </button>
-            )}
-          </div>
-        )}
+              <button
+                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
+                onClick={handleOpenFiltered}
+                title="Open Explorer filtered to these sites"
+                aria-label="Open Explorer filtered"
+              >
+                🎯 <span>Open in Explorer (filter)</span>
+              </button>
+            </>
+          )}
+          {hasKnownCols && (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              onClick={handleAddColumns}
+              title="Add these columns to the Explorer table"
+              aria-label="Add columns to Explorer"
+            >
+              ➕ <span>Add columns to Explorer</span>
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -309,9 +429,88 @@ export default function ChatView() {
       setMessages((m) => [...m, { role: "assistant", content: answerText.trim() }]);
     }
 
-    // 2) Tabla
+    // 1.b) Clarifications (deterministas desde backend)
+    if (resp?.clarify?.question && Array.isArray(resp.clarify.options)) {
+      const q = resp.clarify.question;
+      const opts = resp.clarify.options as Array<{ label: string; query: string }>;
+      const Clarify: React.FC = () => {
+        const choose = async (opt: { label: string; query: string }) => {
+          setMessages((m) => [
+            ...m,
+            { role: "user", content: `${opt.label}` },
+          ]);
+          setBusy(true);
+          try {
+            const next = await askAI(`${lastUserQ}. Clarification: ${opt.query}`, lastTableForAI);
+            handleArtifacts(next);
+          } catch (e: any) {
+            setMessages((m) => [
+              ...m,
+              { role: "assistant", content: `⚠️ Error: ${e?.message || ""}` },
+            ]);
+          } finally {
+            setBusy(false);
+          }
+        };
+        return (
+          <div className="space-y-2">
+            <div className="text-sm text-gray-800">{q}</div>
+            <div className="flex flex-wrap gap-2">
+              {opts.map((o, i) => (
+                <button
+                  key={i}
+                  className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-gray-50"
+                  onClick={() => void choose(o)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      };
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: <Clarify /> },
+      ]);
+      return;
+    }
+
+    // 2) Visualizaciones (prioritario): si hay gráfico, abrirlo y NO mostrar tabla duplicada
+    if (resp?.visualization?.data && resp.visualization?.xKey) {
+      const v = resp.visualization as any;
+      const type: ChartType = v.type === "line" ? "line" : v.type === "pie" ? "pie" : "bar";
+      const xKey: string = v.xKey;
+      let yKeys: string[] = Array.isArray(v.yKeys) ? v.yKeys : [];
+      let data: Array<Record<string, any>> = Array.isArray(v.data) ? v.data : [];
+      if (!yKeys.length) yKeys = autoYKeys(data, xKey);
+      data = coerceNumeric(data, yKeys);
+      setChartType(type);
+      setChartXKey(xKey);
+      setChartYKeys(yKeys);
+      setChartData(data);
+      setChartTitle(v.meta?.title || "Explorer Chart");
+      setChartOpen(true);
+      // No añadir tabla si viene también en la misma respuesta; el gráfico es suficiente
+      return;
+    }
+
+    // 3) Tabla
     if ((resp as any)?.table?.columns && (resp as any)?.table?.rows) {
-      const { columns, rows } = (resp as any).table;
+      let { columns, rows } = (resp as any).table;
+      if (Array.isArray(columns) && typeof columns[0] === "string") {
+        columns = (columns as string[]).map((k) => ({ key: k, label: prettyLabel(k) }));
+      }
+
+      // Si no hay filas, no mostrar tabla ni persistir
+      const hasRows = Array.isArray(rows) && rows.length > 0;
+      if (!hasRows) {
+        // aún podemos mostrar el texto del modelo ya añadido arriba; no añadimos tabla vacía
+        return;
+      }
+
+      // Guardar para AI follow-ups eficientes y persistir para restaurar tras navegación
+      setLastTableForAI({ columns, rows });
       try {
         const accountIds = (rows || [])
           .map(
@@ -328,6 +527,8 @@ export default function ChatView() {
           JSON.stringify({ columns, rows, account_ids: accountIds })
         );
       } catch {}
+
+      // Siempre renderiza inmediatamente la tabla recibida
       setMessages((m) => [
         ...m,
         {
@@ -343,23 +544,7 @@ export default function ChatView() {
       ]);
     }
 
-    // 3) Visualizaciones
-    if (resp?.visualization?.data && resp.visualization?.xKey) {
-      const v = resp.visualization as any;
-      const type: ChartType = v.type === "line" ? "line" : "bar";
-      const xKey: string = v.xKey;
-      let yKeys: string[] = Array.isArray(v.yKeys) ? v.yKeys : [];
-      let data: Array<Record<string, any>> = Array.isArray(v.data) ? v.data : [];
-      if (!yKeys.length) yKeys = autoYKeys(data, xKey);
-      data = coerceNumeric(data, yKeys);
-      setChartType(type);
-      setChartXKey(xKey);
-      setChartYKeys(yKeys);
-      setChartData(data);
-      setChartTitle(v.meta?.title || "Explorer Chart");
-      setChartOpen(true);
-      return;
-    }
+    // (visualization handled above)
 
     // 4) Retrocompat
     const arts = (resp as any)?.artifacts;
@@ -368,7 +553,8 @@ export default function ChatView() {
         if (a?.type === "chart") {
           const v = a.data || a.options || {};
           const type: ChartType =
-            a.chart_kind === "line" || v.type === "line" ? "line" : "bar";
+            a.chart_kind === "line" || v.type === "line" ? "line" : 
+            a.chart_kind === "pie" || v.type === "pie" ? "pie" : "bar";
           if (v?.xKey && v?.data) {
             let yKeys: string[] = Array.isArray(v.yKeys) ? v.yKeys : [];
             let data: Array<Record<string, any>> = Array.isArray(v.data)
@@ -398,6 +584,7 @@ export default function ChatView() {
     const text = input.trim();
     if (!text || busy) return;
     setMessages((m) => [...m, { role: "user", content: text }]);
+    setLastUserQ(text);
     setInput("");
     setBusy(true);
     try {
@@ -408,7 +595,7 @@ export default function ChatView() {
         return;
       }
       // LLM
-      const resp: ChatResponse = await askAI(text);
+      const resp: ChatResponse = await askAI(text, lastTableForAI);
       handleArtifacts(resp);
     } catch (e: any) {
       setMessages((m) => [
@@ -417,6 +604,33 @@ export default function ChatView() {
           role: "assistant",
           content: `⚠️ Error contacting Moby: ${e?.message || "Unknown error"}`,
         },
+      ]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---- Quick templates ----
+  const TEMPLATES: Array<{ label: string; prompt: string }> = [
+    { label: "Search comments: power outage plan", prompt: 'Search qualification comments for: "power outage plan"' },
+    { label: "Time series: Amount (quarter, 8)", prompt: "Time series (quarter) of Opportunity Amount last 8 quarters" },
+    { label: "Top 3 by Stage2 per country", prompt: "Top 3 sites per country by Stage 2" },
+    { label: "% with HLA typing per country", prompt: "% of sites per country with HLA typing" },
+    { label: "Top 5 sites with most patients", prompt: "Show me the top 5 sites with most patients per year" },
+  ];
+
+  const runTemplate = async (text: string) => {
+    if (busy) return;
+    setMessages((m) => [...m, { role: "user", content: text }]);
+    setLastUserQ(text);
+    setBusy(true);
+    try {
+      const resp: ChatResponse = await askAI(text, lastTableForAI);
+      handleArtifacts(resp);
+    } catch (e: any) {
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: `⚠️ Error contacting Moby: ${e?.message || "Unknown error"}` },
       ]);
     } finally {
       setBusy(false);
@@ -707,7 +921,7 @@ export default function ChatView() {
             new Set(
               rows.flatMap((r: any) => Object.keys(r))
             )
-          ).map((k) => ({ key: k, label: k }))
+          ).map((k) => ({ key: k, label: prettyLabel(k) }))
         : [{ key: "account_id", label: "Account Id" }];
 
       sessionStorage.setItem(
@@ -753,7 +967,7 @@ export default function ChatView() {
         role: "assistant",
         content: (
           <>
-            Hi, I’m Moby{" "}
+            Hi, I'm Moby{" "}
             <img
               src={Moby}
               alt="Moby the cat"
@@ -765,6 +979,7 @@ export default function ChatView() {
         ),
       },
     ]);
+    setLastTableForAI(null);
     try {
       sessionStorage.removeItem(MSGS_KEY);
       sessionStorage.removeItem(INPUT_KEY);
@@ -777,10 +992,11 @@ export default function ChatView() {
     if (typeof node === "string") {
       const looksHtml = /<\/?[a-z][\s\S]*>/i.test(node);
       if (looksHtml) {
+        const sanitized = node.replace(/<table[\s\S]*?<\/table>/gi, "");
         return (
           <div
             className={ASSISTANT_HTML_CLS}
-            dangerouslySetInnerHTML={{ __html: node }}
+            dangerouslySetInnerHTML={{ __html: sanitized }}
           />
         );
       }
@@ -845,8 +1061,21 @@ export default function ChatView() {
           {busy && <div className="text-sm text-gray-500">Moby is thinking…</div>}
         </div>
 
-        {/* Input */}
+        {/* Quick templates */}
         <div className="border-t bg-gray-50 p-3">
+          <div className="mb-2 flex flex-wrap gap-2">
+            {TEMPLATES.map((t, i) => (
+              <button
+                key={i}
+                className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-white"
+                title={t.prompt}
+                onClick={() => void runTemplate(t.prompt)}
+                disabled={busy}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-2">
             <input
               className="flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-[#0072CE] bg-white"

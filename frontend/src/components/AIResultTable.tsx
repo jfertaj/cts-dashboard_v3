@@ -1,5 +1,4 @@
 // src/components/AIResultTable.tsx
-import React from "react";
 import React, { useEffect } from "react";
 
 type Props = {

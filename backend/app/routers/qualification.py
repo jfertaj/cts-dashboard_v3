@@ -471,12 +471,18 @@ async def upload_qualification(file: UploadFile = File(...), db: Session = Depen
             db.flush()
             db.add(Response(question_id=que.id, response_text=r.get("answer")))
 
-    # 👇 APLANADO: clave (slug pregunta) -> respuesta
+    # 👇 APLANADO: clave (question_key con subcódigo) -> respuesta
     flat: Dict[str, Any] = {}
     for r in rows:
-        qtext = r.get("question") or r.get("question_text") or ""
-        ans   = r.get("answer")
-        key   = _slugify_question(qtext)
+        ans = r.get("answer")
+        # IMPORTANTE: Siempre usar question_key que viene con el formato section__slug del parser
+        key = _clean(r.get("question_key"))
+        if not key:
+            # Si por alguna razón no hay question_key, construirlo con el patrón correcto
+            qtext = r.get("question") or r.get("question_text") or ""
+            sub_code = r.get("subsection_code") or "x"
+            slug = _slugify_question(qtext)
+            key = f"{sub_code}__{slug}" if slug else None
         if key and ans not in (None, ""):
             flat[key] = str(ans)
 
@@ -677,16 +683,25 @@ def _recompute_site_qual(db: Session, site_id: int) -> None:
 
     qid = q[0]
     # leemos preguntas/respuestas de ese questionnaire y aplanamos
+    # IMPORTANTE: Incluir subsection para generar claves con prefijo de sección
     rows = (
-        db.query(Question.question_text, Response.response_text)
+        db.query(Question.question_text, Question.subsection, Response.response_text)
         .join(Section, Section.id == Question.section_id)
         .outerjoin(Response, Response.question_id == Question.id)
         .filter(Section.questionnaire_id == qid)
         .all()
     )
     flat: Dict[str, Any] = {}
-    for qtext, ans in rows:
-        key = _slugify_question(qtext)
+    for qtext, subsection, ans in rows:
+        # Extraer el código de subsección del formato "2.1 Title" -> "2_1"
+        sub_code = "x"
+        if subsection:
+            match = re.match(r"^(\d+(?:\.\d+)*)\s+", subsection)
+            if match:
+                sub_code = match.group(1).replace(".", "_")
+        
+        slug = _slugify_question(qtext)
+        key = f"{sub_code}__{slug}" if slug else None
         if key and ans not in (None, ""):
             flat[key] = str(ans)
 
