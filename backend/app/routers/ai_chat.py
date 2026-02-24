@@ -31,6 +31,7 @@ INDEX_REFRESH_SEC = int(os.environ.get("AI_INDEX_REFRESH_SEC", "600"))
 FIELDS_SF_JSON_PATH = os.environ.get("FIELDS_SF_JSON_PATH", "app/config/fields_opportunity_curated.json")
 QUAL_ALIAS_JSON_PATH = os.environ.get("QUAL_ALIAS_JSON_PATH", "app/config/qualification_aliases.json")
 EXPLORER_DRIVE_KM_PATH = "/api/explorer/search/within-drive-km"
+EXPLORER_SEARCH_PATH   = "/api/explorer/search"
 
 def _dbg(msg: str, *args):
     if DEBUG:
@@ -847,6 +848,66 @@ def tool_explorer_within_drive_km(
         keys = sorted({k for r in rows for k in r.keys()})
         cols = [{"key": k, "label": k} for k in keys]
     return {"columns": cols, "rows": rows, "meta": data.get("meta"), "base": data.get("base")}
+
+def tool_explorer_search(
+    request: Request,
+    filters: Dict[str, Any],
+    columns: Optional[List[str]] = None,
+):
+    """
+    Proxy interno al endpoint /api/explorer/search.
+    Acepta FilterGroup con reglas qual.*, sf.* y site.* y devuelve una tabla unificada.
+    """
+    url = str(request.base_url).rstrip("/") + EXPLORER_SEARCH_PATH
+    # Columnas por defecto si no se especifican
+    default_cols = [
+        "sf.Account.Id", "sf.Account.Name",
+        "sf.Account.ShippingCountry", "sf.Account.ShippingCity",
+        "sf.C_Number_of_T1D_Patients_currently_U_18__c",
+        "sf.C_Number_of_T1D_Patients_currently_O_18__c",
+        "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
+        "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+    ]
+    payload = {
+        "filters": filters or {"logic": "AND", "rules": []},
+        "columns": columns or default_cols,
+    }
+    headers = {}
+    if request:
+        ck = request.headers.get("cookie")
+        if ck:
+            headers["cookie"] = ck
+        auth = request.headers.get("authorization")
+        if auth:
+            headers["authorization"] = auth
+    with httpx.Client(timeout=90.0) as cli:
+        resp = cli.post(url, json=payload, headers=headers)
+    if resp.status_code >= 400:
+        raise HTTPException(resp.status_code, f"explorer_search failed: {resp.text[:300]}")
+    data = resp.json()
+    rows = data.get("rows") or []
+    cols: List[Dict[str, str]] = []
+    if rows:
+        keys = list({k for r in rows for k in (r.get("data") or r).keys()})
+        keys = sorted(keys)
+        cols = [{"key": k, "label": k} for k in keys]
+    # Aplanar data nested si viene en {account_id, account_name, data:{...}}
+    flat_rows = []
+    for r in rows:
+        if "data" in r and isinstance(r["data"], dict):
+            flat = {**r["data"]}
+            for meta_k in ("account_id", "account_name", "country", "city"):
+                if meta_k in r:
+                    flat[meta_k] = r[meta_k]
+        else:
+            flat = dict(r)
+        flat_rows.append(flat)
+    return {
+        "columns": cols,
+        "rows": flat_rows[:300],
+        "meta": {"total": len(rows)},
+    }
+
 
 # ====== Tools ======
 
@@ -2965,6 +3026,44 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
+            "name": "explorer_search",
+            "description": (
+                "Search clinical trial sites using a combined FilterGroup that can mix qual.*, sf.* and site.* fields in one call. "
+                "Use this tool when the query requires filtering on BOTH qualification checklist fields (qual.*) AND Salesforce fields (sf.*) simultaneously. "
+                "Examples: 'sites with on-site pharmacy AND >50 ND patients ≥18', 'sites with overnight stay AND Stage2>10 in Spain'. "
+                "The filter format is a nested AND/OR group. Operators: equals, not_equals, >, >=, <, <=, contains, in, not_in, is_empty, is_not_empty, between. "
+                "qual.* field keys use the format 'qual.<section_key>' (e.g. 'qual.3_6__is_your_pharmacy_on_site_or_off_campus'). "
+                "sf.* field keys use 'sf.<SalesforceField>' (e.g. 'sf.C_Number_of_ND_Patients_O_18__c'). "
+                "site.* field keys: 'site.country', 'site.city'. "
+                "After getting results you can call render_chart to visualize them."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filters": {
+                        "type": "object",
+                        "description": (
+                            "FilterGroup: {logic: 'AND'|'OR', rules: [{field, operator, value}, ...]}. "
+                            "Rules can be nested groups. "
+                            "Example: {logic:'AND', rules:["
+                            "{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'},"
+                            "{field:'sf.C_Number_of_ND_Patients_O_18__c', operator:'>', value:50}"
+                            "]}"
+                        )
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of column keys to include (sf.*, qual.*, site.*). Defaults to site name, country, city and patient counts."
+                    }
+                },
+                "required": ["filters"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explorer_within_drive_km",
             "description": "Find neighboring sites within a driving distance (km) from a base Salesforce Account, using the Explorer service. Use this for 'within X km', 'nearby', 'distance' queries.",
             "parameters": {
@@ -3337,12 +3436,13 @@ TOOLS — WHEN TO USE WHAT
 
 **TOOL REFERENCE (simplified):**
 - salesforce_query → Use for 95% of queries: sites, counts, geography, patients, contacts, trials
-- sql_query → Use ONLY for site_qual qualification questions (pharmacy, overnight stay, etc.)
+- sql_query → Use ONLY for site_qual qualification questions that don't need SF fields (standalone qual queries)
+- explorer_search → Use when combining qual.* AND sf.* filters in a single query (replaces sql_query+salesforce_query separately)
 - qual_search → Semantic search over qualification comments
 - salesforce_account_extras → PI, CS flags, assignments, new diagnoses per Account
 - salesforce_account_contacts → Contact lists (PI, Study Coordinator, etc.)
 - rank_sites → Top-N sites by metric (auto-detects SF vs site_qual)
-- render_chart → Generate bar/line/pie charts
+- render_chart → Generate bar/line/pie charts (call after explorer_search to visualize results)
  
 IMPORTANT: If an answer requires data, you MUST call at least one appropriate tool to fetch real rows. Do not invent numbers.
 
@@ -3439,11 +3539,62 @@ QUERY ROUTING EXAMPLES (critical - follow these patterns exactly):
 • "Who is the PI for [site]?" → First get Account.Id, then salesforce_account_extras(account_id)
 • "Study Coordinators in Belgium" → salesforce_account_contacts with title_contains='Study Coordinator' and filter by country
 
-**BLOCK 8: Combined queries**
+**BLOCK 8: Combined SF-only queries**
 • "Sites in Spain with HLA typing and >10 patients" → salesforce_query with WHERE Account.ShippingCountry='Spain' AND C_Is_HLA_typing_performed__c='Yes' AND (C_Number_of_T1D_Patients_currently_U_18__c + C_Number_of_T1D_Patients_currently_O_18__c) > 10
 
-**BLOCK 9: Direct Account/Contact queries (when needed)**
+**BLOCK 9: Combined qual + SF queries → USE explorer_search**
+Use `explorer_search` when the query mixes qualification checklist fields (qual.*) AND Salesforce metrics (sf.*) or site location (site.*).
+This tool calls the Explorer's filter engine which handles the JOIN internally — do NOT use sql_query + salesforce_query separately for these.
+
+• "Sites with on-site pharmacy AND ND patients ≥18 > 50"
+  → explorer_search(filters={{logic:'AND', rules:[
+      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}},
+      {{field:'sf.C_Number_of_new_T1D_diagnosed_O_18__c', operator:'>', value:50}}
+    ]}})
+
+• "Sites with overnight stay AND Stage2 > 10 in Spain"
+  → explorer_search(filters={{logic:'AND', rules:[
+      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}},
+      {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:10}},
+      {{field:'site.country', operator:'equals', value:'Spain'}}
+    ]}})
+
+• "Sites with pharmacy OR overnight stay"
+  → explorer_search(filters={{logic:'OR', rules:[
+      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}},
+      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}}
+    ]}})
+
+• "Sites in Italy that have a pharmacy AND more than 100 T1D patients currently over 18"
+  → explorer_search(filters={{logic:'AND', rules:[
+      {{field:'site.country', operator:'equals', value:'Italy'}},
+      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}},
+      {{field:'sf.C_Number_of_T1D_Patients_currently_O_18__c', operator:'>', value:100}}
+    ]}})
+
+KEY qual field keys for explorer_search (use these exact values in the field property):
+- Pharmacy on site: qual.3_6__is_your_pharmacy_on_site_or_off_campus  (value: 'On-site' or 'On-site pharmacy')
+- Overnight stay: qual.3_5_2__overnight_stay  (value: 'Yes')
+- Number of exam rooms: qual.3_3__number_of_examination_rooms  (operator: '>', value: numeric)
+- Ongoing clinical trials: qual.3_1__count_ongoing_clinical_trials
+Use INDEX above for other qual field keys (format: alias => qual.<key>).
+
+KEY sf field keys for explorer_search:
+- ND patients ≥18: sf.C_Number_of_new_T1D_diagnosed_O_18__c
+- ND patients <18: sf.C_Number_of_new_T1D_diagnosed_U_18__c
+- Current T1D ≥18: sf.C_Number_of_T1D_Patients_currently_O_18__c
+- Current T1D <18: sf.C_Number_of_T1D_Patients_currently_U_18__c
+- Stage 2: sf.C_Number_of_Stage2_Individuals_followed__c
+- Stage 1: sf.C_Number_of_Stage1_Individuals_followed__c
+- HLA typing: sf.C_Is_HLA_typing_performed__c  (value: 'Yes')
+- Country: sf.Account.ShippingCountry  OR  site.country
+
+AFTER explorer_search → you can call render_chart on the returned rows to produce a chart.
+FOLLOW-UP on explorer_search results → if user says "of those, only in Spain", call explorer_search again adding the new rule to the same filters.
+
+**BLOCK 10: Direct Account/Contact queries (when needed)**
 • "Show me all clinical subaccounts" → salesforce_query: SELECT Id, Name, ParentId, RecordType.DeveloperName, C_Type__c FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical'
+  NOTE: Use BLOCK 9 (explorer_search) for any query that combines qual.* with sf.* — do not use sql_query+salesforce_query separately.
 • "List all contacts with email" → salesforce_query: SELECT Id, Name, Email, Phone, Title, Department, AccountId FROM Contact WHERE Email != null
 • "Show account hierarchy for [account]" → salesforce_query: SELECT Id, Name, ParentId, C_Type__c FROM Account WHERE ParentId = '[parent_id]'
   NOTE: Use Account queries for all site lists/counts/geography (BLOCK 1). Use Opportunity for patient metrics (BLOCK 2). NEVER use Postgres sites table for basic counts.
@@ -3911,7 +4062,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if meta.get("source") == "sf":
             preview_items.append(f"{alias} => sf.{meta.get('field')}")
         else:
-            preview_items.append(f"{alias} => site_qual.{meta.get('key')}")
+            # Usar prefijo qual. para que el AI construya filtros compatibles con explorer_search
+            key = meta.get("key") or meta.get("field") or ""
+            preview_items.append(f"{alias} => qual.{key}")
     INDEX_SNIPPET = " | ".join(preview_items)
 
     # ===== Mini‑planificador determinista =====
@@ -5776,6 +5929,19 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     except Exception as _e:
                         _dbg("WARN: could not cache viz table for show table: %s", _e)
                     msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out)})
+
+            elif name == "explorer_search":
+                    try:
+                        out = tool_explorer_search(
+                            request,
+                            filters=args.get("filters") or {"logic": "AND", "rules": []},
+                            columns=args.get("columns") or [],
+                        )
+                        last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
+                        last_table = _normalize_table_for_ui(last_table)
+                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
+                    except Exception as ee:
+                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
 
             elif name == "explorer_within_drive_km":
                     # Autorrellena base_account_id desde la última tabla si no vino
