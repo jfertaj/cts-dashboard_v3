@@ -1,0 +1,3467 @@
+{
+  "_description": "Full Salesforce field schema for INNODIA org - Account, Opportunity, Contact, Assignment__c. Generated from FieldDefinition SOQL. Use api_name as field key in SOQL queries.",
+  "_generated": "2026-02-25",
+  "Account": [
+    {
+      "api": "Account_Inactive__c",
+      "label": "Account Inactive",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Account_Name_original_language__c",
+      "label": "Account Name original language",
+      "type": "Text(255)"
+    },
+    {
+      "api": "Account_Status__c",
+      "label": "Account Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "AccountSource",
+      "label": "Account Source",
+      "type": "Picklist"
+    },
+    {
+      "api": "Accreditation_End_Date__c",
+      "label": "Accreditation End Date",
+      "type": "Date"
+    },
+    {
+      "api": "Accreditation_Start_Date__c",
+      "label": "Accreditation Start Date",
+      "type": "Date"
+    },
+    {
+      "api": "Accredited__c",
+      "label": "Accredited",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Accredited_Date__c",
+      "label": "Accredited Date",
+      "type": "Date"
+    },
+    {
+      "api": "Activation_Start_Date__c",
+      "label": "Activation Start Date",
+      "type": "Date"
+    },
+    {
+      "api": "Activity_Range__c",
+      "label": "Activity Range",
+      "type": "Picklist"
+    },
+    {
+      "api": "AnnualRevenue",
+      "label": "Annual Revenue",
+      "type": "Currency(18, 0)"
+    },
+    {
+      "api": "BillingAddress",
+      "label": "Billing Address",
+      "type": "Address"
+    },
+    {
+      "api": "C_Accredited_Clinical_Trial_Site__c",
+      "label": "Accredited Clinical Trial Site (CTS)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Contact_Person__c",
+      "label": "Contact Person",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Contribute_as_a_Patient_Organization__c",
+      "label": "Patient Organization",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Contribution_to_INNODIA__c",
+      "label": "Contribution to INNODIA",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "C_Deliver_Clinical_Grade_Services__c",
+      "label": "Diagnostic Lab (DxLab)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Invoice_Directed_to__c",
+      "label": "Invoice Directed to",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "C_Level_of_Membership__c",
+      "label": "Level of Membership",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Link_to_Sharepoint_Documents__c",
+      "label": "Link to Sharepoint Documents",
+      "type": "URL(255)"
+    },
+    {
+      "api": "C_Member__c",
+      "label": "Member",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "C_Member_Representative__c",
+      "label": "Member Representative",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Membership__c",
+      "label": "Membership",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Membership_Approved_Date__c",
+      "label": "Membership Approved Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Perform_Cutting_Edge__c",
+      "label": "Research & Mechanistic Lab (LAB)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Profiled_Date__c",
+      "label": "Profiled Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Profiling_Status__c",
+      "label": "Profiling Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Referral_Clinical_Partner__c",
+      "label": "Referral Clinical Partner (RP)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Type__c",
+      "label": "Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Type_of_Membership_Application__c",
+      "label": "Type of Membership Application",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_VAT_Number__c",
+      "label": "VAT Number",
+      "type": "Text(20)"
+    },
+    {
+      "api": "CDA__c",
+      "label": "CDA",
+      "type": "Picklist"
+    },
+    {
+      "api": "CDA_Date__c",
+      "label": "CDA Date",
+      "type": "Date"
+    },
+    {
+      "api": "CDA_end_date__c",
+      "label": "CDA end date",
+      "type": "Date"
+    },
+    {
+      "api": "CDA_start_date__c",
+      "label": "CDA start date",
+      "type": "Date"
+    },
+    {
+      "api": "Clinical_Site_CS__c",
+      "label": "Clinical Site (CS)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Clinical_Site_CS_validated__c",
+      "label": "Validated Clinical Site (CS)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Clinical_Trial_Site_CTS_validated__c",
+      "label": "Validated Clinical  Trial Site (CTS)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "CreatedById",
+      "label": "Created By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "CreatedDate",
+      "label": "Created Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "CTS__c",
+      "label": "CTS",
+      "type": "Checkbox"
+    },
+    {
+      "api": "CTS_Contact_Person__c",
+      "label": "CTS Contact Person",
+      "type": "Picklist"
+    },
+    {
+      "api": "CTS_Type__c",
+      "label": "CTS Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "CTU_Status__c",
+      "label": "CTU Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "CTU_Status_Other__c",
+      "label": "CTU Status Other",
+      "type": "Text(100)"
+    },
+    {
+      "api": "CTU_Type__c",
+      "label": "CTU Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "Data_Sample_collected_and_available__c",
+      "label": "Data/Sample collected and available",
+      "type": "Picklist"
+    },
+    {
+      "api": "Data_Sample_Description__c",
+      "label": "Data/Sample Description",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "Department__c",
+      "label": "Department",
+      "type": "Text(150)"
+    },
+    {
+      "api": "Description",
+      "label": "Description",
+      "type": "Long Text Area(32000)"
+    },
+    {
+      "api": "DETECT_Hub__c",
+      "label": "DETECT Hub",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Diagnostic_Lab_DxLab_validated__c",
+      "label": "Validated Diagnostic Lab (DxLab)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Elegible_for_DETECT_Site__c",
+      "label": "Elegible for DETECT Site",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Fax",
+      "label": "Fax",
+      "type": "Phone"
+    },
+    {
+      "api": "Focus__c",
+      "label": "Focus",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "Hubs_and_diagnostic_labs__c",
+      "label": "Hubs and diagnostic labs",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Id",
+      "label": "Account ID",
+      "type": "Lookup()"
+    },
+    {
+      "api": "Industry",
+      "label": "Industry",
+      "type": "Picklist"
+    },
+    {
+      "api": "INNODIA_Clinical_Trial_Site__c",
+      "label": "INNODIA Clinical Trial Site",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Institute__c",
+      "label": "Institute",
+      "type": "Text(150)"
+    },
+    {
+      "api": "IsDeleted",
+      "label": "Deleted",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IsPriorityRecord",
+      "label": "Important",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Jigsaw",
+      "label": "Data.com Key",
+      "type": "Text(20)"
+    },
+    {
+      "api": "JigsawCompanyId",
+      "label": "Jigsaw Company Id",
+      "type": "External Lookup"
+    },
+    {
+      "api": "Key_Identifier__c",
+      "label": "Key Identifier",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "Lab__c",
+      "label": "Lab",
+      "type": "Checkbox"
+    },
+    {
+      "api": "LastActivityDate",
+      "label": "Last Activity",
+      "type": "Date"
+    },
+    {
+      "api": "LastModifiedById",
+      "label": "Last Modified By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "LastModifiedDate",
+      "label": "Last Modified Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastReferencedDate",
+      "label": "Last Referenced Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastViewedDate",
+      "label": "Last Viewed Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "Letter_technical_field__c",
+      "label": "Letter (technical field)",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "MasterRecordId",
+      "label": "Account",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "Member_Representative_Email__c",
+      "label": "Member Representative Email",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "Membership_Application_Date__c",
+      "label": "Membership Application Date",
+      "type": "Date"
+    },
+    {
+      "api": "Membership_Expiration_Date__c",
+      "label": "Membership Expiration Date",
+      "type": "Date"
+    },
+    {
+      "api": "Membership_Starting_Date__c",
+      "label": "Membership Starting Date",
+      "type": "Date"
+    },
+    {
+      "api": "Membership_Status__c",
+      "label": "Membership Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "MSA_Date__c",
+      "label": "MSA Date",
+      "type": "Date"
+    },
+    {
+      "api": "MSA_in_place__c",
+      "label": "MSA in place",
+      "type": "Picklist"
+    },
+    {
+      "api": "myINNODIA_Member_ID__c",
+      "label": "myINNODIA Member ID",
+      "type": "Text(100)  (External ID) (Unique Case Insensitive)"
+    },
+    {
+      "api": "Name",
+      "label": "Account Name",
+      "type": "Name"
+    },
+    {
+      "api": "npe01__One2OneContact__c",
+      "label": "Primary Contact",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "npe01__SYSTEM_AccountType__c",
+      "label": "_SYSTEM: AccountType",
+      "type": "Text(100)"
+    },
+    {
+      "api": "npe01__SYSTEMIsIndividual__c",
+      "label": "_SYSTEM: IsIndividual",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npo02__AverageAmount__c",
+      "label": "Average Gift",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__Best_Gift_Year__c",
+      "label": "Best Gift Year",
+      "type": "Text(4)"
+    },
+    {
+      "api": "npo02__Best_Gift_Year_Total__c",
+      "label": "Best Gift Year Total",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npo02__FirstCloseDate__c",
+      "label": "First Gift Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__Formal_Greeting__c",
+      "label": "Formal Greeting",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "npo02__HouseholdPhone__c",
+      "label": "Household Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "npo02__Informal_Greeting__c",
+      "label": "Informal Greeting",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "npo02__LargestAmount__c",
+      "label": "Largest Gift",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__LastCloseDate__c",
+      "label": "Last Gift Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__LastMembershipAmount__c",
+      "label": "Last Membership Amount",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__LastMembershipDate__c",
+      "label": "Last Membership Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__LastMembershipLevel__c",
+      "label": "Last Membership Level",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npo02__LastMembershipOrigin__c",
+      "label": "Last Membership Origin",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npo02__LastOppAmount__c",
+      "label": "Last Gift Amount",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__MembershipEndDate__c",
+      "label": "Membership End Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__MembershipJoinDate__c",
+      "label": "Membership Join Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__NumberOfClosedOpps__c",
+      "label": "Total Number of Gifts",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__NumberOfMembershipOpps__c",
+      "label": "Number of Memberships",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppAmount2YearsAgo__c",
+      "label": "Total Gifts Two Years Ago",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountLastNDays__c",
+      "label": "Total Gifts Last N Days",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountLastYear__c",
+      "label": "Total Gifts Last Year",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountThisYear__c",
+      "label": "Total Gifts This Year",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppsClosed2YearsAgo__c",
+      "label": "Number of Gifts Two Years Ago",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppsClosedLastNDays__c",
+      "label": "Number of Gifts Last N Days",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppsClosedLastYear__c",
+      "label": "Number of Gifts Last Year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppsClosedThisYear__c",
+      "label": "Number of Gifts This Year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__SmallestAmount__c",
+      "label": "Smallest Gift",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__SYSTEM_CUSTOM_NAMING__c",
+      "label": "_SYSTEM: CUSTOM NAMING",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "npo02__TotalMembershipOppAmount__c",
+      "label": "Total Membership Amount",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__TotalOppAmount__c",
+      "label": "Total Gifts",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npsp__All_Members_Deceased__c",
+      "label": "All Household Members Deceased",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Batch__c",
+      "label": "Batch",
+      "type": "Lookup(Batch)"
+    },
+    {
+      "api": "npsp__CustomizableRollups_UseSkewMode__c",
+      "label": "Customizable Rollups: Force Skew Mode",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Funding_Focus__c",
+      "label": "Funding Focus",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "npsp__Grantmaker__c",
+      "label": "Grantmaker",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Matching_Gift_Administrator_Name__c",
+      "label": "Matching Gift Administrator Name",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Amount_Max__c",
+      "label": "Matching Gift Amount Max",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Amount_Min__c",
+      "label": "Matching Gift Amount Min",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Annual_Employee_Max__c",
+      "label": "Matching Gift Annual Employee Max",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Comments__c",
+      "label": "Matching Gift Comments",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Company__c",
+      "label": "Matching Gift Company",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Matching_Gift_Email__c",
+      "label": "Matching Gift Email",
+      "type": "Email"
+    },
+    {
+      "api": "npsp__Matching_Gift_Info_Updated__c",
+      "label": "Matching Gift Info Updated",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Matching_Gift_Percent__c",
+      "label": "Matching Gift Percent",
+      "type": "Percent(3, 2)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Phone__c",
+      "label": "Matching Gift Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "npsp__Matching_Gift_Request_Deadline__c",
+      "label": "Matching Gift Request Deadline",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npsp__Membership_Span__c",
+      "label": "Membership Span",
+      "type": "Formula (Number)"
+    },
+    {
+      "api": "npsp__Membership_Status__c",
+      "label": "Membership Status",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npsp__Number_of_Household_Members__c",
+      "label": "Number of Household Members",
+      "type": "Number(10, 0)"
+    },
+    {
+      "api": "npsp__Sustainer__c",
+      "label": "Sustainer",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Undeliverable_Address__c",
+      "label": "Undeliverable Billing Address",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Number_18_years__c",
+      "label": "Number < 18 years",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "Number_More_18_years__c",
+      "label": "Number >= 18 years",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "Number_of_Subscribers__c",
+      "label": "Number of Subscribers",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "Number_of_T1D_patients_under_the_care__c",
+      "label": "Number of T1D patients under the care",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "Number_of_TD1_diagnosed_last_year__c",
+      "label": "Number of TD1 diagnosed last year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "NumberOfEmployees",
+      "label": "Employees",
+      "type": "Number(8, 0)"
+    },
+    {
+      "api": "Open_to_Collaboration_partnership__c",
+      "label": "Open to Collaboration/partnership",
+      "type": "Picklist"
+    },
+    {
+      "api": "Open_to_RCA__c",
+      "label": "Open to RCA",
+      "type": "Picklist"
+    },
+    {
+      "api": "OwnerId",
+      "label": "Account Owner",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "ParentId",
+      "label": "Parent Account",
+      "type": "Hierarchy"
+    },
+    {
+      "api": "Partnership_MOU_end_date__c",
+      "label": "Partnership/MOU end date",
+      "type": "Date"
+    },
+    {
+      "api": "Partnership_MOU_start_date__c",
+      "label": "Partnership/MOU start date",
+      "type": "Date"
+    },
+    {
+      "api": "Patient_Organization_validated__c",
+      "label": "Validated Patient Organization",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Patient_voice__c",
+      "label": "Patient voice",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Phone",
+      "label": "Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "PhotoUrl",
+      "label": "Photo URL",
+      "type": "URL(255)"
+    },
+    {
+      "api": "Qualification_End_Date__c",
+      "label": "Qualification End Date",
+      "type": "Date"
+    },
+    {
+      "api": "Qualification_Start_Date__c",
+      "label": "Qualification Start Date",
+      "type": "Date"
+    },
+    {
+      "api": "REASON__c",
+      "label": "REASON",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "RecordTypeId",
+      "label": "Account Record Type",
+      "type": "Record Type"
+    },
+    {
+      "api": "Referral_Outreach_Site_Non_CTS__c",
+      "label": "Referral & Outreach Site (Non-CTS)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Referral_Partner__c",
+      "label": "RP",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Related_CTU__c",
+      "label": "Related CTU",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "Research_Focus__c",
+      "label": "Research Focus",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "Research_Mechanistic_Lab_LAB_validated__c",
+      "label": "Validated Res & Mechanistic Lab (LAB)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Research_Step__c",
+      "label": "Research Step",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "Screening_Activity_Description__c",
+      "label": "Screening Activity Description",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "Screening_Program__c",
+      "label": "Screening Program",
+      "type": "Picklist"
+    },
+    {
+      "api": "Service_Description_1__c",
+      "label": "Service Description 1",
+      "type": "Long Text Area(500)"
+    },
+    {
+      "api": "Service_Description_2__c",
+      "label": "Service Description 2",
+      "type": "Long Text Area(500)"
+    },
+    {
+      "api": "Service_Description_3__c",
+      "label": "Service Description 3",
+      "type": "Long Text Area(500)"
+    },
+    {
+      "api": "Services_to_share__c",
+      "label": "Services to share",
+      "type": "Picklist"
+    },
+    {
+      "api": "ShippingAddress",
+      "label": "Main Address",
+      "type": "Address"
+    },
+    {
+      "api": "Short_Name__c",
+      "label": "Short Name",
+      "type": "Text(80)"
+    },
+    {
+      "api": "SicDesc",
+      "label": "SIC Description",
+      "type": "Text(80)"
+    },
+    {
+      "api": "Site_Active_Date__c",
+      "label": "Site Active Date",
+      "type": "Date"
+    },
+    {
+      "api": "SourceSystemIdentifier",
+      "label": "Source System ID",
+      "type": "Text(85)"
+    },
+    {
+      "api": "Specific_information__c",
+      "label": "Specific information",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "Subaccount_Inactive__c",
+      "label": "Subaccount Inactive",
+      "type": "Checkbox"
+    },
+    {
+      "api": "SystemModstamp",
+      "label": "System Modstamp",
+      "type": "Date/Time"
+    },
+    {
+      "api": "T_Auto_Number__c",
+      "label": "Auto Number (Technical field)",
+      "type": "Auto Number"
+    },
+    {
+      "api": "Technology_Expertise__c",
+      "label": "Technology Expertise",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "Type",
+      "label": "Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "Type_of_Organization__c",
+      "label": "Type of Organization",
+      "type": "Picklist"
+    },
+    {
+      "api": "UK_T1D_RC__c",
+      "label": "UK T1D RC",
+      "type": "Checkbox"
+    },
+    {
+      "api": "UserRecordAccessId",
+      "label": "Object Access Level",
+      "type": "Lookup(User Record Access)"
+    },
+    {
+      "api": "Website",
+      "label": "Website",
+      "type": "URL(255)"
+    }
+  ],
+  "Opportunity": [
+    {
+      "api": "AccountId",
+      "label": "Account Name",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "Amount",
+      "label": "Amount",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "Approved_Docs_Received_Date__c",
+      "label": "Approved study documents received",
+      "type": "Date"
+    },
+    {
+      "api": "Archive_confirmation_15yrs_comments__c",
+      "label": "Archive confirmation (min15yrs) comments",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "Archive_confirmation_15yrs_received__c",
+      "label": "Archive confirmation (min15yrs) received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_1st_Level_Certification_Passed_Date__c",
+      "label": "1st Level Certification Passed Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Account_Verified__c",
+      "label": "Account Verified",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Accreditation_certificate_sent_on__c",
+      "label": "Accreditation certificate sent on",
+      "type": "Date"
+    },
+    {
+      "api": "C_Additional_Comments__c",
+      "label": "Additional Comments",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_All_documents_comments__c",
+      "label": "All documents comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_All_documents_received__c",
+      "label": "All documents received",
+      "type": "Date"
+    },
+    {
+      "api": "C_All_Research_Staff_Needed_for_GCP__c",
+      "label": "All Research Staff Needed for GCP Course",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Asked_for_Visit_Date__c",
+      "label": "Asked for Visit Date",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Assignment__c",
+      "label": "Assignment",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Assignment_Sent__c",
+      "label": "Assignment Sent",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Aware_of_any_Screening_Program__c",
+      "label": "Aware of any Screening Program",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_CDA_signed__c",
+      "label": "CDA signed",
+      "type": "Date"
+    },
+    {
+      "api": "C_CDA_Status__c",
+      "label": "CDA Status",
+      "type": "Date"
+    },
+    {
+      "api": "C_CDA_Type__c",
+      "label": "CDA Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Center_for_Running_Early_Diagnosis__c",
+      "label": "Running screening for Early Diagnosis",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Centralized_Clinical_Trial_Facility__c",
+      "label": "Centralized Clinical Trial Facility",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Centralized_Facility_Contact_Person__c",
+      "label": "Centralized Facility Contact Person",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Centrifuge_certificate_comments__c",
+      "label": "Centrifuge certificate comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Centrifuge_certificate_received__c",
+      "label": "Centrifuge certificate received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Certification_Output__c",
+      "label": "Certification Output",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Closing_Report__c",
+      "label": "Closing Report",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "C_Comments__c",
+      "label": "Comments",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "C_Comments_on_goals_to_be_achieved__c",
+      "label": "Comments on goals to be achieved",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "C_Contact_name__c",
+      "label": "Contact name",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Contact_Provided__c",
+      "label": "Contact Provided",
+      "type": "Text(200)"
+    },
+    {
+      "api": "C_Contact_Verified__c",
+      "label": "Contact Verified",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_CV_of_the_head_of_the_lab_comments__c",
+      "label": "CV of the head of the lab comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_CV_of_the_head_of_the_lab_received__c",
+      "label": "CV of the head of the lab received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Deadline__c",
+      "label": "Deadline",
+      "type": "Date"
+    },
+    {
+      "api": "C_Deadline_Invoice__c",
+      "label": "Deadline Invoice",
+      "type": "Date"
+    },
+    {
+      "api": "C_Deadline_to_plan_meeting__c",
+      "label": "Deadline to plan meeting",
+      "type": "Date"
+    },
+    {
+      "api": "C_Deadline_to_plan_second_meeting__c",
+      "label": "Deadline to plan second meeting",
+      "type": "Date"
+    },
+    {
+      "api": "C_Deadline_to_receive_Documents__c",
+      "label": "Deadline to receive Documents",
+      "type": "Date"
+    },
+    {
+      "api": "C_Deadline_to_receive_form_questionnaire__c",
+      "label": "Deadline to receive form/ questionnaire",
+      "type": "Date"
+    },
+    {
+      "api": "C_Description_of_the_goal_1__c",
+      "label": "Description of the goal #1",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Description_of_the_goal_2__c",
+      "label": "Description of the goal #2",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Description_of_the_goal_3__c",
+      "label": "Description of the goal #3",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Description_of_the_other_goals__c",
+      "label": "Description of the other goals",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Document_Status__c",
+      "label": "Document Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Documents_Signed_Date__c",
+      "label": "Documents Signed Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_ECG_device_certificate_comments__c",
+      "label": "ECG- device certificate comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_ECG_device_certificate_received__c",
+      "label": "ECG- device certificate received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Email_with_documents_sent__c",
+      "label": "Email with documents sent",
+      "type": "Date"
+    },
+    {
+      "api": "C_Form_Questionnaire_reviewed__c",
+      "label": "Form / Questionnaire reviewed",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Form_Questionnaire_sent__c",
+      "label": "Form / Questionnaire sent",
+      "type": "Date"
+    },
+    {
+      "api": "C_Full_Membership_invoice_paid__c",
+      "label": "Full Membership invoice paid",
+      "type": "Date"
+    },
+    {
+      "api": "C_Goal_1_deadline__c",
+      "label": "Goal #1 deadline",
+      "type": "Date"
+    },
+    {
+      "api": "C_Goal_2_deadline__c",
+      "label": "Goal #2 deadline",
+      "type": "Date"
+    },
+    {
+      "api": "C_Goal_3_deadline__c",
+      "label": "Goal #3 deadline",
+      "type": "Date"
+    },
+    {
+      "api": "C_Has_facility_to_conduct__c",
+      "label": "Has facility to conduct Clinical Trials",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Immuno_Medi_trial_names_or_sponsors__c",
+      "label": "Immuno Medi trial names or sponsors",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "C_Info_Inserted_CRM_and_Database__c",
+      "label": "Info Inserted (CRM and Database)",
+      "type": "Date"
+    },
+    {
+      "api": "C_Interest_about_setting_up_a_program__c",
+      "label": "Interest about setting up a program",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Interestedinconducting_clinical_trials__c",
+      "label": "Interested in conducting T1D trials",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Invoice_Full_Membership_sent__c",
+      "label": "Invoice Full Membership sent",
+      "type": "Date"
+    },
+    {
+      "api": "C_Is_HLA_typing_performed__c",
+      "label": "Is HLA typing performed?",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Lab_Accreditation_certificate_Comments__c",
+      "label": "Lab Accreditation certificate comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Lab_Accreditation_certificate_received__c",
+      "label": "Lab Accreditation certificate received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Lead_Study_Coordinator_SC__c",
+      "label": "Lead Study Coordinator (SC)",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Lead_Study_Nurse__c",
+      "label": "Lead Study Nurse",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Lead_Study_Nurse_Dedicated_to_the_cent__c",
+      "label": "Lead Study Nurse Dedicated to the center",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Link_to_Sharepoint_Documents__c",
+      "label": "Link to Sharepoint Documents",
+      "type": "URL(255)"
+    },
+    {
+      "api": "C_List_of_nearby_CTS__c",
+      "label": "List of nearby CTS",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_List_of_Organization_or_PAC_names__c",
+      "label": "List of Organization or PAC names",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_List_of_trial_name_or_sponsors_NonTyp1__c",
+      "label": "List of trial name or sponsors",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_List_of_trial_name_or_sponsors_Type1__c",
+      "label": "List of trial name or sponsors",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_MCA_Verified__c",
+      "label": "MCA Verified",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Meeting_Comments__c",
+      "label": "Meeting Comments",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "C_Meeting_Date__c",
+      "label": "Meeting Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Meeting_invitation_sent__c",
+      "label": "Meeting invitation sent",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Membership_Form_received__c",
+      "label": "Membership Form received",
+      "type": "Date"
+    },
+    {
+      "api": "C_Monitor_certificate_Comments__c",
+      "label": "Blood pressure monitor Comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Monitor_certificate_received__c",
+      "label": "Blood pressure monitor received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Nbr_of_related_site_sub_Investigator__c",
+      "label": "Number of related site sub Investigator",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Nbr_of_studies_PI_is_involved_PI_Sub_I__c",
+      "label": "Nbr of studies PI is involved (PI/Sub-I)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_Individuals_screened_intotal__c",
+      "label": "Number of Individuals screened in total",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_new_T1D_diagnosed_O_18__c",
+      "label": "Number of new T1D diagnosed last year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_new_T1D_diagnosed_U_18__c",
+      "label": "Number of new T1D diagnosed last year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_Stage1_Individuals_followed__c",
+      "label": "Number of Stage 1 Individuals followed",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_Stage2_Individuals_followed__c",
+      "label": "Number of Stage 2 Individuals followed",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_T1D_Patients_currently_O_18__c",
+      "label": "Nbr of T1D Patients currently under care",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Number_of_T1D_Patients_currently_U_18__c",
+      "label": "Nbr of T1D Patients currently under care",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Other_goals_deadline__c",
+      "label": "Other goals deadline",
+      "type": "Date"
+    },
+    {
+      "api": "C_Oxygen_saturation_monitor_received__c",
+      "label": "Oxygen saturation monitor received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Payment_received__c",
+      "label": "Payment received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Percentage_Doc_Received__c",
+      "label": "% of documents received",
+      "type": "Formula (Number)"
+    },
+    {
+      "api": "C_Phase_I_NonType1__c",
+      "label": "Phase I (Non T1D)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Phase_I_Type1__c",
+      "label": "Phase I (T1D)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Phase_II_NonType1__c",
+      "label": "Phase II (Non T1D)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Phase_II_Type1__c",
+      "label": "Phase II (T1D)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Phase_III_NonType1__c",
+      "label": "Phase III (Non T1D)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_Phase_III_Type1__c",
+      "label": "Phase III (T1D)",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_PI_Experience_with_Immuno_Med__c",
+      "label": "PI Experience with Immunomodulatory Medi",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Planning_Meeting_date__c",
+      "label": "Planning Meeting date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Population_Origin__c",
+      "label": "Population Origin",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Primarily_Caring_for_all_study__c",
+      "label": "Caring for all study activities",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Principal_Investigator__c",
+      "label": "Principal Investigator",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Profiling_Complete__c",
+      "label": "Profiling Complete",
+      "type": "Date"
+    },
+    {
+      "api": "C_Refrigerator_certificate_Comments__c",
+      "label": "Refrigerator certificate Comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Refrigerator_certificate_received__c",
+      "label": "Refrigerator certificate received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Respiratory_rate_monitor_comments__c",
+      "label": "Respiratory rate monitor comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Respiratory_rate_monitor_received__c",
+      "label": "Respiratory rate monitor received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_SC_Dedicate_To_The_Research_Center__c",
+      "label": "SC dedicated to the research center",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_SC_Experience_in_T1D_Clinicla_Research__c",
+      "label": "SC Experience in T1D Clinicla Research",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "C_SC_Situation_Explanation__c",
+      "label": "Situation Explanation",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "C_Scale_comments__c",
+      "label": "Scale comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Scale_received__c",
+      "label": "Scale received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Second_Meeting_Date__c",
+      "label": "Second Meeting Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Send_patients_to_other_CTS_nearby__c",
+      "label": "Send patients to other CTS nearby",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Services_Provided_by_Centralized_Unit__c",
+      "label": "Services Provided by Centralized Unit",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Signature__c",
+      "label": "Signature",
+      "type": "Date"
+    },
+    {
+      "api": "C_Site_has_a_Study_Coordinator__c",
+      "label": "Site has a Study Coordinator",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Site_Has_A_Study_Nurse__c",
+      "label": "Site Has A Study Nurse",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Site_Linked_with_Patient_Org_or_PAC__c",
+      "label": "Site Linked with Patient Org. or PAC",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Stadiometer_certificate_comments__c",
+      "label": "Stadiometer certificate comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Stadiometer_certificate_received__c",
+      "label": "Stadiometer certificate received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Start_Date__c",
+      "label": "Start Date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Study_Nurse_Situation_Explanation__c",
+      "label": "Situation Explanation",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "C_Study_Nurse_Specialities__c",
+      "label": "Study Nurse Specialities",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Study_staff_list_comment__c",
+      "label": "Study staff list comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Study_staff_list_received__c",
+      "label": "Study staff list received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Summary_email_sent__c",
+      "label": "Summary email sent date",
+      "type": "Date"
+    },
+    {
+      "api": "C_Tasks_created_for_the_Team__c",
+      "label": "Tasks created for the Team",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_The_Funding_for_the_screening_program__c",
+      "label": "The funding for the screening program",
+      "type": "Text(200)"
+    },
+    {
+      "api": "C_Type_of_visit__c",
+      "label": "Type of visit",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Under_Which_Program__c",
+      "label": "Under Which Program",
+      "type": "Text(200)"
+    },
+    {
+      "api": "C_Update_Account_SubAccount_info__c",
+      "label": "Update Account/SubAccount info",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Update_Contact_Info__c",
+      "label": "Update Contact Info",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Welcome_Email_Sent_Associate__c",
+      "label": "Welcome Email Sent (if Associate)",
+      "type": "Date"
+    },
+    {
+      "api": "C_Welcome_Email_Sent_Full__c",
+      "label": "Welcome Email Sent (if Full)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_X80_freezer_certificate_Comments__c",
+      "label": "(-)80\u00b0 freezer  certificate Comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_X80_freezer_certificate_received__c",
+      "label": "(-)80\u00b0 freezer  certificate received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_ygen_saturation_monitor_comments__c",
+      "label": "Oxygen saturation monitor comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "CampaignId",
+      "label": "Primary Campaign Source",
+      "type": "Lookup(Campaign)"
+    },
+    {
+      "api": "CloseDate",
+      "label": "Open Date",
+      "type": "Date"
+    },
+    {
+      "api": "ContactId",
+      "label": "Contact",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "CreatedById",
+      "label": "Created By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "CreatedDate",
+      "label": "Created Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "Current_GCP_certificates_comments__c",
+      "label": "Current GCP certificates comments",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "Current_GCP_certificates_received__c",
+      "label": "Current GCP certificates received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Delegation_Log_provided__c",
+      "label": "Delegation log provided",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Description",
+      "label": "Description",
+      "type": "Long Text Area(32000)"
+    },
+    {
+      "api": "DETECT_Protocol__c",
+      "label": "DETECT Protocol",
+      "type": "Checkbox"
+    },
+    {
+      "api": "DETECT_Protocol_Version__c",
+      "label": "DETECT Protocol Version",
+      "type": "Text(100)"
+    },
+    {
+      "api": "Example_of_device_certified_comments__c",
+      "label": "Example of device certified comments",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "Example_of_device_certified_received__c",
+      "label": "Example of device certified received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Fiscal",
+      "label": "Fiscal Period",
+      "type": "Picklist"
+    },
+    {
+      "api": "ForecastCategory",
+      "label": "Forecast Category",
+      "type": "Picklist"
+    },
+    {
+      "api": "ForecastCategoryName",
+      "label": "Forecast Category",
+      "type": "Picklist"
+    },
+    {
+      "api": "Form_Questionnaire_received__c",
+      "label": "Form/Questionnaire received",
+      "type": "Date"
+    },
+    {
+      "api": "HasOpenActivity",
+      "label": "Has Open Activity",
+      "type": "Checkbox"
+    },
+    {
+      "api": "HasOpportunityLineItem",
+      "label": "Has Line Item",
+      "type": "Checkbox"
+    },
+    {
+      "api": "HasOverdueTask",
+      "label": "Has Overdue Task",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Id",
+      "label": "Opportunity ID",
+      "type": "Lookup()"
+    },
+    {
+      "api": "Infusion_pump_for_IMP_certificate_commen__c",
+      "label": "Infusion pump for IMP certificate commen",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "Infusion_pump_for_IMP_certificate_receiv__c",
+      "label": "Infusion pump for IMP certificate receiv",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Insurance_Policy_Number__c",
+      "label": "Policy Number",
+      "type": "Text(100)"
+    },
+    {
+      "api": "Invitation_Email_sent__c",
+      "label": "Invitation Email sent",
+      "type": "Date"
+    },
+    {
+      "api": "Invoice_paid__c",
+      "label": "Invoice paid",
+      "type": "Date"
+    },
+    {
+      "api": "Invoice_received__c",
+      "label": "Invoice received",
+      "type": "Date"
+    },
+    {
+      "api": "IsClosed",
+      "label": "Closed",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IsDeleted",
+      "label": "Deleted",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IsWon",
+      "label": "Won",
+      "type": "Checkbox"
+    },
+    {
+      "api": "LastActivityDate",
+      "label": "Last Activity",
+      "type": "Date"
+    },
+    {
+      "api": "LastAmountChangedHistoryId",
+      "label": "Last Amount Changed History",
+      "type": "Lookup(Opportunity History)"
+    },
+    {
+      "api": "LastCloseDateChangedHistoryId",
+      "label": "Last Open Date Changed History",
+      "type": "Lookup(Opportunity History)"
+    },
+    {
+      "api": "LastModifiedById",
+      "label": "Last Modified By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "LastModifiedDate",
+      "label": "Last Modified Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastReferencedDate",
+      "label": "Last Referenced Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastStageChangeDate",
+      "label": "Last Stage Change Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastViewedDate",
+      "label": "Last Viewed Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LeadSource",
+      "label": "Lead Source",
+      "type": "Picklist"
+    },
+    {
+      "api": "List_of_SOPs_comments__c",
+      "label": "List of SOPs comments",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "List_of_SOPs_received__c",
+      "label": "List of SOPs received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "MatchPoint__c",
+      "label": "MatchPoint",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Material_Barcodes__c",
+      "label": "Barcodes",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Material_DBS_Cards__c",
+      "label": "DBS cards",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Material_Desiccant__c",
+      "label": "Desiccant",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Material_Hub_Labels__c",
+      "label": "Hub address labels",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Material_Plastic_Envelopes__c",
+      "label": "Plastic envelopes",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Material_Received_Date__c",
+      "label": "Material received",
+      "type": "Date"
+    },
+    {
+      "api": "MONITOR_Protocol__c",
+      "label": "MONITOR Protocol",
+      "type": "Checkbox"
+    },
+    {
+      "api": "MONITOR_Protocol_Version__c",
+      "label": "MONITOR Protocol Version",
+      "type": "Text(100)"
+    },
+    {
+      "api": "MoU_Signed_Date__c",
+      "label": "MoU Signed",
+      "type": "Date"
+    },
+    {
+      "api": "MyINNODIA_Platform__c",
+      "label": "MyINNODIA Platform",
+      "type": "Picklist"
+    },
+    {
+      "api": "Name",
+      "label": "Opportunity Name",
+      "type": "Text(120)"
+    },
+    {
+      "api": "NextStep",
+      "label": "Next Step",
+      "type": "Text(255)"
+    },
+    {
+      "api": "NIP_Notes__c",
+      "label": "Notes",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "NIP_Signed_Date__c",
+      "label": "Agreement signed",
+      "type": "Date"
+    },
+    {
+      "api": "NIP_Submitted_Date__c",
+      "label": "Agreement submitted",
+      "type": "Date"
+    },
+    {
+      "api": "NIP_Using_INNODIA_Template__c",
+      "label": "Using INNODIA template",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__Amount_Outstanding__c",
+      "label": "Remaining Balance",
+      "type": "Formula (Currency)"
+    },
+    {
+      "api": "npe01__Amount_Written_Off__c",
+      "label": "Payment Writeoff Amount",
+      "type": "Roll-Up Summary (SUM Payment)"
+    },
+    {
+      "api": "npe01__Contact_Id_for_Role__c",
+      "label": "Contact Id for Role",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npe01__Do_Not_Automatically_Create_Payment__c",
+      "label": "Do Not Automatically Create Payment",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npe01__Is_Opp_From_Individual__c",
+      "label": "Is Opp From Individual",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npe01__Member_Level__c",
+      "label": "Member Level",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__Membership_End_Date__c",
+      "label": "Membership End Date",
+      "type": "Date"
+    },
+    {
+      "api": "npe01__Membership_Origin__c",
+      "label": "Membership Origin",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__Membership_Start_Date__c",
+      "label": "Membership Start Date",
+      "type": "Date"
+    },
+    {
+      "api": "npe01__Number_of_Payments__c",
+      "label": "Number of Payments",
+      "type": "Roll-Up Summary (COUNT Payment)"
+    },
+    {
+      "api": "npe01__Payments_Made__c",
+      "label": "Payment Amount Received",
+      "type": "Roll-Up Summary (SUM Payment)"
+    },
+    {
+      "api": "npe03__Recurring_Donation__c",
+      "label": "Recurring Donation",
+      "type": "Lookup(Recurring Donation)"
+    },
+    {
+      "api": "npo02__CombinedRollupFieldset__c",
+      "label": "Combined Rollup Fieldset",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npo02__systemHouseholdContactRoleProcessor__c",
+      "label": "_SYSTEM: HOUSEHOLD CONTACT ROLEPROCESSOR",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Acknowledgment_Date__c",
+      "label": "Acknowledgment Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Acknowledgment_Status__c",
+      "label": "Acknowledgment Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Ask_Date__c",
+      "label": "Ask Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Batch__c",
+      "label": "Batch",
+      "type": "Lookup(Batch)"
+    },
+    {
+      "api": "npsp__Batch_Number__c",
+      "label": "Batch Number",
+      "type": "Text(30)"
+    },
+    {
+      "api": "npsp__Closed_Lost_Reason__c",
+      "label": "Closed Lost Reason",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "npsp__CommitmentId__c",
+      "label": "Elevate Recurring Id",
+      "type": "Text(100)  (External ID)"
+    },
+    {
+      "api": "npsp__DisableContactRoleAutomation__c",
+      "label": "Disable Contact Role Automation",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Fair_Market_Value__c",
+      "label": "Fair Market Value",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Gift_Strategy__c",
+      "label": "Gift Strategy",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Grant_Contract_Date__c",
+      "label": "Grant Contract Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Grant_Contract_Number__c",
+      "label": "Grant Contract Number",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npsp__Grant_Period_End_Date__c",
+      "label": "Grant Period End Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Grant_Period_Start_Date__c",
+      "label": "Grant Period Start Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Grant_Program_Area_s__c",
+      "label": "Program Areas",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "npsp__Grant_Requirements_Website__c",
+      "label": "Grant Requirements Website",
+      "type": "URL(255)"
+    },
+    {
+      "api": "npsp__Honoree_Contact__c",
+      "label": "Honoree Contact",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "npsp__Honoree_Information__c",
+      "label": "Honoree Information",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "npsp__Honoree_Name__c",
+      "label": "Honoree Name",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npsp__In_Kind_Description__c",
+      "label": "In-Kind Description",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "npsp__In_Kind_Donor_Declared_Value__c",
+      "label": "In-Kind Donor Declared Value",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__In_Kind_Type__c",
+      "label": "In-Kind Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Is_Grant_Renewal__c",
+      "label": "Is Grant Renewal",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Matching_Gift__c",
+      "label": "Matching Gift",
+      "type": "Lookup(Opportunity)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Account__c",
+      "label": "Matching Gift Account",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Employer__c",
+      "label": "Matching Gift Employer",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npsp__Matching_Gift_Status__c",
+      "label": "Matching Gift Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Next_Grant_Deadline_Due_Date__c",
+      "label": "Next Deliverable Date",
+      "type": "Roll-Up Summary (MIN Deliverable)"
+    },
+    {
+      "api": "npsp__Notification_Message__c",
+      "label": "Notification Message",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "npsp__Notification_Preference__c",
+      "label": "Notification Preference",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Notification_Recipient_Contact__c",
+      "label": "Notification Recipient Contact",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "npsp__Notification_Recipient_Email__c",
+      "label": "Notification Recipient Email",
+      "type": "Email"
+    },
+    {
+      "api": "npsp__Notification_Recipient_Information__c",
+      "label": "Notification Recipient Information",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "npsp__Notification_Recipient_Name__c",
+      "label": "Notification Recipient Name",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npsp__Previous_Grant_Opportunity__c",
+      "label": "Previous Grant/Gift Opportunity",
+      "type": "Lookup(Opportunity)"
+    },
+    {
+      "api": "npsp__Primary_Contact__c",
+      "label": "Primary Contact",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "npsp__Primary_Contact_Campaign_Member_Status__c",
+      "label": "Primary Contact Campaign Member Status",
+      "type": "Text(40)"
+    },
+    {
+      "api": "npsp__Qualified_Date__c",
+      "label": "Qualified Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Recurring_Donation_Installment_Name__c",
+      "label": "Recurring Donation Installment Name",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npsp__Recurring_Donation_Installment_Number__c",
+      "label": "Recurring Donation Installment Number",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npsp__Requested_Amount__c",
+      "label": "Requested Amount",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Tribute_Notification_Date__c",
+      "label": "Tribute Notification Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Tribute_Notification_Status__c",
+      "label": "Tribute Notification Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Tribute_Type__c",
+      "label": "Tribute Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "OwnerId",
+      "label": "Opportunity Owner",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "PIS_Consent_Approved__c",
+      "label": "PIS / Consent / Patient materials",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Preparing_Submission_Notes__c",
+      "label": "Preparing Submission Notes",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "Pricebook2Id",
+      "label": "Price Book",
+      "type": "Lookup(Price Book)"
+    },
+    {
+      "api": "Probability",
+      "label": "Probability (%)",
+      "type": "Percent(3, 0)"
+    },
+    {
+      "api": "Profiling_form_finalised_date__c",
+      "label": "Profiling form finalised date",
+      "type": "Date"
+    },
+    {
+      "api": "Profiling_form_uploaded_to_DB__c",
+      "label": "Profiling form uploaded to DB",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Protocol_Approved__c",
+      "label": "Protocol(s)",
+      "type": "Checkbox"
+    },
+    {
+      "api": "PushCount",
+      "label": "Push Count",
+      "type": "Number(9, 0)"
+    },
+    {
+      "api": "Qualification_certificate_sent_on__c",
+      "label": "Qualification certificate sent on",
+      "type": "Date"
+    },
+    {
+      "api": "Qualification_Close_Date__c",
+      "label": "Qualification Close Date",
+      "type": "Date"
+    },
+    {
+      "api": "Qualification_form_finalised_Date__c",
+      "label": "Qualification form finalised Date",
+      "type": "Date"
+    },
+    {
+      "api": "Qualification_form_uploaded_to_DB__c",
+      "label": "Qualification form uploaded to DB",
+      "type": "Checkbox"
+    },
+    {
+      "api": "RecordTypeId",
+      "label": "Opportunity Record Type",
+      "type": "Record Type"
+    },
+    {
+      "api": "Requires_sponsor_insurance__c",
+      "label": "Requires sponsor insurance?",
+      "type": "Picklist"
+    },
+    {
+      "api": "Shipment_City__c",
+      "label": "City",
+      "type": "Text(100)"
+    },
+    {
+      "api": "Shipment_Country__c",
+      "label": "Country",
+      "type": "Text(100)"
+    },
+    {
+      "api": "Shipment_Email__c",
+      "label": "Email",
+      "type": "Email"
+    },
+    {
+      "api": "Shipment_Phone__c",
+      "label": "Phone number",
+      "type": "Phone"
+    },
+    {
+      "api": "Shipment_Responsible_Name__c",
+      "label": "Responsible person name",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "Shipment_State__c",
+      "label": "State",
+      "type": "Text(100)"
+    },
+    {
+      "api": "Shipment_Street__c",
+      "label": "Street Address",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "Shipment_Zip_Code__c",
+      "label": "Zip Code",
+      "type": "Text(100)"
+    },
+    {
+      "api": "Site_Added_ClinicalTrials_Date__c",
+      "label": "Site added to clinicaltrials.gov",
+      "type": "Date"
+    },
+    {
+      "api": "Site_Early_T1D_Activation_Letter_Date__c",
+      "label": "Site activation letter",
+      "type": "Date"
+    },
+    {
+      "api": "SIV_eCRF_Accounts_Created__c",
+      "label": "eCRF accounts created",
+      "type": "Picklist"
+    },
+    {
+      "api": "SIV_eCRF_Training__c",
+      "label": "eCRF Training",
+      "type": "Picklist"
+    },
+    {
+      "api": "SIV_Material_Sent_Date__c",
+      "label": "SIV Material sent",
+      "type": "Date"
+    },
+    {
+      "api": "SIV_Meeting_Date__c",
+      "label": "SIV Meeting Date",
+      "type": "Date"
+    },
+    {
+      "api": "SIV_Minute_Meeting__c",
+      "label": "Minute meeting",
+      "type": "Checkbox"
+    },
+    {
+      "api": "SIV_Presentation_Deck__c",
+      "label": "Presentation deck",
+      "type": "Checkbox"
+    },
+    {
+      "api": "SIV_Report__c",
+      "label": "SIV Report",
+      "type": "Checkbox"
+    },
+    {
+      "api": "StageName",
+      "label": "Stage",
+      "type": "Picklist"
+    },
+    {
+      "api": "Study_Approval_Received_Date__c",
+      "label": "Study approval received",
+      "type": "Date"
+    },
+    {
+      "api": "Study_Docs_Provided_Date__c",
+      "label": "Study documents provided to site",
+      "type": "Date"
+    },
+    {
+      "api": "Study_Submitted_Date__c",
+      "label": "Study submitted for approval",
+      "type": "Date"
+    },
+    {
+      "api": "SystemModstamp",
+      "label": "System Modstamp",
+      "type": "Date/Time"
+    },
+    {
+      "api": "Team_CVs_GCPs_Received__c",
+      "label": "Team CVs and GCPs received",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Type",
+      "label": "Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "UserRecordAccessId",
+      "label": "Object Access Level",
+      "type": "Lookup(User Record Access)"
+    }
+  ],
+  "Contact": [
+    {
+      "api": "Account__c",
+      "label": "Account",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "AccountId",
+      "label": "Account Name",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "AssistantName",
+      "label": "Assistant",
+      "type": "Text(40)"
+    },
+    {
+      "api": "AssistantPhone",
+      "label": "Asst. Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "Authorized_Institute_Representative__c",
+      "label": "Authorized Institute Representative",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Birthdate",
+      "label": "Birthdate",
+      "type": "Date"
+    },
+    {
+      "api": "BuyerAttributes",
+      "label": "Buyer Attributes",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "C_Board_Member__c",
+      "label": "Board Member",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Contact_Person__c",
+      "label": "Contact Person",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Content_Communication_Person__c",
+      "label": "Content/Communication Person",
+      "type": "Checkbox"
+    },
+    {
+      "api": "C_Country_Lead__c",
+      "label": "Country Lead",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Expert_Information__c",
+      "label": "Expert Information",
+      "type": "Long Text Area(5000)"
+    },
+    {
+      "api": "C_Info_on_Activities_for_Country_Lead__c",
+      "label": "Info on Activities for Country Lead",
+      "type": "Long Text Area(32768)"
+    },
+    {
+      "api": "C_Key_Identifier__c",
+      "label": "Key Identifier",
+      "type": "Auto Number"
+    },
+    {
+      "api": "C_Link_to_Sharepoint_Documents__c",
+      "label": "Link to Sharepoint Documents",
+      "type": "URL(255)"
+    },
+    {
+      "api": "C_Voting_Rights__c",
+      "label": "Voting Rights",
+      "type": "Checkbox"
+    },
+    {
+      "api": "CDA_end_date__c",
+      "label": "CDA end date",
+      "type": "Date"
+    },
+    {
+      "api": "CDA_start_date__c",
+      "label": "CDA start date",
+      "type": "Date"
+    },
+    {
+      "api": "Child_date_of_birth__c",
+      "label": "Child date of birth",
+      "type": "Date"
+    },
+    {
+      "api": "City__c",
+      "label": "City",
+      "type": "Text(30)"
+    },
+    {
+      "api": "Client_Account_Inpact__c",
+      "label": "Client - Account",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "Clinical_Trial_Expertise__c",
+      "label": "Clinical Trial Expertise",
+      "type": "Picklist"
+    },
+    {
+      "api": "Contact_Inactive__c",
+      "label": "Contact Inactive",
+      "type": "Checkbox"
+    },
+    {
+      "api": "ContactSource",
+      "label": "Creation Source",
+      "type": "Picklist"
+    },
+    {
+      "api": "Contract_type__c",
+      "label": "Contract type",
+      "type": "Picklist"
+    },
+    {
+      "api": "Country_of_birth__c",
+      "label": "Country of birth",
+      "type": "Text(30)"
+    },
+    {
+      "api": "Country_of_Residence__c",
+      "label": "Country of residence",
+      "type": "Text(30)"
+    },
+    {
+      "api": "CreatedById",
+      "label": "Created By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "CreatedDate",
+      "label": "Created Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "CTS_excl_from_routine_correspondence__c",
+      "label": "CTS - excl from routine correspondence",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Date_of_application__c",
+      "label": "Date of application",
+      "type": "Date"
+    },
+    {
+      "api": "Date_of_approval__c",
+      "label": "Date of Certification",
+      "type": "Date"
+    },
+    {
+      "api": "Date_of_birth__c",
+      "label": "Date of birth",
+      "type": "Date"
+    },
+    {
+      "api": "Date_of_diagnosis__c",
+      "label": "Date of diagnosis",
+      "type": "Date"
+    },
+    {
+      "api": "Date_of_Profilation__c",
+      "label": "Date of Interview",
+      "type": "Date"
+    },
+    {
+      "api": "Date_of_service__c",
+      "label": "Date of service",
+      "type": "Date"
+    },
+    {
+      "api": "Department",
+      "label": "Department",
+      "type": "Text(80)"
+    },
+    {
+      "api": "DepartmentGroup",
+      "label": "Department Group",
+      "type": "Picklist"
+    },
+    {
+      "api": "Description",
+      "label": "Description",
+      "type": "Long Text Area(32000)"
+    },
+    {
+      "api": "Description_of_the_service__c",
+      "label": "Description of the service",
+      "type": "Text Area(255)"
+    },
+    {
+      "api": "DOC_L2_Bcell_Therapy__c",
+      "label": "DOC L2 Bcell Therapy",
+      "type": "Date"
+    },
+    {
+      "api": "DOC_L2_Clinical_Trials__c",
+      "label": "DOC L2 Clinical Trials",
+      "type": "Date"
+    },
+    {
+      "api": "DOC_L2_Screening__c",
+      "label": "DOC L2 Screening",
+      "type": "Date"
+    },
+    {
+      "api": "DOC_L3_Detect__c",
+      "label": "DOC L3 Detect",
+      "type": "Date"
+    },
+    {
+      "api": "Education__c",
+      "label": "Education",
+      "type": "Picklist"
+    },
+    {
+      "api": "Email",
+      "label": "Email",
+      "type": "Email"
+    },
+    {
+      "api": "EmailBouncedDate",
+      "label": "Email Bounced Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "EmailBouncedReason",
+      "label": "Email Bounced Reason",
+      "type": "Text(255)"
+    },
+    {
+      "api": "Fax",
+      "label": "Fax",
+      "type": "Phone"
+    },
+    {
+      "api": "Feedback_on_the_service__c",
+      "label": "Feedback on the service",
+      "type": "Rich Text Area(52768)"
+    },
+    {
+      "api": "General_Expertise__c",
+      "label": "General Expertise",
+      "type": "Picklist"
+    },
+    {
+      "api": "HasOptedOutOfEmail",
+      "label": "Email Opt Out",
+      "type": "Checkbox"
+    },
+    {
+      "api": "HomePhone",
+      "label": "Home Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "Id",
+      "label": "Contact ID",
+      "type": "Lookup()"
+    },
+    {
+      "api": "In_Progress__c",
+      "label": "In Progress",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IndividualId",
+      "label": "Individual",
+      "type": "Lookup(Individual)"
+    },
+    {
+      "api": "Info_on_Activites_for_Leading_Team__c",
+      "label": "Info on Activites for Leading Team",
+      "type": "Long Text Area(500)"
+    },
+    {
+      "api": "INPACT_Associate_Status__c",
+      "label": "INPACT Associate Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "INPACT_Certification_Types__c",
+      "label": "INPACT Certification Types",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "INPACT_Country_Lead__c",
+      "label": "INPACT Country Lead",
+      "type": "Checkbox"
+    },
+    {
+      "api": "INPACT_Inactive_Contact__c",
+      "label": "INPACT Inactive Contact",
+      "type": "Checkbox"
+    },
+    {
+      "api": "INPACT_Leading_Team__c",
+      "label": "INPACT Leading Team",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IsDeleted",
+      "label": "Deleted",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IsEmailBounced",
+      "label": "Is Email Bounced",
+      "type": "Checkbox"
+    },
+    {
+      "api": "IsPriorityRecord",
+      "label": "Important",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Jigsaw",
+      "label": "Data.com Key",
+      "type": "Text(20)"
+    },
+    {
+      "api": "JigsawContactId",
+      "label": "Jigsaw Contact Id",
+      "type": "External Lookup"
+    },
+    {
+      "api": "LastActivityDate",
+      "label": "Last Activity",
+      "type": "Date"
+    },
+    {
+      "api": "LastCURequestDate",
+      "label": "Last Stay-in-Touch Request Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastCUUpdateDate",
+      "label": "Last Stay-in-Touch Save Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastModifiedById",
+      "label": "Last Modified By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "LastModifiedDate",
+      "label": "Last Modified Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastReferencedDate",
+      "label": "Last Referenced Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastViewedDate",
+      "label": "Last Viewed Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LeadSource",
+      "label": "Lead Source",
+      "type": "Picklist"
+    },
+    {
+      "api": "Legal_Representative__c",
+      "label": "Legal Representative",
+      "type": "Checkbox"
+    },
+    {
+      "api": "MailingAddress",
+      "label": "Mailing Address",
+      "type": "Address"
+    },
+    {
+      "api": "MasterRecordId",
+      "label": "Contact",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "MCA_end_date__c",
+      "label": "MCA end date",
+      "type": "Date"
+    },
+    {
+      "api": "MCA_start_date__c",
+      "label": "MCA start date",
+      "type": "Date"
+    },
+    {
+      "api": "MobilePhone",
+      "label": "Mobile",
+      "type": "Phone"
+    },
+    {
+      "api": "MSA_expiration_date__c",
+      "label": "MSA expiration date",
+      "type": "Date"
+    },
+    {
+      "api": "MSA_signed_on__c",
+      "label": "MSA signed on",
+      "type": "Date"
+    },
+    {
+      "api": "myINNODIA_ID__c",
+      "label": "myINNODIA ID",
+      "type": "Text(100)  (External ID) (Unique Case Insensitive)"
+    },
+    {
+      "api": "Name",
+      "label": "Name",
+      "type": "Name"
+    },
+    {
+      "api": "npe01__AlternateEmail__c",
+      "label": "Alternate Email",
+      "type": "Email"
+    },
+    {
+      "api": "npe01__Home_Address__c",
+      "label": "Home Address",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npe01__HomeEmail__c",
+      "label": "Personal Email",
+      "type": "Email"
+    },
+    {
+      "api": "npe01__Organization_Type__c",
+      "label": "Organization Type",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npe01__Other_Address__c",
+      "label": "Other Address",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npe01__Preferred_Email__c",
+      "label": "Preferred Email",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__PreferredPhone__c",
+      "label": "Preferred Phone",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__Primary_Address_Type__c",
+      "label": "Primary Address Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__Private__c",
+      "label": "Private",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npe01__Secondary_Address_Type__c",
+      "label": "Secondary Address Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__SystemAccountProcessor__c",
+      "label": "DEPRECATED - _SYSTEM: ACCOUNT PROCESSOR",
+      "type": "Picklist"
+    },
+    {
+      "api": "npe01__Type_of_Account__c",
+      "label": "Type of Account",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npe01__Work_Address__c",
+      "label": "Work Address",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npe01__WorkEmail__c",
+      "label": "Work Email",
+      "type": "Email"
+    },
+    {
+      "api": "npe01__WorkPhone__c",
+      "label": "Work Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "npo02__AverageAmount__c",
+      "label": "Average Gift",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__Best_Gift_Year__c",
+      "label": "Best Gift Year",
+      "type": "Text(4)"
+    },
+    {
+      "api": "npo02__Best_Gift_Year_Total__c",
+      "label": "Best Gift Year Total",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npo02__FirstCloseDate__c",
+      "label": "First Gift Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__Formula_HouseholdMailingAddress__c",
+      "label": "Household Mailing Address",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npo02__Formula_HouseholdPhone__c",
+      "label": "Household Phone",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npo02__Household__c",
+      "label": "Household",
+      "type": "Lookup(Household)"
+    },
+    {
+      "api": "npo02__Household_Naming_Order__c",
+      "label": "Household Naming Order",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__LargestAmount__c",
+      "label": "Largest Gift",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__LastCloseDate__c",
+      "label": "Last Gift Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__LastCloseDateHH__c",
+      "label": "Last Household Gift Date",
+      "type": "Formula (Date)"
+    },
+    {
+      "api": "npo02__LastMembershipAmount__c",
+      "label": "Last Membership Amount",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__LastMembershipDate__c",
+      "label": "Last Membership Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__LastMembershipLevel__c",
+      "label": "Last Membership Level",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npo02__LastMembershipOrigin__c",
+      "label": "Last Membership Origin",
+      "type": "Text(255)"
+    },
+    {
+      "api": "npo02__LastOppAmount__c",
+      "label": "Last Gift Amount",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__MembershipEndDate__c",
+      "label": "Membership End Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__MembershipJoinDate__c",
+      "label": "Membership Join Date",
+      "type": "Date"
+    },
+    {
+      "api": "npo02__Naming_Exclusions__c",
+      "label": "Naming Exclusions",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "npo02__NumberOfClosedOpps__c",
+      "label": "Total Number of Gifts",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__NumberOfMembershipOpps__c",
+      "label": "Number of Memberships",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppAmount2YearsAgo__c",
+      "label": "Total Gifts Two Years Ago",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountLastNDays__c",
+      "label": "Total Gifts Last N Days",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountLastYear__c",
+      "label": "Total Gifts Last Year",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountLastYearHH__c",
+      "label": "Total Household Gifts Last Year",
+      "type": "Formula (Currency)"
+    },
+    {
+      "api": "npo02__OppAmountThisYear__c",
+      "label": "Total Gifts This Year",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__OppAmountThisYearHH__c",
+      "label": "Total Household Gifts This Year",
+      "type": "Formula (Currency)"
+    },
+    {
+      "api": "npo02__OppsClosed2YearsAgo__c",
+      "label": "Number of Gifts Two Years Ago",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppsClosedLastNDays__c",
+      "label": "Number of Gifts Last N Days",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppsClosedLastYear__c",
+      "label": "Number of Gifts Last Year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__OppsClosedThisYear__c",
+      "label": "Number of Gifts This Year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npo02__SmallestAmount__c",
+      "label": "Smallest Gift",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__Soft_Credit_Last_Year__c",
+      "label": "Soft Credit Last Year",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npo02__Soft_Credit_This_Year__c",
+      "label": "Soft Credit This Year",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npo02__Soft_Credit_Total__c",
+      "label": "Soft Credit Total",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npo02__Soft_Credit_Two_Years_Ago__c",
+      "label": "Soft Credit Two Years Ago",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npo02__SystemHouseholdProcessor__c",
+      "label": "_SYSTEM: HOUSEHOLD PROCESSOR-DEPRECATED",
+      "type": "Picklist"
+    },
+    {
+      "api": "npo02__Total_Household_Gifts__c",
+      "label": "Total Household Gifts",
+      "type": "Formula (Currency)"
+    },
+    {
+      "api": "npo02__TotalMembershipOppAmount__c",
+      "label": "Total Membership Amount",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npo02__TotalOppAmount__c",
+      "label": "Total Gifts",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npsp__Address_Verification_Status__c",
+      "label": "Address Verification Status",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npsp__Batch__c",
+      "label": "Batch",
+      "type": "Lookup(Batch)"
+    },
+    {
+      "api": "npsp__Current_Address__c",
+      "label": "Current Address",
+      "type": "Lookup(Address)"
+    },
+    {
+      "api": "npsp__CustomizableRollups_UseSkewMode__c",
+      "label": "Customizable Rollups: Force Skew Mode",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Deceased__c",
+      "label": "Deceased",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Do_Not_Contact__c",
+      "label": "Do Not Contact",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Exclude_from_Household_Formal_Greeting__c",
+      "label": "Exclude from Household Formal Greeting",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Exclude_from_Household_Informal_Greeting__c",
+      "label": "Exclude from Household Informal Greeting",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Exclude_from_Household_Name__c",
+      "label": "Exclude from Household Name",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__First_Soft_Credit_Amount__c",
+      "label": "First Soft Credit Amount",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__First_Soft_Credit_Date__c",
+      "label": "First Soft Credit Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__HHId__c",
+      "label": "HHId",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "npsp__is_Address_Override__c",
+      "label": "Address Override",
+      "type": "Checkbox"
+    },
+    {
+      "api": "npsp__Largest_Soft_Credit_Amount__c",
+      "label": "Largest Soft Credit Amount",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Largest_Soft_Credit_Date__c",
+      "label": "Largest Soft Credit Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Last_Soft_Credit_Amount__c",
+      "label": "Last Soft Credit Amount",
+      "type": "Currency(16, 2)"
+    },
+    {
+      "api": "npsp__Last_Soft_Credit_Date__c",
+      "label": "Last Soft Credit Date",
+      "type": "Date"
+    },
+    {
+      "api": "npsp__Number_of_Soft_Credits__c",
+      "label": "Number of Soft Credits",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npsp__Number_of_Soft_Credits_Last_N_Days__c",
+      "label": "Number of Soft Credits Last N Days",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npsp__Number_of_Soft_Credits_Last_Year__c",
+      "label": "Number of Soft Credits Last Year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npsp__Number_of_Soft_Credits_This_Year__c",
+      "label": "Number of Soft Credits This Year",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npsp__Number_of_Soft_Credits_Two_Years_Ago__c",
+      "label": "Number of Soft Credits Two Years Ago",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "npsp__Primary_Affiliation__c",
+      "label": "Primary Affiliation",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "npsp__Primary_Contact__c",
+      "label": "Primary Contact",
+      "type": "Formula (Checkbox)"
+    },
+    {
+      "api": "npsp__Soft_Credit_Last_N_Days__c",
+      "label": "Soft Credit Last N Days",
+      "type": "Currency(14, 2)"
+    },
+    {
+      "api": "npsp__Sustainer__c",
+      "label": "Sustainer",
+      "type": "Picklist"
+    },
+    {
+      "api": "npsp__Undeliverable_Address__c",
+      "label": "Undeliverable Mailing Address",
+      "type": "Checkbox"
+    },
+    {
+      "api": "opted_out_of_promotional_communications__c",
+      "label": "opted out of promotional communications",
+      "type": "Checkbox"
+    },
+    {
+      "api": "OtherAddress",
+      "label": "Other Address",
+      "type": "Address"
+    },
+    {
+      "api": "OtherPhone",
+      "label": "Other Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "OwnerId",
+      "label": "Contact Owner",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "Phone",
+      "label": "Phone",
+      "type": "Phone"
+    },
+    {
+      "api": "PhotoUrl",
+      "label": "Photo URL",
+      "type": "URL(255)"
+    },
+    {
+      "api": "pmdm__AttendanceRate__c",
+      "label": "Attendance Rate",
+      "type": "Formula (Percent)"
+    },
+    {
+      "api": "pmdm__AttendanceSummary__c",
+      "label": "Attendance Summary",
+      "type": "Formula (Text)"
+    },
+    {
+      "api": "pmdm__ConsecutiveAbsences__c",
+      "label": "Consecutive Absences",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "pmdm__IsClient__c",
+      "label": "Client",
+      "type": "Checkbox"
+    },
+    {
+      "api": "pmdm__LastServiceDate__c",
+      "label": "Last Service Date",
+      "type": "Date"
+    },
+    {
+      "api": "pmdm__NumAbsentServiceDeliveries__c",
+      "label": "Number of Absent Service Deliveries",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "pmdm__NumPresentServiceDeliveries__c",
+      "label": "Number of Present Service Deliveries",
+      "type": "Number(18, 0)"
+    },
+    {
+      "api": "PwD_Status__c",
+      "label": "PwD Status",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "ReportsToId",
+      "label": "Reports To",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "Research_Expertise__c",
+      "label": "Research Expertise",
+      "type": "Picklist"
+    },
+    {
+      "api": "SystemModstamp",
+      "label": "System Modstamp",
+      "type": "Date/Time"
+    },
+    {
+      "api": "Title",
+      "label": "Title",
+      "type": "Text(128)"
+    },
+    {
+      "api": "TitleType",
+      "label": "Seniority Level",
+      "type": "Picklist"
+    },
+    {
+      "api": "Tuesdays_with_INNODIA_attendance__c",
+      "label": "Tuesdays with INNODIA attendance",
+      "type": "Checkbox"
+    },
+    {
+      "api": "Type_of_activity__c",
+      "label": "Type of activity",
+      "type": "Picklist (Multi-Select)"
+    },
+    {
+      "api": "UserRecordAccessId",
+      "label": "Object Access Level",
+      "type": "Lookup(User Record Access)"
+    },
+    {
+      "api": "ZIP_code__c",
+      "label": "ZIP code",
+      "type": "Text(30)"
+    }
+  ],
+  "Assignment__c": [
+    {
+      "api": "Assignment_Type__c",
+      "label": "Assignment Type",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Account__c",
+      "label": "Account",
+      "type": "Lookup(Account)"
+    },
+    {
+      "api": "C_Assignment_Stage__c",
+      "label": "Assignment Stage",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Contact_Name__c",
+      "label": "Contact Name",
+      "type": "Lookup(Contact)"
+    },
+    {
+      "api": "C_Description_of_the_service_Activity__c",
+      "label": "Description of the service/Activity",
+      "type": "Rich Text Area(32768)"
+    },
+    {
+      "api": "C_Invoice_Received__c",
+      "label": "Invoice Received",
+      "type": "Date"
+    },
+    {
+      "api": "C_Link_to_Sharepoint_Documents__c",
+      "label": "Link to Sharepoint Documents",
+      "type": "URL(255)"
+    },
+    {
+      "api": "C_MCA_Status__c",
+      "label": "MCA Status",
+      "type": "Picklist"
+    },
+    {
+      "api": "C_Opportunity_Name__c",
+      "label": "Opportunity Name",
+      "type": "Master-Detail(Opportunity)"
+    },
+    {
+      "api": "C_Payment_Done__c",
+      "label": "Payment Done",
+      "type": "Checkbox"
+    },
+    {
+      "api": "CreatedById",
+      "label": "Created By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "CreatedDate",
+      "label": "Created Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "Custom_Assignment_Name__c",
+      "label": "Custom Assignment Name",
+      "type": "Text(255)"
+    },
+    {
+      "api": "Id",
+      "label": "Record ID",
+      "type": "Lookup()"
+    },
+    {
+      "api": "IsDeleted",
+      "label": "Deleted",
+      "type": "Checkbox"
+    },
+    {
+      "api": "LastActivityDate",
+      "label": "Last Activity Date",
+      "type": "Date"
+    },
+    {
+      "api": "LastModifiedById",
+      "label": "Last Modified By",
+      "type": "Lookup(User)"
+    },
+    {
+      "api": "LastModifiedDate",
+      "label": "Last Modified Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastReferencedDate",
+      "label": "Last Referenced Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "LastViewedDate",
+      "label": "Last Viewed Date",
+      "type": "Date/Time"
+    },
+    {
+      "api": "Name",
+      "label": "Assignment Name",
+      "type": "Auto Number"
+    },
+    {
+      "api": "RecordTypeId",
+      "label": "Record Type",
+      "type": "Record Type"
+    },
+    {
+      "api": "SystemModstamp",
+      "label": "System Modstamp",
+      "type": "Date/Time"
+    },
+    {
+      "api": "UserRecordAccessId",
+      "label": "Object Access Level",
+      "type": "Lookup(User Record Access)"
+    }
+  ]
+}

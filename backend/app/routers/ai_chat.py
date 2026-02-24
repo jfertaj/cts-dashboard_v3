@@ -299,18 +299,119 @@ def _build_knowledge_index(db: Session) -> Dict[str, Any]:
     for k, v in sf_map.items():
         fused[k] = v
 
-    # Manual fallbacks (robust aliases)
+    # Manual fallbacks (robust aliases) — NLP glossary: acronyms, abbreviations, domain terms
+    # ND = Newly Diagnosed (T1D patients diagnosed last year)
+    # T1D = Type 1 Diabetes
+    # CTS = Clinical Trial Site
+    # CS = Clinical Site
+    # DxLab = Diagnostic Lab
+    # Stage 1/2 = Pre-symptomatic T1D stages
+    # PI = Principal Investigator
+    # SC = Study Coordinator / Study Nurse
+    # HLA = Human Leukocyte Antigen
+    # PAC = Patient Advisory Council
+    # RP = Referral Partner
+    # IMP = Investigational Medicinal Product
+    # GCP = Good Clinical Practice
+    # MCA = Multi-Centre Agreement
+    _nd_u18 = {"source": "sf", "field": "C_Number_of_new_T1D_diagnosed_U_18__c", "label": "New T1D diagnosed <18 (last year)"}
+    _nd_o18 = {"source": "sf", "field": "C_Number_of_new_T1D_diagnosed_O_18__c", "label": "New T1D diagnosed ≥18 (last year)"}
+    _cu18 = {"source": "sf", "field": "C_Number_of_T1D_Patients_currently_U_18__c", "label": "T1D patients currently <18"}
+    _co18 = {"source": "sf", "field": "C_Number_of_T1D_Patients_currently_O_18__c", "label": "T1D patients currently ≥18"}
+    _s1 = {"source": "sf", "field": "C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1 individuals followed"}
+    _s2 = {"source": "sf", "field": "C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2 individuals followed"}
+    _hla = {"source": "sf", "field": "C_Is_HLA_typing_performed__c", "label": "HLA typing performed"}
+    _screened = {"source": "sf", "field": "C_Number_of_Individuals_screened_intotal__c", "label": "Individuals screened (total)"}
+    _pi = {"source": "sf", "field": "C_Principal_Investigator__c", "label": "Principal Investigator"}
+    _sc = {"source": "sf", "field": "C_Lead_Study_Coordinator_SC__c", "label": "Lead Study Coordinator (SC)"}
     manual_sf = {
-        _normalize("Stage 2"): {"source": "sf", "field": "C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2 individuals followed"},
-        _normalize("Stage 1"): {"source": "sf", "field": "C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1 individuals followed"},
-        # Also map raw API names explicitly as aliases
-        _normalize("C_Number_of_Stage2_Individuals_followed__c"): {"source": "sf", "field": "C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2 individuals followed"},
-        _normalize("C_Number_of_Stage1_Individuals_followed__c"): {"source": "sf", "field": "C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1 individuals followed"},
-        _normalize("HLA typing"): {"source": "sf", "field": "C_Is_HLA_typing_performed__c", "label": "HLA typing performed"},
-        _normalize("patients under 18"): {"source": "sf", "field": "C_Number_of_T1D_Patients_currently_U_18__c", "label": "T1D patients <18 (current)"},
-        _normalize("patients over 18"): {"source": "sf", "field": "C_Number_of_T1D_Patients_currently_O_18__c", "label": "T1D patients ≥18 (current)"},
-        _normalize("newly diagnosed under 18"): {"source": "sf", "field": "C_Number_of_new_T1D_diagnosed_U_18__c", "label": "New T1D diagnosed <18"},
-        _normalize("newly diagnosed over 18"): {"source": "sf", "field": "C_Number_of_new_T1D_diagnosed_O_18__c", "label": "New T1D diagnosed ≥18"},
+        # Stage aliases
+        _normalize("Stage 2"): _s2,
+        _normalize("Stage 1"): _s1,
+        _normalize("Stage I"): _s1,
+        _normalize("Stage II"): _s2,
+        _normalize("pre-symptomatic stage 1"): _s1,
+        _normalize("pre-symptomatic stage 2"): _s2,
+        _normalize("presymptomatic stage 1"): _s1,
+        _normalize("presymptomatic stage 2"): _s2,
+        # API name aliases
+        _normalize("C_Number_of_Stage2_Individuals_followed__c"): _s2,
+        _normalize("C_Number_of_Stage1_Individuals_followed__c"): _s1,
+        _normalize("C_Number_of_new_T1D_diagnosed_U_18__c"): _nd_u18,
+        _normalize("C_Number_of_new_T1D_diagnosed_O_18__c"): _nd_o18,
+        _normalize("C_Number_of_T1D_Patients_currently_U_18__c"): _cu18,
+        _normalize("C_Number_of_T1D_Patients_currently_O_18__c"): _co18,
+        # HLA
+        _normalize("HLA typing"): _hla,
+        _normalize("HLA"): _hla,
+        _normalize("HLA typing performed"): _hla,
+        # Current T1D patients under care
+        _normalize("patients under 18"): _cu18,
+        _normalize("patients over 18"): _co18,
+        _normalize("patients below 18"): _cu18,
+        _normalize("patients above 18"): _co18,
+        _normalize("T1D patients under 18"): _cu18,
+        _normalize("T1D patients over 18"): _co18,
+        _normalize("T1D patients <18"): _cu18,
+        _normalize("T1D patients >=18"): _co18,
+        _normalize("T1D patients currently under 18"): _cu18,
+        _normalize("T1D patients currently over 18"): _co18,
+        _normalize("current T1D patients under 18"): _cu18,
+        _normalize("current T1D patients over 18"): _co18,
+        _normalize("currently under 18"): _cu18,
+        _normalize("currently over 18"): _co18,
+        _normalize("current patients under 18"): _cu18,
+        _normalize("current patients over 18"): _co18,
+        _normalize("patients under care"): _co18,  # default to ≥18 when not specified
+        _normalize("T1D patients"): _co18,
+        # ND = Newly Diagnosed aliases
+        _normalize("ND"): _nd_o18,  # default ND without age → ≥18
+        _normalize("nd"): _nd_o18,
+        _normalize("ND patients"): _nd_o18,
+        _normalize("ND <18"): _nd_u18,
+        _normalize("ND under 18"): _nd_u18,
+        _normalize("ND below 18"): _nd_u18,
+        _normalize("ND over 18"): _nd_o18,
+        _normalize("ND >=18"): _nd_o18,
+        _normalize("ND above 18"): _nd_o18,
+        _normalize("ND juvenil"): _nd_u18,
+        _normalize("ND adulto"): _nd_o18,
+        _normalize("newly diagnosed"): _nd_o18,  # default → ≥18
+        _normalize("newly diagnosed patients"): _nd_o18,
+        _normalize("newly diagnosed under 18"): _nd_u18,
+        _normalize("newly diagnosed over 18"): _nd_o18,
+        _normalize("newly diagnosed below 18"): _nd_u18,
+        _normalize("newly diagnosed above 18"): _nd_o18,
+        _normalize("newly diagnosed <18"): _nd_u18,
+        _normalize("newly diagnosed >=18"): _nd_o18,
+        _normalize("new T1D diagnoses"): _nd_o18,
+        _normalize("new T1D diagnoses under 18"): _nd_u18,
+        _normalize("new T1D diagnoses over 18"): _nd_o18,
+        _normalize("new T1D diagnosed"): _nd_o18,
+        _normalize("new T1D diagnosed under 18"): _nd_u18,
+        _normalize("new T1D diagnosed over 18"): _nd_o18,
+        _normalize("new T1D <18"): _nd_u18,
+        _normalize("new T1D >=18"): _nd_o18,
+        _normalize("diagnoses last year"): _nd_o18,
+        _normalize("diagnosed last year"): _nd_o18,
+        _normalize("diagnosed last year under 18"): _nd_u18,
+        _normalize("diagnosed last year over 18"): _nd_o18,
+        _normalize("recien diagnosticados"): _nd_o18,
+        _normalize("recién diagnosticados"): _nd_o18,
+        _normalize("nuevos diagnosticados"): _nd_o18,
+        # Screened
+        _normalize("screened"): _screened,
+        _normalize("individuals screened"): _screened,
+        _normalize("total screened"): _screened,
+        _normalize("screened total"): _screened,
+        _normalize("screening"): _screened,
+        # PI / SC
+        _normalize("PI"): _pi,
+        _normalize("principal investigator"): _pi,
+        _normalize("investigator principal"): _pi,
+        _normalize("SC"): _sc,
+        _normalize("study coordinator"): _sc,
+        _normalize("lead study coordinator"): _sc,
     }
     for a, meta in manual_sf.items():
         fused[a] = meta
@@ -3402,6 +3503,32 @@ LANGUAGE
 - Default to English.
 - If the latest user message is clearly (>80%) in another language, reply in that language. Otherwise keep English.
 
+DOMAIN GLOSSARY — INNODIA abbreviations and acronyms (memorize these):
+- **ND** = Newly Diagnosed T1D patients (last year). Two SF fields: ≥18 → C_Number_of_new_T1D_diagnosed_O_18__c ; <18 → C_Number_of_new_T1D_diagnosed_U_18__c. Use BOTH when user says "ND" without age.
+- **T1D** = Type 1 Diabetes. "T1D patients" = currently under care: ≥18 → C_Number_of_T1D_Patients_currently_O_18__c ; <18 → C_Number_of_T1D_Patients_currently_U_18__c
+- **Stage 1** = Pre-symptomatic Stage 1 → sf.C_Number_of_Stage1_Individuals_followed__c
+- **Stage 2** = Pre-symptomatic Stage 2 → sf.C_Number_of_Stage2_Individuals_followed__c
+- **Screened** = Individuals screened in total → sf.C_Number_of_Individuals_screened_intotal__c
+- **CTS** = Clinical Trial Site. Account flag: INNODIA_Clinical_Trial_Site__c = true (also C_Accredited_Clinical_Trial_Site__c for accredited ones)
+- **CS** = Clinical Site. Account flag: Clinical_Site_CS__c = true
+- **DxLab** = Diagnostic Lab. Account flag: C_Deliver_Clinical_Grade_Services__c = true
+- **RP** = Referral Partner. Account flag: C_Referral_Clinical_Partner__c = true
+- **PO** = Patient Organization. Account flag: C_Contribute_as_a_Patient_Organization__c = true
+- **PI** = Principal Investigator → sf.C_Principal_Investigator__c (Opportunity) or Contact with Role='PI'
+- **SC** = Study Coordinator → sf.C_Lead_Study_Coordinator_SC__c (Opportunity)
+- **HLA** = Human Leukocyte Antigen typing → sf.C_Is_HLA_typing_performed__c (Opportunity)
+- **PAC** = Patient Advisory Council (referenced in C_Site_Linked_with_Patient_Org_or_PAC__c)
+- **IMP** = Investigational Medicinal Product (drug storage/handling in qual checklist)
+- **GCP** = Good Clinical Practice (certification/training)
+- **MCA** = Multi-Centre Agreement → Assignment.C_MCA_Status__c
+- **Phase I/II/III** = Clinical trial phases → sf.C_Phase_I_Type1__c, C_Phase_II_Type1__c, C_Phase_III_Type1__c (T1D) and NonType1 variants
+
+SF OBJECTS AVAILABLE:
+- **Account** = Sites/organizations. Key custom fields: INNODIA_Clinical_Trial_Site__c, C_Type__c, C_Profiling_Status__c, C_Membership__c, Account_Status__c, Accredited__c, Screening_Program__c
+- **Opportunity** = Profiling/qualification records linked to Account. Contains patient metrics (Stage 1/2, ND, current T1D), PI/SC contacts, trial counts, visit info
+- **Contact** = People (PI, SC, Study Nurse, etc.) linked to Accounts via AccountContactRelation
+- **Assignment__c** = Task assignments linked to Opportunity+Contact+Account. Fields: Assignment_Type__c, C_Assignment_Stage__c, C_MCA_Status__c, C_Payment_Done__c, C_Invoice_Received__c
+
 DATA SOURCES & SCHEMA (do not expose credentials)
 {SCHEMA_HINT}
 
@@ -3593,12 +3720,17 @@ KEY sf field keys for explorer_search:
 AFTER explorer_search → you can call render_chart on the returned rows to produce a chart.
 FOLLOW-UP on explorer_search results → if user says "of those, only in Spain", call explorer_search again adding the new rule to the same filters.
 
-**BLOCK 10: Direct Account/Contact queries (when needed)**
+**BLOCK 10: Direct Account/Contact/Assignment queries (when needed)**
 • "Show me all clinical subaccounts" → salesforce_query: SELECT Id, Name, ParentId, RecordType.DeveloperName, C_Type__c FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical'
   NOTE: Use BLOCK 9 (explorer_search) for any query that combines qual.* with sf.* — do not use sql_query+salesforce_query separately.
 • "List all contacts with email" → salesforce_query: SELECT Id, Name, Email, Phone, Title, Department, AccountId FROM Contact WHERE Email != null
 • "Show account hierarchy for [account]" → salesforce_query: SELECT Id, Name, ParentId, C_Type__c FROM Account WHERE ParentId = '[parent_id]'
   NOTE: Use Account queries for all site lists/counts/geography (BLOCK 1). Use Opportunity for patient metrics (BLOCK 2). NEVER use Postgres sites table for basic counts.
+• "Show assignments for [account/opportunity]" → salesforce_query: SELECT Id, Name, Assignment_Type__c, C_Assignment_Stage__c, C_MCA_Status__c, C_Payment_Done__c, C_Account__r.Name, C_Contact_Name__r.Name FROM Assignment__c WHERE C_Account__c = '[account_id]'
+• "Assignments pending payment" → salesforce_query: SELECT Id, Name, C_Assignment_Stage__c, C_Payment_Done__c, C_Account__r.Name FROM Assignment__c WHERE C_Payment_Done__c = false
+• "ND by country" → salesforce_query: SELECT Account.ShippingCountry, SUM(C_Number_of_new_T1D_diagnosed_O_18__c), SUM(C_Number_of_new_T1D_diagnosed_U_18__c) FROM Opportunity WHERE ... GROUP BY Account.ShippingCountry
+• "DxLab sites" → salesforce_query: SELECT Id, Name, ShippingCountry FROM Account WHERE C_Deliver_Clinical_Grade_Services__c = true AND (Account_Inactive__c = false OR Account_Inactive__c = null)
+• "CTS sites accredited" → salesforce_query: SELECT Id, Name, ShippingCountry FROM Account WHERE INNODIA_Clinical_Trial_Site__c = true AND C_Accredited_Clinical_Trial_Site__c = true
 
 STYLE
 - Be direct and neutral. Fall back gracefully between SF and Postgres and mention it briefly in bullets.
