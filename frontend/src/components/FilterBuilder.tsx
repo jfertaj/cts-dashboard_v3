@@ -39,6 +39,8 @@ function getKind(f?: FieldDef) {
 const OPS_STRING = [
   { v: "equals", label: "=" },
   { v: "not_equals", label: "≠" },
+  { v: "is_empty", label: "is empty" },
+  { v: "is_not_empty", label: "is not empty" },
   { v: "in", label: "is one of" },
   { v: "not_in", label: "is NOT one of" },
   { v: "contains", label: "contains" },
@@ -50,6 +52,8 @@ const OPS_STRING = [
 const OPS_NUMBER = [
   { v: "equals", label: "=" },
   { v: "not_equals", label: "≠" },
+  { v: "is_empty", label: "is empty" },
+  { v: "is_not_empty", label: "is not empty" },
   { v: "in", label: "is one of" },
   { v: "not_in", label: "is NOT one of" },
   { v: ">", label: ">" },
@@ -303,6 +307,10 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
         );
       }
 
+      if (rule.operator === "is_empty" || rule.operator === "is_not_empty") {
+        return null; // no value needed for these operators
+      }
+
       if (rule.operator === "between") {
         const [a, b] = Array.isArray(rule.value) ? rule.value : ["", ""];
         if (kind === "date") {
@@ -418,7 +426,9 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
             updateAt(path, (r) => ({
               ...(r as Rule),
               operator: e.target.value,
-              value: e.target.value === "between" ? ["", ""] : "",
+              value: e.target.value === "between" ? ["", ""]
+                   : (e.target.value === "is_empty" || e.target.value === "is_not_empty") ? null
+                   : "",
             }))
           }
           title={rule.operator === "in" || rule.operator === "not_in" ? "Use comma-separated values" : undefined}

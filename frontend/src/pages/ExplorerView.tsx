@@ -34,6 +34,14 @@ import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
 
+const OP_LABELS: Record<string, string> = {
+  equals: "=", not_equals: "≠", contains: "contains", not_contains: "!contains",
+  starts_with: "starts with", ends_with: "ends with",
+  ">": ">", ">=": "≥", "<": "<", "<=": "≤",
+  between: "between", in: "in", not_in: "not in",
+  is_empty: "is empty", is_not_empty: "is not empty",
+};
+
 /** ================================================
  * Human‑friendly label dictionary (explicit overrides)
  * Keys can be with or without the "sf." prefix; matching is
@@ -1387,6 +1395,7 @@ export default function ExplorerView() {
 
   const [useSeparateNearbyFilters, setUseSeparateNearbyFilters] = useState(false);
   const [filtersNearby, setFiltersNearby] = useState<FilterGroup>({ logic: "AND", rules: [] });
+  const [autoSearchTrigger, setAutoSearchTrigger] = useState(0);
   const [lastNearbyParams, setLastNearbyParams] = useState<{ baseAccountId: string; maxKm: number } | null>(null);
 
   // ===== Details state (NEW) =====
@@ -1759,6 +1768,18 @@ export default function ExplorerView() {
     return m;
   }, [fieldDefs]);
 
+  const activeRuleCount = useMemo(() => {
+    const count = (g: { rules?: any[] }): number => {
+      let n = 0;
+      for (const r of (g.rules ?? [])) {
+        if (r && typeof (r as any).field === "string") n++;
+        else n += count(r as any);
+      }
+      return n;
+    };
+    return count(filters);
+  }, [filters]);
+
   const qualPresetKeys = useMemo(
     () => (Array.isArray(fieldDefs) ? (fieldDefs as FieldDef[]).filter(f => String(f.key).startsWith("qual.")).map(f => f.key) : []),
     [fieldDefs]
@@ -1886,6 +1907,18 @@ export default function ExplorerView() {
       setBusy(false);
     }
   };
+
+  // Remove a single top-level filter rule by index and re-trigger search
+  const removeRuleAtIndex = useCallback((idx: number) => {
+    setFilters(prev => ({ ...prev, rules: prev.rules.filter((_, i) => i !== idx) }));
+    setAutoSearchTrigger(t => t + 1);
+  }, []);
+
+  // Auto-search when a chip removal triggers it (state is already updated by then)
+  useEffect(() => {
+    if (autoSearchTrigger > 0) onSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSearchTrigger]);
 
   // Reset (sí cerramos nearby)
   const onReset = async () => {
@@ -2605,7 +2638,14 @@ export default function ExplorerView() {
       {/* Header filtros */}
       <div className="rounded-xl border bg-white shadow-sm">
         <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800">Filters (nested AND/OR)</h2>
+          <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+            Filters (nested AND/OR)
+            {activeRuleCount > 0 && (
+              <span className="inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 min-w-[20px]">
+                {activeRuleCount}
+              </span>
+            )}
+          </h2>
           <div className="flex gap-2 items-center">
             {nearbyActive && (
               <span className="hidden md:inline-flex items-center gap-2 mr-2 text-sm rounded-full border px-3 py-1 bg-emerald-50 text-emerald-700">
@@ -2669,6 +2709,50 @@ export default function ExplorerView() {
             onChange={setFilters}
             fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]).filter(f => !EXCLUDED_FILTER_FIELDS.has(f.key)) : []}
           />
+          {/* Active filter chips */}
+          {filters.rules.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+              {filters.rules.map((r, i) => {
+                const isRule = r && typeof (r as any).field === "string";
+                const rule = r as any;
+                let chipLabel: string;
+                if (isRule) {
+                  const fieldLabel = labelByKey.get(rule.field) ?? (rule.field as string).split(".").pop() ?? rule.field;
+                  const opLabel = OP_LABELS[rule.operator] ?? rule.operator;
+                  const noValue = rule.operator === "is_empty" || rule.operator === "is_not_empty";
+                  let valStr = "";
+                  if (!noValue) {
+                    if (Array.isArray(rule.value)) valStr = (rule.value as any[]).filter(Boolean).join(" – ");
+                    else valStr = String(rule.value ?? "");
+                  }
+                  chipLabel = noValue
+                    ? `${fieldLabel} ${opLabel}`
+                    : `${fieldLabel} ${opLabel} ${valStr}`.trim();
+                } else {
+                  const sub = r as any;
+                  const n = (sub.rules ?? []).length;
+                  chipLabel = `Group (${n} rule${n === 1 ? "" : "s"})`;
+                }
+                return (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-0.5"
+                  >
+                    <span className="max-w-[240px] truncate" title={chipLabel}>{chipLabel}</span>
+                    <button
+                      className="ml-0.5 rounded-full hover:bg-blue-200 p-0.5 text-blue-600 flex-shrink-0"
+                      title="Remove filter"
+                      onClick={() => removeRuleAtIndex(i)}
+                    >
+                      <svg className="h-3 w-3" viewBox="0 0 12 12" fill="none" aria-hidden>
+                        <path d="M2 2l8 8M10 2L2 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2 items-center">
             <button
               onClick={onSearch}
