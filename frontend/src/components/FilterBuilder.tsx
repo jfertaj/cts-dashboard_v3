@@ -74,6 +74,43 @@ const OPS_BOOL = [
   { v: "not_equals", label: "≠" },
 ];
 
+/** Extracts numeric section prefix e.g. "3.5.1" → [3,5,1] for sorting */
+function sectionParts(name: string): number[] | null {
+  const m = name.trim().match(/^(\d+(?:\.\d+)*)(?:\s|$)/);
+  if (!m) return null;
+  return m[1].split(".").map((x) => parseInt(x, 10));
+}
+
+/** Same comparator used in ColumnPicker — numeric section names first, then alphabetical */
+function compareGroupNames(a: string, b: string): number {
+  const pa = sectionParts(a);
+  const pb = sectionParts(b);
+  if (pa && pb) {
+    const n = Math.max(pa.length, pb.length);
+    for (let i = 0; i < n; i++) {
+      const va = pa[i] ?? -1;
+      const vb = pb[i] ?? -1;
+      if (va !== vb) return va - vb;
+    }
+    return 0;
+  }
+  if (pa) return -1;
+  if (pb) return 1;
+  return a.localeCompare(b);
+}
+
+/** Explicit rank for known SF groups — mirrors the order in ExplorerView's SF_GROUPS */
+const SF_GROUP_RANK: Record<string, number> = {
+  "Site":               0,
+  "Account Basics":     1,
+  "OnBoarding":         2,
+  "Profiling Basics":   3,
+  "Screening":          4,
+  "Salesforce (other)": 5,
+  "Salesforce":         6,
+  "Other":              7,
+};
+
 function getFieldBadge(f: { key: string; source?: string }) {
   const src = (f.source || "").toLowerCase();
   if (src === "qual" || f.key.startsWith("qual.")) return "[qual]";
@@ -165,12 +202,14 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(f);
     }
-    const orderRank = (g: string) => (g === "Site" ? 0 : g === "Salesforce" ? 1 : g === "Qualification" ? 2 : 10);
+    const rankOf = (g: string) => SF_GROUP_RANK[g] ?? 50; // qual sections (numeric) get 50, sorted by compareGroupNames
     const sorted = [...map.entries()]
       .sort((a, b) => {
-        const ra = orderRank(a[0]);
-        const rb = orderRank(b[0]);
-        return ra !== rb ? ra - rb : a[0].localeCompare(b[0]);
+        const ra = rankOf(a[0]);
+        const rb = rankOf(b[0]);
+        if (ra !== rb) return ra - rb;
+        // Both unknown (qual sections with numeric prefix) → sort numerically
+        return compareGroupNames(a[0], b[0]);
       })
       .map(([name, list]) => [name, list.sort((x, y) => (x.label || x.key).localeCompare(y.label || y.key))] as const);
     return sorted;

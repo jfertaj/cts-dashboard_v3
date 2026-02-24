@@ -379,6 +379,16 @@ const EXCLUDED_VISIBLE_COLUMNS = new Set<string>([
   "sf.Account.ShippingLongitude",
 ]);
 
+// --- Campos que NO mostramos en el FilterBuilder ---
+// - ShippingCountry/City → redundantes con site.country / site.city (que sí funcionan)
+// - Lat/Lng → no tienen sentido como filtro de texto
+const EXCLUDED_FILTER_FIELDS = new Set<string>([
+  "sf.Account.ShippingCountry",
+  "sf.Account.ShippingCity",
+  "sf.Account.ShippingLatitude",
+  "sf.Account.ShippingLongitude",
+]);
+
 function useDebouncedEffect(fn: () => void, deps: any[], delay = 250) {
   const t = useRef<number | null>(null);
   useEffect(() => {
@@ -900,7 +910,7 @@ function NearbyDrawer({
 
             {useSeparateNearbyFilters ? (
               <div className="p-3">
-                <FilterBuilder value={filtersNearby} onChange={onChangeFiltersNearby} fields={fields} />
+                <FilterBuilder value={filtersNearby} onChange={onChangeFiltersNearby} fields={fields.filter((f: any) => !EXCLUDED_FILTER_FIELDS.has(f.key))} />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-700"
@@ -1396,7 +1406,18 @@ export default function ExplorerView() {
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnOrder, JSON.stringify(columnOrder)); }, [columnOrder]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbyLayout, JSON.stringify(nearbyLayout)); }, [nearbyLayout]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbySideWidth, JSON.stringify(nearbySideWidth)); }, [nearbySideWidth]);
-  
+
+  // Auto-search when all filter rules are removed so the map restores full results
+  const prevFiltersRulesLenRef = useRef(0);
+  useEffect(() => {
+    const prev = prevFiltersRulesLenRef.current;
+    prevFiltersRulesLenRef.current = filters.rules.length;
+    if (prev > 0 && filters.rules.length === 0 && !busy && bootDone) {
+      onSearch();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.rules.length]);
+
   const idsSig = useMemo(() => {
     const currentRows = nearbyActive ? fullNearbyRows : fullRows;
     const ids = Array.from(new Set((currentRows || []).map(r => r.account_id).filter(Boolean)));
@@ -2646,7 +2667,7 @@ export default function ExplorerView() {
           <FilterBuilder
             value={filters}
             onChange={setFilters}
-            fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : []}
+            fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]).filter(f => !EXCLUDED_FILTER_FIELDS.has(f.key)) : []}
           />
           <div className="flex flex-wrap gap-2 items-center">
             <button

@@ -2911,6 +2911,11 @@ async def explorer_search(
             if rule.field == "site.city":    val = (acc.get("city") or "") or ""
             if rule.field == "site.country": val = (acc.get("country") or "") or ""
             op = _op_norm(rule.operator); s = _str(rule.value)
+            # For country: normalize both stored value and filter value to ISO codes
+            # so "Italy"/"italy"/"IT"/"it" all match regardless of how data is stored.
+            if rule.field == "site.country" and op in ("equals", "=", "not_equals", "!="):
+                s = (_country_norm(s) or s).upper()
+                val = (_country_norm(val) or val).upper()
             if   op in ("equals","="):      return val.lower() == s.lower()
             elif op in ("not_equals","!="): return val.lower() != s.lower()
             elif op == "contains":          return s.lower() in val.lower()
@@ -4457,6 +4462,11 @@ async def explorer_search_within_drive_km(
             if rule.field == "site.city":    val = (acc.get("city")    or "")
             if rule.field == "site.country": val = (acc.get("country") or "")
             op = _OP_SYNONYM.get(rule.operator, rule.operator); s = str(rule.value or "")
+            # For country: normalize both stored value and filter value to ISO codes
+            # so "Italy"/"italy"/"IT"/"it" all match regardless of how data is stored.
+            if rule.field == "site.country" and op in ("equals", "=", "not_equals", "!="):
+                s = (_country_norm(s) or s).upper()
+                val = (_country_norm(val) or val).upper()
             if op in ("equals","="): return val.lower() == s.lower()
             if op in ("not_equals","!="): return val.lower() != s.lower()
             if op == "contains": return s.lower() in val.lower()
