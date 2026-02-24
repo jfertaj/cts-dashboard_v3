@@ -18,19 +18,26 @@ export type ChatResponse = {
   table?: TablePayload;
   visualization?: VizPayload;
   clarify?: { question: string; options: Array<{ label: string; query: string }> };
+  last_filters?: Record<string, any>;
 };
 
 export async function askAI(
   prompt: string,
-  lastTable?: TablePayload | null
+  lastTable?: TablePayload | null,
+  lastFilters?: Record<string, any> | null
 ): Promise<ChatResponse> {
   const payload: any = {
     messages: [{ role: "user", content: prompt }],
   };
-  
+
   // Incluir last_table si está disponible para follow-ups eficientes
   if (lastTable && lastTable.rows && lastTable.rows.length > 0) {
     payload.last_table = lastTable;
+  }
+
+  // Incluir last_filters para follow-ups con explorer_search
+  if (lastFilters && Array.isArray(lastFilters.rules) && lastFilters.rules.length > 0) {
+    payload.last_filters = lastFilters;
   }
   
   const res = await fetch("/api/ai/chat", {

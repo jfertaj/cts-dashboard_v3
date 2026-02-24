@@ -77,7 +77,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     stream: bool = False
-    last_table: Optional[Dict[str, Any]] = None  # Tabla de la respuesta anterior para follow-ups eficientes
+    last_table: Optional[Dict[str, Any]] = None    # Tabla de la respuesta anterior para follow-ups eficientes
+    last_filters: Optional[Dict[str, Any]] = None  # FilterGroup que produjo la tabla anterior (para follow-ups con explorer_search)
 
 # ====== Whitelists / Guards ======
 
@@ -4994,6 +4995,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             "Aliases → target field:\n" + INDEX_SNIPPET
         )
     })
+    if payload.last_filters and payload.last_filters.get("rules"):
+        msgs.append({
+            "role": "system",
+            "content": (
+                "LAST FILTERS (FilterGroup that produced the current table — "
+                "for follow-up queries, modify these and call explorer_search again with the updated filters):\n"
+                + json.dumps(payload.last_filters, ensure_ascii=False)
+            )
+        })
 
     for m in payload.messages:
         msgs.append({"role": m.role, "content": m.content})
@@ -5001,6 +5011,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     # Inicializar last_table desde el payload si está disponible
     last_table: Optional[Dict[str, Any]] = last_table_from_payload if last_table_from_payload else None
     last_visualization: Optional[Dict[str, Any]] = None
+    last_explorer_filters: Optional[Dict[str, Any]] = None
     
     # Si tenemos last_table del payload, informar al modelo
     if last_table and len(last_table.get("rows", [])) > 0:
@@ -5932,13 +5943,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
             elif name == "explorer_search":
                     try:
+                        used_filters = args.get("filters") or {"logic": "AND", "rules": []}
                         out = tool_explorer_search(
                             request,
-                            filters=args.get("filters") or {"logic": "AND", "rules": []},
+                            filters=used_filters,
                             columns=args.get("columns") or [],
                         )
                         last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
                         last_table = _normalize_table_for_ui(last_table)
+                        last_explorer_filters = used_filters  # guardar para follow-ups
                         msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
                     except Exception as ee:
                         msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
@@ -6043,12 +6056,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 out = {"answer": answer_html, "table": _normalize_table_for_ui(last_table)}
                 if last_visualization:
                     out["visualization"] = last_visualization
+                if last_explorer_filters:
+                    out["last_filters"] = last_explorer_filters
                 return out
 
     # Fallback: si agotamos rondas pero sí hay datos, devolvemos algo útil
     if last_table:
         rows = last_table.get("rows", [])
         result: Dict[str, Any] = {"answer": "<p>Here are the results.</p>"}
+        if last_explorer_filters:
+            result["last_filters"] = last_explorer_filters
         # Solo añadir tabla si tiene múltiples filas
         if rows and len(rows) > 1:
             result["table"] = _normalize_table_for_ui(last_table)

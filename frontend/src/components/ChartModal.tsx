@@ -46,7 +46,9 @@ export default function ChartModal({
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [legendMaxUI, setLegendMaxUI] = useState<number>(legendMax ?? 8);
+  const [stacked, setStacked] = useState<boolean>(true);
   useEffect(() => { setLegendMaxUI(legendMax ?? 8); }, [legendMax, open]);
+  useEffect(() => { setStacked(true); }, [open]);
   
   if (!open) return null;
 
@@ -229,6 +231,14 @@ export default function ChartModal({
               )}
             </div>
 
+            {type === "bar" && yKeys.length > 1 && (
+              <div className="flex items-center gap-2">
+                <Label>Mode</Label>
+                <Pill active={stacked} onClick={() => setStacked(true)}>Stacked</Pill>
+                <Pill active={!stacked} onClick={() => setStacked(false)}>Grouped</Pill>
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Label>Legend max</Label>
               <select
@@ -287,16 +297,21 @@ export default function ChartModal({
                     payload={legendPayloadForSeries() as any}
                   />
 
-                  {yKeys.map((k, idx) => (
-                    <Bar key={k} dataKey={k} fill={COLORS[idx % COLORS.length]} radius={[4, 4, 0, 0]} stackId={yKeys.length > 1 ? "stack" : undefined}>
-                      {/* Optional per-datum coloring via entry._color */}
-                      {Array.isArray(data) && data.length > 0 && (
-                        data.map((entry, i) => (
-                          <Cell key={`cell-${k}-${i}`} fill={entry?._color || COLORS[idx % COLORS.length]} />
-                        ))
-                      )}
-                    </Bar>
-                  ))}
+                  {yKeys.map((k, idx) => {
+                    const isMulti = yKeys.length > 1;
+                    const stackId = isMulti && stacked ? "stack" : undefined;
+                    const radius: [number,number,number,number] = isMulti && stacked ? [0,0,0,0] : [4,4,0,0];
+                    return (
+                      <Bar key={k} dataKey={k} fill={COLORS[idx % COLORS.length]} radius={radius} stackId={stackId}>
+                        {/* Per-datum coloring solo en serie única (stacking usa color de serie) */}
+                        {!isMulti && Array.isArray(data) && data.length > 0 && (
+                          data.map((entry, i) => (
+                            <Cell key={`cell-${k}-${i}`} fill={entry?._color || COLORS[idx % COLORS.length]} />
+                          ))
+                        )}
+                      </Bar>
+                    );
+                  })}
                 </BarChart>
               ) : type === "line" ? (
                 <LineChart data={data} margin={{ top: 20, right: 24, left: 16, bottom: 180 }}>

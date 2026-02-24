@@ -25,7 +25,8 @@ export default function ChatView() {
   // --- persistence keys ---
   const MSGS_KEY = "moby_chat_messages_v1";
   const INPUT_KEY = "moby_chat_input_v1";
-  const TABLE_KEY = "moby_last_table_v1";
+  const TABLE_KEY   = "moby_last_table_v1";
+  const FILTERS_KEY = "moby_last_filters_v1";
 
   const [messages, setMessages] = useState<Msg[]>([
     {
@@ -49,6 +50,7 @@ export default function ChatView() {
   const [busy, setBusy] = useState(false);
   const [lastUserQ, setLastUserQ] = useState<string>("");
   const [lastTableForAI, setLastTableForAI] = useState<{columns: any[], rows: any[]} | null>(null);
+  const [lastFiltersForAI, setLastFiltersForAI] = useState<Record<string,any> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Chart state (reuse your ChartModal)
@@ -155,6 +157,9 @@ export default function ChatView() {
     if (restoredTableRef.current) return;
     if (explorerFields.length === 0) return; // esperamos a tener catálogo para mostrar botones correctos
     try {
+      const rawFilters = sessionStorage.getItem(FILTERS_KEY);
+      if (rawFilters) { try { setLastFiltersForAI(JSON.parse(rawFilters)); } catch {} }
+
       const raw = sessionStorage.getItem(TABLE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -528,6 +533,13 @@ export default function ChatView() {
         );
       } catch {}
 
+      // Guardar last_filters si vino en la respuesta (para follow-ups con explorer_search)
+      if ((resp as any).last_filters) {
+        const lf = (resp as any).last_filters;
+        setLastFiltersForAI(lf);
+        try { sessionStorage.setItem(FILTERS_KEY, JSON.stringify(lf)); } catch {}
+      }
+
       // Siempre renderiza inmediatamente la tabla recibida
       setMessages((m) => [
         ...m,
@@ -595,7 +607,7 @@ export default function ChatView() {
         return;
       }
       // LLM
-      const resp: ChatResponse = await askAI(text, lastTableForAI);
+      const resp: ChatResponse = await askAI(text, lastTableForAI, lastFiltersForAI);
       handleArtifacts(resp);
     } catch (e: any) {
       setMessages((m) => [
@@ -625,7 +637,7 @@ export default function ChatView() {
     setLastUserQ(text);
     setBusy(true);
     try {
-      const resp: ChatResponse = await askAI(text, lastTableForAI);
+      const resp: ChatResponse = await askAI(text, lastTableForAI, lastFiltersForAI);
       handleArtifacts(resp);
     } catch (e: any) {
       setMessages((m) => [
