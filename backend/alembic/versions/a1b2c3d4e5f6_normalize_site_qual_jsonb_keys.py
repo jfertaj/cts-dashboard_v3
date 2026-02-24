@@ -28,7 +28,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, None] = '63d7b6d09a47'
+down_revision: Union[str, None] = '20251030_qual_comments_tsv'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
