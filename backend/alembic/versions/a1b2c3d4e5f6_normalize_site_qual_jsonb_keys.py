@@ -63,7 +63,7 @@ def upgrade() -> None:
         if changed:
             conn.execute(
                 sa.text(
-                    "UPDATE site_qual SET data = :data::jsonb WHERE id = :id"
+                    "UPDATE site_qual SET data = CAST(:data AS jsonb) WHERE id = :id"
                 ),
                 {"data": json.dumps(new_data), "id": row_id},
             )
