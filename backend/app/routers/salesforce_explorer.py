@@ -191,6 +191,22 @@ def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
 
     return True
 
+def _qual_get(qual_data: Dict[str, Any], key: str) -> Any:
+    """
+    Lookup de una clave qual en el JSONB con 3 fallbacks, para manejar
+    los distintos formatos históricos de almacenamiento:
+      1. Clave exacta:            "2_2__personal_conversation_with_physician"
+      2. Subcode con punto:       "2.2__personal_conversation_with_physician"
+      3. Clave base sin prefijo:  "personal_conversation_with_physician"
+    """
+    v = qual_data.get(key)
+    if v is None and "_" in key:
+        v = qual_data.get(key.replace("_", ".", 1))
+    if v is None and "__" in key:
+        v = qual_data.get(key.split("__", 1)[1])
+    return v
+
+
 def is_numeric_field(sf_field_no_prefix: str) -> bool:
     t = TYPE_BY_KEY.get(sf_field_no_prefix, "").lower()
     return t in NUMERIC_TYPES
@@ -2951,18 +2967,8 @@ async def explorer_search(
     def pass_qual(qual_data: Dict[str, Any]) -> bool:
         if not qual_rules:
             return True
-        results = []
-        for qr in qual_rules:
-            # Mirror the 3-fallback key lookup used in the row-builder (qual.* section):
-            # 1. Exact key (e.g. "2_2__personal_conversation_with_physician")
-            v = qual_data.get(qr.field)
-            # 2. Replace first underscore with dot (e.g. "2.2__personal_conversation_with_physician")
-            if v is None and "_" in qr.field:
-                v = qual_data.get(qr.field.replace("_", ".", 1))
-            # 3. Strip section prefix — use base key (e.g. "personal_conversation_with_physician")
-            if v is None and "__" in qr.field:
-                v = qual_data.get(qr.field.split("__", 1)[1])
-            results.append(_eval_qual_rule(v, qr.operator, qr.value))
+        results = [_eval_qual_rule(_qual_get(qual_data, qr.field), qr.operator, qr.value)
+                   for qr in qual_rules]
         glue_and = (filters.get("logic") or "AND") == "AND"
         return all(results) if glue_and else any(results)
 
@@ -3074,23 +3080,7 @@ async def explorer_search(
 
             # qual.*
             if k.startswith("qual."):
-                qual_key = k[5:]  # Remove 'qual.' prefix -> "2_1__comments"
-                
-                # Try multiple key variants to handle both . and _ formats
-                # 1. Try exact key first
-                value = qual_data.get(qual_key)
-                
-                # 2. Try with dots instead of underscores (e.g., "2.1__comments")
-                if value is None and "_" in qual_key:
-                    qual_key_dots = qual_key.replace("_", ".", 1)  # Only first occurrence
-                    value = qual_data.get(qual_key_dots)
-                
-                # 3. If not found and key has section prefix, try base key without section
-                if value is None and "__" in qual_key:
-                    base_key = qual_key.split("__", 1)[1]  # e.g., "comments" or "room_temperature__lockable"
-                    value = qual_data.get(base_key)
-                
-                data[k] = value
+                data[k] = _qual_get(qual_data, k[5:])
                 continue
 
             # sf.*
@@ -3214,7 +3204,7 @@ async def explorer_search(
                                 val = ex.get(f"extra.{sub}")
                             data[k] = val
                         continue
-                    if k.startswith("qual."):   data[k] = qual_data.get(k[5:]); continue
+                    if k.startswith("qual."):   data[k] = _qual_get(qual_data, k[5:]); continue
                     if k.startswith("extra."):
                         data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                         continue
@@ -3283,7 +3273,7 @@ async def explorer_search(
                         else:
                             data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
                         continue
-                    if k.startswith("qual."):   data[k] = qual_data.get(k[5:]); continue
+                    if k.startswith("qual."):   data[k] = _qual_get(qual_data, k[5:]); continue
                     if k.startswith("extra."):
                         data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                         continue
@@ -3754,22 +3744,7 @@ async def explorer_fill_columns(
 
             # qual.*
             if k.startswith("qual."):
-                qual_key = k[5:]
-                # Try multiple key variants to handle both . and _ formats
-                # 1. Try exact key first
-                value = qual_data.get(qual_key)
-                
-                # 2. Try with dots instead of underscores (e.g., "2.1__comments")
-                if value is None and "_" in qual_key:
-                    qual_key_dots = qual_key.replace("_", ".", 1)  # Only first occurrence
-                    value = qual_data.get(qual_key_dots)
-                
-                # 3. If not found and key has section prefix, try base key without section
-                if value is None and "__" in qual_key:
-                    base_key = qual_key.split("__", 1)[1]  # e.g., "comments" or "room_temperature__lockable"
-                    value = qual_data.get(base_key)
-                
-                data[k] = value
+                data[k] = _qual_get(qual_data, k[5:])
                 continue
 
             # sf.*
@@ -4458,7 +4433,10 @@ async def explorer_search_within_drive_km(
     qual_rows = db.execute(select(SiteQual.site_id, SiteQual.data)).all()
     groups_by_slug = _qual_groups_from_questions(db)
     qual_by_site: Dict[int, Dict[str, Any]] = {
-        sid: _expand_comments_keys_for_row(data or {}, groups_by_slug) for sid, data in qual_rows
+        sid: _expand_describe_keys_for_row(
+            _expand_comments_keys_for_row(data or {}, groups_by_slug),
+            groups_by_slug
+        ) for sid, data in qual_rows
     }
 
     # Member/HasPI y extras sobre el subconjunto filtrado
@@ -4524,15 +4502,8 @@ async def explorer_search_within_drive_km(
     def pass_qual(qual_data: Dict[str, Any]) -> bool:
         if not qual_rules:
             return True
-        res = []
-        for qr in qual_rules:
-            # 3-fallback key lookup (mirrors the row-builder logic)
-            v = qual_data.get(qr.field)
-            if v is None and "_" in qr.field:
-                v = qual_data.get(qr.field.replace("_", ".", 1))
-            if v is None and "__" in qr.field:
-                v = qual_data.get(qr.field.split("__", 1)[1])
-            res.append(_eval_qual_rule(v, qr.operator, qr.value))
+        res = [_eval_qual_rule(_qual_get(qual_data, qr.field), qr.operator, qr.value)
+               for qr in qual_rules]
         return all(res) if (filters.get("logic") or "AND") == "AND" else any(res)
 
     def pass_member(aid: str) -> bool:
@@ -4625,7 +4596,7 @@ async def explorer_search_within_drive_km(
                 else:
                     data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
                 continue
-            if k.startswith("qual."):  data[k] = qual_data.get(k[5:]); continue
+            if k.startswith("qual."):  data[k] = _qual_get(qual_data, k[5:]); continue
             if k.startswith("sf."):    data[k] = o.get(k[3:]); continue
             if k.startswith("extra."):
                 data[k] = (extras_map.get(str(aid), {}) or {}).get(k); continue
