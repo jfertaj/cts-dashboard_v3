@@ -175,6 +175,12 @@ def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
     if op in ("lte","<="):
         return _cmp(v, tgt) <= 0
 
+    # Empty / not-empty
+    if op in ("is_empty",):
+        return v is None or (isinstance(v, str) and v.strip() == "")
+    if op in ("is_not_empty",):
+        return not (v is None or (isinstance(v, str) and v.strip() == ""))
+
     # Strings
     vs = "" if v is None else str(v)
     ts = "" if tgt is None else str(tgt)
@@ -2908,14 +2914,29 @@ async def explorer_search(
             return True
         def match_one(rule: Rule) -> bool:
             val = ""
-            if rule.field == "site.city":    val = (acc.get("city") or "") or ""
-            if rule.field == "site.country": val = (acc.get("country") or "") or ""
+            if rule.field == "site.city":    val = (acc.get("city") or "")
+            if rule.field == "site.country": val = (acc.get("country") or "")
             op = _op_norm(rule.operator); s = _str(rule.value)
-            # For country: normalize both stored value and filter value to ISO codes
-            # so "Italy"/"italy"/"IT"/"it" all match regardless of how data is stored.
-            if rule.field == "site.country" and op in ("equals", "=", "not_equals", "!="):
-                s = (_country_norm(s) or s).upper()
+            # is empty / is not empty
+            if op in ("is_null", "isnull", "is_empty"):
+                return val == ""
+            if op in ("is_not_null", "notnull", "is_not_empty"):
+                return val != ""
+            # Normalize country values to ISO for equality/set operators
+            if rule.field == "site.country" and op in ("equals", "=", "not_equals", "!=", "in", "not_in"):
                 val = (_country_norm(val) or val).upper()
+                if op not in ("in", "not_in"):
+                    s = (_country_norm(s) or s).upper()
+            # in / not_in (comma-separated values)
+            if op in ("in", "not_in"):
+                raw_items = [x.strip() for x in str(rule.value or "").split(",") if x.strip()]
+                if rule.field == "site.country":
+                    items = [(_country_norm(x) or x).upper() for x in raw_items]
+                    present = val.upper() in items
+                else:
+                    items = [x.lower() for x in raw_items]
+                    present = val.lower() in items
+                return present if op == "in" else not present
             if   op in ("equals","="):      return val.lower() == s.lower()
             elif op in ("not_equals","!="): return val.lower() != s.lower()
             elif op == "contains":          return s.lower() in val.lower()
@@ -2932,7 +2953,15 @@ async def explorer_search(
             return True
         results = []
         for qr in qual_rules:
+            # Mirror the 3-fallback key lookup used in the row-builder (qual.* section):
+            # 1. Exact key (e.g. "2_2__personal_conversation_with_physician")
             v = qual_data.get(qr.field)
+            # 2. Replace first underscore with dot (e.g. "2.2__personal_conversation_with_physician")
+            if v is None and "_" in qr.field:
+                v = qual_data.get(qr.field.replace("_", ".", 1))
+            # 3. Strip section prefix — use base key (e.g. "personal_conversation_with_physician")
+            if v is None and "__" in qr.field:
+                v = qual_data.get(qr.field.split("__", 1)[1])
             results.append(_eval_qual_rule(v, qr.operator, qr.value))
         glue_and = (filters.get("logic") or "AND") == "AND"
         return all(results) if glue_and else any(results)
@@ -2980,6 +3009,22 @@ async def explorer_search(
             res.append(_eval_qual_rule(actual, ar.operator, ar.value))
         return all(res) if glue_and else any(res)
 
+    # Helper: applies all Python-side pass_* checks respecting root AND/OR logic.
+    # For AND (default): all categories must pass.
+    # For OR: at least one category with actual rules must pass.
+    _root_and = (filters.get("logic") or "AND") == "AND"
+    def passes_row_checks(acc: Dict[str, Any], qual_data: Dict[str, Any], aid: str) -> bool:
+        if _root_and:
+            return (pass_site(acc) and pass_qual(qual_data) and
+                    pass_member(aid) and pass_account(aid) and pass_extra(aid))
+        checks = []
+        if site_rules:    checks.append(pass_site(acc))
+        if qual_rules:    checks.append(pass_qual(qual_data))
+        if member_rules:  checks.append(pass_member(aid))
+        if account_rules: checks.append(pass_account(aid))
+        if extra_rules:   checks.append(pass_extra(aid))
+        return any(checks) if checks else True
+
     # ===========================================================
     # 7) Construcción de filas de OPP normales
     # ===========================================================
@@ -2989,16 +3034,10 @@ async def explorer_search(
         if not aid:             continue
         if aid not in acc_map:  continue  # filtradas por inactividad
         acc = acc_map.get(aid) or {}
-        if not pass_site(acc):  continue
-
         site_info = site_by_acc.get(str(aid))
         site_id   = site_info["site_id"] if site_info else None
         qual_data = qual_by_site.get(site_id, {}) if site_id else {}
-
-        if not pass_qual(qual_data): continue
-        if not pass_member(aid):     continue
-        if not pass_account(aid):    continue
-        if not pass_extra(aid):      continue
+        if not passes_row_checks(acc, qual_data, aid): continue
 
         data: Dict[str, Any] = {}
         for k in requested_cols:
@@ -3142,16 +3181,10 @@ async def explorer_search(
                 if aid not in acc_map:
                     continue  # filtradas por inactividad
                 acc = acc_map.get(aid) or {}
-                if not pass_site(acc):  continue
-
                 site_info = site_by_acc.get(str(aid))
                 site_id   = site_info["site_id"] if site_info else None
                 qual_data = qual_by_site.get(site_id, {}) if site_id else {}
-
-                if not pass_qual(qual_data): continue
-                if not pass_member(aid):     continue
-                if not pass_account(aid):    continue
-                if not pass_extra(aid):      continue
+                if not passes_row_checks(acc, qual_data, aid): continue
 
                 proxy = sf_proxy_by_acc.get(str(aid), {})
                 data: Dict[str, Any] = {}
@@ -3221,15 +3254,10 @@ async def explorer_search(
                 if aid not in acc_map:
                     continue  # filtradas por inactividad
                 acc = acc_map.get(aid) or {}
-                if not pass_site(acc):
-                    continue
                 site_info = site_by_acc.get(str(aid))
                 site_id   = site_info["site_id"] if site_info else None
                 qual_data = qual_by_site.get(site_id, {}) if site_id else {}
-                if not pass_qual(qual_data): continue
-                if not pass_member(aid):     continue
-                if not pass_account(aid):    continue
-                if not pass_extra(aid):      continue
+                if not passes_row_checks(acc, qual_data, aid): continue
 
                 # Proxy SF fields from most recent non-Activity, if requested
                 proxy = sf_proxy_by_acc.get(str(aid), {})
@@ -4462,11 +4490,26 @@ async def explorer_search_within_drive_km(
             if rule.field == "site.city":    val = (acc.get("city")    or "")
             if rule.field == "site.country": val = (acc.get("country") or "")
             op = _OP_SYNONYM.get(rule.operator, rule.operator); s = str(rule.value or "")
-            # For country: normalize both stored value and filter value to ISO codes
-            # so "Italy"/"italy"/"IT"/"it" all match regardless of how data is stored.
-            if rule.field == "site.country" and op in ("equals", "=", "not_equals", "!="):
-                s = (_country_norm(s) or s).upper()
+            # is empty / is not empty
+            if op in ("is_null", "isnull", "is_empty"):
+                return val == ""
+            if op in ("is_not_null", "notnull", "is_not_empty"):
+                return val != ""
+            # Normalize country values to ISO for equality/set operators
+            if rule.field == "site.country" and op in ("equals", "=", "not_equals", "!=", "in", "not_in"):
                 val = (_country_norm(val) or val).upper()
+                if op not in ("in", "not_in"):
+                    s = (_country_norm(s) or s).upper()
+            # in / not_in (comma-separated values)
+            if op in ("in", "not_in"):
+                raw_items = [x.strip() for x in str(rule.value or "").split(",") if x.strip()]
+                if rule.field == "site.country":
+                    items = [(_country_norm(x) or x).upper() for x in raw_items]
+                    present = val.upper() in items
+                else:
+                    items = [x.lower() for x in raw_items]
+                    present = val.lower() in items
+                return present if op == "in" else not present
             if op in ("equals","="): return val.lower() == s.lower()
             if op in ("not_equals","!="): return val.lower() != s.lower()
             if op == "contains": return s.lower() in val.lower()
@@ -4481,7 +4524,15 @@ async def explorer_search_within_drive_km(
     def pass_qual(qual_data: Dict[str, Any]) -> bool:
         if not qual_rules:
             return True
-        res = [_eval_qual_rule(qual_data.get(qr.field), qr.operator, qr.value) for qr in qual_rules]
+        res = []
+        for qr in qual_rules:
+            # 3-fallback key lookup (mirrors the row-builder logic)
+            v = qual_data.get(qr.field)
+            if v is None and "_" in qr.field:
+                v = qual_data.get(qr.field.replace("_", ".", 1))
+            if v is None and "__" in qr.field:
+                v = qual_data.get(qr.field.split("__", 1)[1])
+            res.append(_eval_qual_rule(v, qr.operator, qr.value))
         return all(res) if (filters.get("logic") or "AND") == "AND" else any(res)
 
     def pass_member(aid: str) -> bool:
@@ -4528,6 +4579,20 @@ async def explorer_search_within_drive_km(
             res.append(_eval_qual_rule(actual, er.operator, er.value))
         return all(res) if glue_and else any(res)
 
+    # Helper: applies all Python-side checks respecting root AND/OR logic.
+    _root_and = (filters.get("logic") or "AND") == "AND"
+    def passes_row_checks(acc: Dict[str, Any], qual_data: Dict[str, Any], aid: str) -> bool:
+        if _root_and:
+            return (pass_site(acc) and pass_qual(qual_data) and
+                    pass_member(aid) and pass_account(aid) and pass_extra(aid))
+        checks = []
+        if site_rules:    checks.append(pass_site(acc))
+        if qual_rules:    checks.append(pass_qual(qual_data))
+        if member_rules:  checks.append(pass_member(aid))
+        if account_rules: checks.append(pass_account(aid))
+        if extra_rules:   checks.append(pass_extra(aid))
+        return any(checks) if checks else True
+
     # --- construir filas crudas ---
     rows: List[Dict[str, Any]] = []
     for o in opps:
@@ -4537,14 +4602,9 @@ async def explorer_search_within_drive_km(
         if aid not in acc_map:      # evita inactivas
             continue
         acc = acc_map.get(aid) or {}
-        if not pass_site(acc):      continue
-
         sid = site_id_by_acc.get(str(aid))
         qual_data = qual_by_site.get(sid, {}) if sid else {}
-        if not pass_qual(qual_data): continue
-        if not pass_member(aid):     continue
-        if not pass_account(aid):    continue
-        if not pass_extra(aid):      continue
+        if not passes_row_checks(acc, qual_data, aid): continue
 
         data: Dict[str, Any] = {}
         for k in requested_cols:
