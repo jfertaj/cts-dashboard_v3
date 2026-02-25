@@ -3522,6 +3522,12 @@ DOMAIN GLOSSARY — INNODIA abbreviations and acronyms (memorize these):
 - **GCP** = Good Clinical Practice (certification/training)
 - **MCA** = Multi-Centre Agreement → Assignment.C_MCA_Status__c
 - **Phase I/II/III** = Clinical trial phases → sf.C_Phase_I_Type1__c, C_Phase_II_Type1__c, C_Phase_III_Type1__c (T1D) and NonType1 variants
+- **Activity** = An Opportunity with RecordType.DeveloperName = 'RT_Activity'. Activities are specific programs/trials (Detect, Fabulinus, Baricade, Safeguard, etc.). Sites participate in an Activity via Assignment__c records.
+- **Detect / DETECT** = Activity "DETECT Pilot Sites" + "DETECT French Roll Out" + "DETECT Italian Roll Out" — an early detection program
+- **Fabulinus** = Activity "Fabulinus CTS Team - Part A" + "Fabulinus CTS Team - Part B" + "FABULINUS Referral Partner Network"
+- **Baricade** = Activity "Baricade Delay (JAJJ)" + "Baricade Preserve (JAJK)"
+- **Safeguard** = Activity "Safeguard Trial Clinical Sites"
+- **Diagnode** = Activity "Diagnode-3 RP Team"
 
 SF OBJECTS AVAILABLE:
 - **Account** = Sites/organizations. Key custom fields: INNODIA_Clinical_Trial_Site__c, C_Type__c, C_Profiling_Status__c, C_Membership__c, Account_Status__c, Accredited__c, Screening_Program__c
@@ -3731,6 +3737,56 @@ FOLLOW-UP on explorer_search results → if user says "of those, only in Spain",
 • "ND by country" → salesforce_query: SELECT Account.ShippingCountry, SUM(C_Number_of_new_T1D_diagnosed_O_18__c), SUM(C_Number_of_new_T1D_diagnosed_U_18__c) FROM Opportunity WHERE ... GROUP BY Account.ShippingCountry
 • "DxLab sites" → salesforce_query: SELECT Id, Name, ShippingCountry FROM Account WHERE C_Deliver_Clinical_Grade_Services__c = true AND (Account_Inactive__c = false OR Account_Inactive__c = null)
 • "CTS sites accredited" → salesforce_query: SELECT Id, Name, ShippingCountry FROM Account WHERE INNODIA_Clinical_Trial_Site__c = true AND C_Accredited_Clinical_Trial_Site__c = true
+
+**BLOCK 11: Activity → Sites queries (via Assignment__c)**
+Activities are Opportunities with RecordType.DeveloperName = 'RT_Activity'.
+Sites participate in an Activity through Assignment__c records (Account_Assignment type).
+The link chain is: Activity (Opportunity) ← C_Opportunity_Name__c — Assignment__c — C_Account__c → Account (Site).
+
+KNOWN ACTIVITIES (exact Opportunity names — use LIKE for partial matches):
+- "DETECT Pilot Sites" | "DETECT French Roll Out" | "DETECT Italian Roll Out"
+- "Fabulinus CTS Team - Part A" | "Fabulinus CTS Team - Part B" | "FABULINUS Referral Partner Network"
+- "Baricade Delay (JAJJ)" | "Baricade Preserve (JAJK)" | "Beta Preserve"
+- "Diagnode-3 RP Team" | "Safeguard Trial Clinical Sites"
+
+SOQL PATTERN for "sites in activity X":
+```
+SELECT C_Account__r.Id, C_Account__r.Name, C_Account__r.ShippingCountry, C_Account__r.ShippingCity,
+       C_Assignment_Stage__c, Assignment_Type__c, C_Opportunity_Name__r.Name
+FROM Assignment__c
+WHERE C_Opportunity_Name__r.Name LIKE '%X%'
+AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity'
+AND RecordType.DeveloperName = 'Account_Assignment'
+ORDER BY C_Account__r.ShippingCountry, C_Account__r.Name
+```
+
+AMBIGUITY HANDLING:
+• If name matches multiple activities (e.g. "Fabulinus" → Part A + Part B + RP Network):
+  → Return ALL grouped by activity name. Do NOT ask for clarification unless the user explicitly wants only one.
+  → Add a summary bullet: "Found X sites across N activities: [activity names]"
+• If "Detect" is queried: return all 3 DETECT activities grouped, with a count per sub-activity.
+
+EXAMPLES:
+• "Sites in Detect" / "Which sites participate in Detect?"
+  → salesforce_query: SELECT C_Account__r.Id, C_Account__r.Name, C_Account__r.ShippingCountry, C_Account__r.ShippingCity, C_Opportunity_Name__r.Name, C_Assignment_Stage__c FROM Assignment__c WHERE C_Opportunity_Name__r.Name LIKE '%DETECT%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity' AND RecordType.DeveloperName = 'Account_Assignment' ORDER BY C_Opportunity_Name__r.Name, C_Account__r.ShippingCountry
+
+• "Sites in Fabulinus Part A"
+  → salesforce_query: ...WHERE C_Opportunity_Name__r.Name LIKE '%Fabulinus%Part A%'...
+
+• "Sites in Fabulinus" (ambiguous → return both parts)
+  → salesforce_query: ...WHERE C_Opportunity_Name__r.Name LIKE '%Fabulinus%' AND RecordType.DeveloperName = 'Account_Assignment'...
+  → Group results in the answer by activity name (Part A / Part B / RP Network)
+
+• "How many sites in Baricade?"
+  → salesforce_query: SELECT C_Opportunity_Name__r.Name activity, COUNT(Id) sites FROM Assignment__c WHERE C_Opportunity_Name__r.Name LIKE '%Baricade%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity' AND RecordType.DeveloperName = 'Account_Assignment' GROUP BY C_Opportunity_Name__r.Name
+
+• "All activities and their site counts"
+  → salesforce_query: SELECT C_Opportunity_Name__r.Name activity, COUNT(Id) sites FROM Assignment__c WHERE C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity' AND RecordType.DeveloperName = 'Account_Assignment' GROUP BY C_Opportunity_Name__r.Name ORDER BY COUNT(Id) DESC
+
+• "Is [site name] in Fabulinus?"
+  → salesforce_query: SELECT Id, C_Opportunity_Name__r.Name FROM Assignment__c WHERE C_Account__r.Name LIKE '%[site]%' AND C_Opportunity_Name__r.Name LIKE '%Fabulinus%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity'
+
+TABLE COLUMNS for activity queries: Activity, Site, Country, City, Assignment Stage (C_Assignment_Stage__c)
 
 STYLE
 - Be direct and neutral. Fall back gracefully between SF and Postgres and mention it briefly in bullets.
