@@ -28,12 +28,18 @@ _signer = Signer(COOKIE_SECRET)
 
 # === Sesiones en PostgreSQL (compartidas entre instancias y reinicios) ===
 _DATABASE_URL = os.getenv("DATABASE_URL", "")
+# psycopg3 requires postgresql:// scheme, not SQLAlchemy's postgresql+psycopg://
+_PSYCOPG_URL = (
+    _DATABASE_URL
+    .replace("postgresql+psycopg://", "postgresql://", 1)
+    .replace("postgres+psycopg://", "postgresql://", 1)
+)
 
 def _ensure_sessions_table():
     """CREATE TABLE IF NOT EXISTS sf_sessions — called once at startup."""
     import psycopg
     try:
-        with psycopg.connect(_DATABASE_URL) as conn:
+        with psycopg.connect(_PSYCOPG_URL) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS sf_sessions (
                     session_id   TEXT PRIMARY KEY,
@@ -59,7 +65,7 @@ def _init_sessions():
 def _db_write_session(session_id: str, data: Dict[str, Any]):
     import psycopg
     _init_sessions()
-    with psycopg.connect(_DATABASE_URL) as conn:
+    with psycopg.connect(_PSYCOPG_URL) as conn:
         conn.execute(
             """INSERT INTO sf_sessions (session_id, access_token, instance_url, issued_at, refresh_token, token_type, id_url)
                VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -80,7 +86,7 @@ def _db_read_session(session_id: str) -> Optional[Dict[str, Any]]:
     import psycopg
     _init_sessions()
     try:
-        with psycopg.connect(_DATABASE_URL) as conn:
+        with psycopg.connect(_PSYCOPG_URL) as conn:
             row = conn.execute(
                 "SELECT access_token, instance_url, issued_at, refresh_token, token_type, id_url "
                 "FROM sf_sessions WHERE session_id = %s",
@@ -100,7 +106,7 @@ def _db_delete_session(session_id: str):
     import psycopg
     _init_sessions()
     try:
-        with psycopg.connect(_DATABASE_URL) as conn:
+        with psycopg.connect(_PSYCOPG_URL) as conn:
             conn.execute("DELETE FROM sf_sessions WHERE session_id = %s", (session_id,))
             conn.commit()
     except Exception as e:
