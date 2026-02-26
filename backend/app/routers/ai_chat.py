@@ -6101,7 +6101,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             # Extract location: text after "to", "near", "of", "a" etc. (city must start with uppercase)
             m_loc = re.search(
                 r"\b(?:to|near|of|cerca\s+de|desde|from|\ba\b)\s+([A-ZÀ-Ö×Ø-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s'\-]{1,40})"
-                r"(?:\s+(?:with|where|que|con|having|and)\b|\s*[.,]|\s*$)",
+                r"(?:\s+(?:with|where|que|con|having|and|that|which|who)\b|\s*[.,]|\s*$)",
                 qtxt2,
             )
             city_det = m_loc.group(1).strip() if m_loc else None
