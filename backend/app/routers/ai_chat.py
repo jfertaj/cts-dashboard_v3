@@ -5013,6 +5013,114 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner pharmacy/overnight failed: %s", _e)
 
+        # INTENCIÓN DIRECTA: "sites in [country]" → direct SF query (no internal HTTP)
+        try:
+            _COUNTRY_MAP = {
+                "united kingdom": "GB", "great britain": "GB", "czech republic": "CZ",
+                "spain": "ES", "españa": "ES", "espagne": "ES",
+                "germany": "DE", "deutschland": "DE", "allemagne": "DE",
+                "france": "FR", "frankreich": "FR",
+                "italy": "IT", "italia": "IT", "italie": "IT",
+                "netherlands": "NL", "holland": "NL",
+                "belgium": "BE", "belgique": "BE", "bélgica": "BE",
+                "austria": "AT",
+                "switzerland": "CH", "suiza": "CH", "suisse": "CH",
+                "denmark": "DK", "dinamarca": "DK",
+                "sweden": "SE", "suecia": "SE",
+                "norway": "NO", "noruega": "NO",
+                "finland": "FI", "finlandia": "FI",
+                "portugal": "PT",
+                "poland": "PL", "polonia": "PL",
+                "czechia": "CZ",
+                "slovenia": "SI", "eslovenia": "SI",
+                "croatia": "HR", "croacia": "HR",
+                "romania": "RO", "rumania": "RO",
+                "hungary": "HU", "hungría": "HU",
+                "greece": "GR", "grecia": "GR",
+                "israel": "IL",
+                "estonia": "EE",
+                "ireland": "IE", "irlanda": "IE",
+                "bulgaria": "BG",
+                "slovakia": "SK", "eslovaquia": "SK",
+                "serbia": "RS",
+                "britain": "GB", "uk": "GB",
+                "luxembourg": "LU",
+                "cyprus": "CY",
+                "malta": "MT",
+                "latvia": "LV", "letonia": "LV",
+                "lithuania": "LT", "lituania": "LT",
+                "turkey": "TR", "turquía": "TR",
+                "us": "US", "usa": "US", "united states": "US",
+                "canada": "CA",
+                "australia": "AU",
+            }
+            asks_country_sites = bool(re.search(
+                r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
+            ))
+            if asks_country_sites:
+                # Match longest country name first to avoid false positives
+                _matched_country = None
+                _matched_code = None
+                for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
+                    if _cn in s:
+                        _matched_country = _cn
+                        _matched_code = _COUNTRY_MAP[_cn]
+                        break
+                if _matched_country and _matched_code and sf:
+                    soql_country = (
+                        "SELECT Account.Id, Account.Name, Account.ShippingCity, Account.ShippingCountry, "
+                        "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
+                        "C_Number_of_T1D_Patients_currently_O_18__c, C_Number_of_T1D_Patients_currently_U_18__c, "
+                        "C_Number_of_Stage1_Individuals_followed__c, C_Number_of_Stage2_Individuals_followed__c "
+                        "FROM Opportunity "
+                        "WHERE Account.RecordType.DeveloperName='SubAccount' "
+                        "AND Account.C_Type__c='Clinical' "
+                        f"AND Account.ShippingCountry = '{_matched_code}' "
+                        "ORDER BY Account.Name ASC "
+                        "LIMIT 200"
+                    )
+                    raw_country = tool_salesforce_query(sf, soql_country)
+                    recs_country = raw_country.get("records", []) if isinstance(raw_country, dict) else []
+                    rows_country = []
+                    seen_cids: set = set()
+                    for r in recs_country:
+                        acc = r.get("Account") or {}
+                        aid = acc.get("Id") or r.get("AccountId", "")
+                        if not aid or aid in seen_cids:
+                            continue
+                        seen_cids.add(aid)
+                        rows_country.append({
+                            "account_id": aid,
+                            "account_name": acc.get("Name", ""),
+                            "country": acc.get("ShippingCountry", ""),
+                            "city": acc.get("ShippingCity", ""),
+                            "sf.C_Number_of_new_T1D_diagnosed_O_18__c": r.get("C_Number_of_new_T1D_diagnosed_O_18__c"),
+                            "sf.C_Number_of_new_T1D_diagnosed_U_18__c": r.get("C_Number_of_new_T1D_diagnosed_U_18__c"),
+                            "sf.C_Number_of_T1D_Patients_currently_O_18__c": r.get("C_Number_of_T1D_Patients_currently_O_18__c"),
+                            "sf.C_Number_of_T1D_Patients_currently_U_18__c": r.get("C_Number_of_T1D_Patients_currently_U_18__c"),
+                            "sf.C_Number_of_Stage1_Individuals_followed__c": r.get("C_Number_of_Stage1_Individuals_followed__c"),
+                            "sf.C_Number_of_Stage2_Individuals_followed__c": r.get("C_Number_of_Stage2_Individuals_followed__c"),
+                        })
+                    cols_country = [
+                        {"key": "account_name", "label": "Site"},
+                        {"key": "city", "label": "City"},
+                        {"key": "country", "label": "Country"},
+                        {"key": "sf.C_Number_of_new_T1D_diagnosed_O_18__c", "label": "ND ≥18"},
+                        {"key": "sf.C_Number_of_new_T1D_diagnosed_U_18__c", "label": "ND <18"},
+                        {"key": "sf.C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1"},
+                        {"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2"},
+                    ]
+                    tbl_country = _normalize_table_for_ui({"columns": cols_country, "rows": rows_country})
+                    _dbg("Planner country deterministic (SF query): %d sites in %s (%s)",
+                         len(rows_country), _matched_country, _matched_code)
+                    return {
+                        "answer": f"<p>Found <strong>{len(rows_country)}</strong> clinical site(s) in "
+                                  f"<strong>{_matched_country.title()}</strong>.</p>",
+                        "table": tbl_country,
+                    }
+        except Exception as _e:
+            _dbg("WARN: planner country sites failed: %s", _e)
+
         # Detectar follow-ups de visualización (frases cortas con palabras clave)
         is_chart_followup = bool(
             # "show" alone is NOT a chart follow-up — "show me sites in X" is a data query
