@@ -4554,6 +4554,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         try:
             sc_intent = re.search(r"\bstudy\s*coordinators?\b", s) is not None
             pi_intent = re.search(r"\bprincipal\s*investigators?\b|\b\bpi\b", s) is not None
+            if (sc_intent or pi_intent) and not sf:
+                return {"answer": "<p>⚠️ Contact/coordinator data requires an active Salesforce session. "
+                                  "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
             if (sc_intent or pi_intent) and sf:
                 # Parse optional country list: "in Germany and Spain"
                 # Capture 'in <country>' anywhere, optionally followed by 'site(s)'
@@ -4606,7 +4609,11 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         # INTENCIÓN DIRECTA: Activities
         try:
             # Acepta 'activities', 'activity' y typos frecuentes como 'activites'
-            if sf and (re.search(r"\bactivit(?:y|ies)\b", s) or re.search(r"\bactivites\b", s) or ("activit" in s)):
+            _act_intent = bool(re.search(r"\bactivit(?:y|ies)\b", s) or re.search(r"\bactivites\b", s) or ("activit" in s))
+            if _act_intent and not sf:
+                return {"answer": "<p>⚠️ Activity/enrollment data requires an active Salesforce session. "
+                                  "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
+            if sf and _act_intent:
                 # 0) Prioridad: frases sobre ASSIGNMENTS (evita que 'list activities' intercepte)
                 if re.search(r"activities?\s+with\s+assignments?", s):
                     # Parse filters (país, nombre quoted, fechas)
@@ -4868,6 +4875,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             has_s1 = bool(re.search(r"\bstage\s*1\b", s))
             has_s2 = bool(re.search(r"\bstage\s*2\b", s))
             asks_sites = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b", s))
+            if (has_s1 or has_s2) and not sf:
+                return {"answer": "<p>⚠️ Stage 1/2 patient data is stored in Salesforce and requires an active session. "
+                                  "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
             if (has_s1 or has_s2) and asks_sites and sf:
                 stage_cond_parts = []
                 if has_s1:
@@ -4923,11 +4933,27 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         try:
             has_pharmacy = bool(re.search(r"\bpharmac", s))
             has_overnight = bool(re.search(r"\bovernight\b", s))
-            asks_sites2 = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b|show\b|find\b|list\b", s))
+            asks_sites2 = bool(re.search(
+                r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b"
+                r"|show\b|find\b|list\b|which\b|those\b|offer\b|have\b|with\b|do\b", s))
             if (has_pharmacy or has_overnight) and asks_sites2:
                 # Step 1: find account IDs from local DB (site_qual)
                 ph_conds = []
                 ph_params: dict = {}
+                # Extract country filter from last_filters (multi-turn context)
+                _lf_country = None
+                try:
+                    _lf = getattr(payload, 'last_filters', None)
+                    if _lf and isinstance(_lf.get("rules"), list):
+                        for _r in _lf["rules"]:
+                            if str(_r.get("field","")).lower() in ("site.country", "sf.account.shippingcountry") and _r.get("value"):
+                                _lf_country = str(_r["value"])
+                                break
+                except Exception:
+                    pass
+                if _lf_country:
+                    ph_conds.append("LOWER(s.country) = :lf_country")
+                    ph_params["lf_country"] = _lf_country.lower()
                 if has_pharmacy:
                     # Match 'On-site' in pharmacy field (various key formats: prefixed and bare)
                     ph_conds.append(
@@ -4956,8 +4982,20 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     "FROM public.sites s JOIN public.site_qual sq ON sq.site_id = s.id "
                     f"WHERE {' AND '.join(ph_conds)}"
                 )
-                db_result = db.execute(db_q)
+                db_result = db.execute(db_q, ph_params)
                 db_rows = db_result.fetchall()
+                if not db_rows and _lf_country:
+                    # Country filter applied but no results → return clear 0-result response
+                    cond_txt0 = " and ".join(filter(None, [
+                        "onsite pharmacy" if has_pharmacy else "",
+                        "overnight stay" if has_overnight else "",
+                    ]))
+                    _dbg("Planner pharmacy/overnight: 0 results in %s", _lf_country)
+                    return {
+                        "answer": f"<p>No sites in <strong>{_lf_country.title()}</strong> with {cond_txt0} were found "
+                                  f"in the local qualification database.</p>",
+                        "table": _normalize_table_for_ui({"columns": [], "rows": []}),
+                    }
                 if db_rows:
                     acc_ids_ph = [row[0] for row in db_rows if row[0]]
                     site_meta = {row[0]: {"name": row[1], "city": row[2], "country": row[3],
@@ -5073,15 +5111,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         _matched_country = _cn
                         _matched_sf_name, _matched_iso = _COUNTRY_MAP[_cn]
                         break
-                if _matched_country and _matched_sf_name and not sf and _matched_iso:
-                    # SF session not available → fallback: query local sites table using ISO code
+                if _matched_country and _matched_sf_name and not sf:
+                    # SF session not available → fallback: query local sites table using full country name
+                    # (sites table stores full English names like "Italy", not ISO codes)
                     db_country_q = text(
                         "SELECT s.salesforce_account_id, s.name, s.city, s.country "
                         "FROM public.sites s "
-                        "WHERE UPPER(s.country) = :iso "
+                        "WHERE LOWER(s.country) = :cname "
                         "ORDER BY s.name ASC LIMIT 200"
                     )
-                    db_country_rows_fb = db.execute(db_country_q, {"iso": _matched_iso.upper()}).fetchall()
+                    db_country_rows_fb = db.execute(db_country_q, {"cname": _matched_sf_name.lower()}).fetchall()
                     rows_country_fb = [
                         {"account_id": r[0] or "", "account_name": r[1] or "",
                          "city": r[2] or "", "country": r[3] or ""}
@@ -5094,11 +5133,17 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     ]
                     tbl_country_fb = _normalize_table_for_ui({"columns": cols_country_fb, "rows": rows_country_fb})
                     _dbg("Planner country DB fallback (no SF): %d sites in %s", len(rows_country_fb), _matched_sf_name)
+                    # Include last_filters so multi-turn refinement queries work
+                    _country_lf = {
+                        "logic": "AND",
+                        "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
+                    }
                     return {
                         "answer": f"<p>Found <strong>{len(rows_country_fb)}</strong> clinical site(s) in "
                                   f"<strong>{_matched_sf_name}</strong> (from local database; "
                                   f"some metrics require a fresh Salesforce session).</p>",
                         "table": tbl_country_fb,
+                        "last_filters": _country_lf,
                     }
                 if _matched_country and _matched_sf_name and sf:
                     # NOTE: SF ShippingCountry stores the full English name (e.g. "Spain"),
