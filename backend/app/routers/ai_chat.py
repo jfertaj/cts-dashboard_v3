@@ -1246,6 +1246,25 @@ def tool_nearest_filtered_sites(
     for sf_key, sf_label in _sf_key_labels.items():
         if sf_key in _present_sf_keys:
             columns.append({"key": sf_key, "label": sf_label})
+    # Also include any sf.* fields explicitly mentioned in filter rules (reliable even when data is null)
+    _already_col_keys = {c["key"] for c in columns}
+    def _collect_filter_sf_fields_fn(f: dict) -> list:
+        result: list = []
+        if not f:
+            return result
+        for _r in f.get("rules") or []:
+            if isinstance(_r, dict):
+                _fld = _r.get("field", "")
+                if _fld.startswith("sf."):
+                    result.append(_fld)
+                else:
+                    result.extend(_collect_filter_sf_fields_fn(_r))
+        return result
+    for _ff in _collect_filter_sf_fields_fn(filters or {}):
+        if _ff not in _already_col_keys:
+            _lbl = _sf_key_labels.get(_ff) or _pretty_label(_ff)
+            columns.append({"key": _ff, "label": _lbl})
+            _already_col_keys.add(_ff)
     return {
         "columns": columns,
         "rows": enriched,
@@ -5032,6 +5051,61 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     }
         except Exception as _e:
             _dbg("WARN: planner ND handler failed: %s", _e)
+
+        # INTENCIÓN DIRECTA: Stage 1/2 by country (aggregation) → like ND by country
+        try:
+            _bc_has_s1 = bool(re.search(r"\bstage\s*1\b", s))
+            _bc_has_s2 = bool(re.search(r"\bstage\s*2\b", s))
+            _bc_by_country = bool(re.search(r"\b(per\s+country|by\s+country|por\s+pa[ií]s|por\s+pais|by\s+region|total|totals?)\b", s))
+            _bc_has_nearest = bool(re.search(r"\bnearest\b|\bclosest\b|\bnear\b|\bcerca\b|\bpróximo[s]?\b", s))
+            if (_bc_has_s1 or _bc_has_s2) and _bc_by_country and not _bc_has_nearest:
+                if not sf:
+                    return {"answer": "<p>⚠️ Stage 1/2 patient data is stored in Salesforce and requires an active session. "
+                                      "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
+                soql_s12_bc = (
+                    "SELECT Account.ShippingCountry, "
+                    "C_Number_of_Stage1_Individuals_followed__c, "
+                    "C_Number_of_Stage2_Individuals_followed__c "
+                    "FROM Opportunity "
+                    "WHERE Account.RecordType.DeveloperName='SubAccount' "
+                    "AND Account.C_Type__c='Clinical' "
+                    "LIMIT 2000"
+                )
+                raw_s12_bc = tool_salesforce_query(sf, soql_s12_bc)
+                recs_s12_bc = raw_s12_bc.get("records", []) if isinstance(raw_s12_bc, dict) else []
+                _s12_bc_totals: dict = {}
+                for _r in recs_s12_bc:
+                    _c = (_r.get("Account") or {}).get("ShippingCountry") or ""
+                    if not _c:
+                        continue
+                    _s1v = float(_r.get("C_Number_of_Stage1_Individuals_followed__c") or 0)
+                    _s2v = float(_r.get("C_Number_of_Stage2_Individuals_followed__c") or 0)
+                    if _c not in _s12_bc_totals:
+                        _s12_bc_totals[_c] = {"s1": 0.0, "s2": 0.0}
+                    _s12_bc_totals[_c]["s1"] += _s1v
+                    _s12_bc_totals[_c]["s2"] += _s2v
+                _bc_sort_key = "sf.C_Number_of_Stage2_Individuals_followed__c" if (_bc_has_s2 and not _bc_has_s1) else "sf.C_Number_of_Stage1_Individuals_followed__c"
+                rows_s12_bc = sorted(
+                    [{"country": c,
+                      "sf.C_Number_of_Stage1_Individuals_followed__c": v["s1"],
+                      "sf.C_Number_of_Stage2_Individuals_followed__c": v["s2"]}
+                     for c, v in _s12_bc_totals.items()],
+                    key=lambda x: x[_bc_sort_key], reverse=True
+                )
+                cols_s12_bc = [
+                    {"key": "country", "label": "Country"},
+                    {"key": "sf.C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1 (sum)"},
+                    {"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2 (sum)"},
+                ]
+                tbl_s12_bc = _normalize_table_for_ui({"columns": cols_s12_bc, "rows": rows_s12_bc})
+                _bc_label = "Stage 2" if (_bc_has_s2 and not _bc_has_s1) else ("Stage 1" if (_bc_has_s1 and not _bc_has_s2) else "Stage 1/2")
+                _dbg("Planner Stage1/2 by country: %d countries", len(rows_s12_bc))
+                return {
+                    "answer": f"<p>{_bc_label} totals across {len(rows_s12_bc)} countries.</p>",
+                    "table": tbl_s12_bc,
+                }
+        except Exception as _e:
+            _dbg("WARN: planner stage1/2 by country failed: %s", _e)
 
         # INTENCIÓN DIRECTA: Stage 1/2 site list → direct SF query (no internal HTTP)
         try:
