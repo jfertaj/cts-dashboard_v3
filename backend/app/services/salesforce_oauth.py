@@ -26,8 +26,85 @@ STATE_COOKIE = "sf_oauth_state"
 
 _signer = Signer(COOKIE_SECRET)
 
-# === Sesiones simples en memoria (mover a Redis/DB en prod) ===
-SESSIONS: Dict[str, Dict[str, Any]] = {}
+# === Sesiones en PostgreSQL (compartidas entre instancias y reinicios) ===
+_DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+def _ensure_sessions_table():
+    """CREATE TABLE IF NOT EXISTS sf_sessions — called once at startup."""
+    import psycopg
+    try:
+        with psycopg.connect(_DATABASE_URL) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sf_sessions (
+                    session_id   TEXT PRIMARY KEY,
+                    access_token TEXT NOT NULL,
+                    instance_url TEXT NOT NULL,
+                    issued_at    INTEGER NOT NULL,
+                    refresh_token TEXT,
+                    token_type   TEXT DEFAULT 'Bearer',
+                    id_url       TEXT
+                )
+            """)
+            conn.commit()
+    except Exception as e:
+        print(f"WARN: could not create sf_sessions table: {e}")
+
+_sessions_table_ready = False
+def _init_sessions():
+    global _sessions_table_ready
+    if not _sessions_table_ready:
+        _ensure_sessions_table()
+        _sessions_table_ready = True
+
+def _db_write_session(session_id: str, data: Dict[str, Any]):
+    import psycopg
+    _init_sessions()
+    with psycopg.connect(_DATABASE_URL) as conn:
+        conn.execute(
+            """INSERT INTO sf_sessions (session_id, access_token, instance_url, issued_at, refresh_token, token_type, id_url)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (session_id) DO UPDATE SET
+                 access_token  = EXCLUDED.access_token,
+                 instance_url  = EXCLUDED.instance_url,
+                 issued_at     = EXCLUDED.issued_at,
+                 refresh_token = EXCLUDED.refresh_token,
+                 token_type    = EXCLUDED.token_type,
+                 id_url        = EXCLUDED.id_url
+            """,
+            (session_id, data["access_token"], data["instance_url"], data["issued_at"],
+             data.get("refresh_token"), data.get("token_type", "Bearer"), data.get("id_url")),
+        )
+        conn.commit()
+
+def _db_read_session(session_id: str) -> Optional[Dict[str, Any]]:
+    import psycopg
+    _init_sessions()
+    try:
+        with psycopg.connect(_DATABASE_URL) as conn:
+            row = conn.execute(
+                "SELECT access_token, instance_url, issued_at, refresh_token, token_type, id_url "
+                "FROM sf_sessions WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "access_token":  row[0], "instance_url": row[1], "issued_at": row[2],
+            "refresh_token": row[3], "token_type":   row[4], "id_url":    row[5],
+        }
+    except Exception as e:
+        print(f"WARN: sf_sessions read failed: {e}")
+        return None
+
+def _db_delete_session(session_id: str):
+    import psycopg
+    _init_sessions()
+    try:
+        with psycopg.connect(_DATABASE_URL) as conn:
+            conn.execute("DELETE FROM sf_sessions WHERE session_id = %s", (session_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"WARN: sf_sessions delete failed: {e}")
 
 
 # ---------------------------
@@ -130,36 +207,34 @@ async def refresh_access_token(refresh_token: str) -> Dict[str, Any]:
 # Gestión de sesiones
 # ---------------------------
 def create_session(token_payload: Dict[str, Any]) -> str:
-    """
-    Guarda lo básico de la sesión OAuth devuelta por Salesforce.
-    """
+    """Persist the OAuth session to PostgreSQL and return the session_id."""
     session_id = str(uuid.uuid4())
-    SESSIONS[session_id] = {
-        "access_token": token_payload["access_token"],
-        "instance_url": token_payload["instance_url"],
-        "issued_at": int(time.time()),
+    data = {
+        "access_token":  token_payload["access_token"],
+        "instance_url":  token_payload["instance_url"],
+        "issued_at":     int(time.time()),
         "refresh_token": token_payload.get("refresh_token"),
-        "token_type": token_payload.get("token_type", "Bearer"),
-        "id_url": token_payload.get("id"),  # endpoint de identidad
+        "token_type":    token_payload.get("token_type", "Bearer"),
+        "id_url":        token_payload.get("id"),
     }
+    _db_write_session(session_id, data)
     return session_id
 
 
 def destroy_session(session_id: str):
-    SESSIONS.pop(session_id, None)
+    _db_delete_session(session_id)
 
 
 def get_identity_from_session_id(session_id: str) -> Optional[Dict[str, Any]]:
-    return SESSIONS.get(session_id)
+    return _db_read_session(session_id)
 
 
 def get_salesforce_from_session_id(session_id: str) -> Optional[Salesforce]:
-    data = SESSIONS.get(session_id)
+    data = _db_read_session(session_id)
     if not data:
         return None
-    # Nota: simple_salesforce ignora 'version' si se pasa vacío; usamos la env saneada.
     return Salesforce(
         instance_url=data["instance_url"],
         session_id=data["access_token"],
-        version=SF_API_VERSION,  # p.ej. "59.0"
+        version=SF_API_VERSION,
     )

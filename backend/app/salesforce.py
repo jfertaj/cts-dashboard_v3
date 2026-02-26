@@ -8,8 +8,8 @@ from app.services.salesforce_oauth import (
     unsign_value,
     get_identity_from_session_id,
     get_salesforce_from_session_id,
-    refresh_access_token,   # tienes refresh en tu servicio
-    SESSIONS,               # almacen de sesiones en memoria
+    refresh_access_token,
+    _db_write_session,      # para persistir tokens refrescados
     SF_API_VERSION,
 )
 
@@ -72,7 +72,7 @@ def get_sf_client(request: Optional[Request] = None) -> Optional[Salesforce]:
             if new_tokens.get("refresh_token"):
                 info["refresh_token"] = new_tokens["refresh_token"]
 
-            SESSIONS[session_id] = info
+            _db_write_session(session_id, info)
             # Devuelve un cliente nuevo con el token fresco
             return _build_client(info["access_token"], info["instance_url"])
         except Exception:
