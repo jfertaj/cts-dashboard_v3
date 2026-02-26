@@ -1181,10 +1181,16 @@ def tool_nearest_filtered_sites(
             auth = request.headers.get("authorization")
             if auth:
                 headers["authorization"] = auth
+        _nearest_sf_cols = [
+            "sf.Account.Id", "sf.Account.Name", "sf.Account.ShippingCountry", "sf.Account.ShippingCity",
+            "sf.C_Number_of_Stage1_Individuals_followed__c", "sf.C_Number_of_Stage2_Individuals_followed__c",
+            "sf.C_Number_of_new_T1D_diagnosed_O_18__c", "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
+            "sf.C_Number_of_T1D_Patients_currently_O_18__c", "sf.C_Number_of_T1D_Patients_currently_U_18__c",
+        ]
         with httpx.Client(timeout=90.0) as cli:
             resp = cli.post(
                 url,
-                json={"filters": filters or {"logic": "AND", "rules": []}, "columns": []},
+                json={"filters": filters or {"logic": "AND", "rules": []}, "columns": _nearest_sf_cols},
                 headers=headers,
             )
         _dbg("NEAREST: explorer/search status=%d", resp.status_code)
@@ -4543,14 +4549,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             return None
         specified_type = re.search(r"\b(new|newly|diagnos(ed)?|dx|actual(es)?|actualmente|current(ly)?|seguimiento|followed|follow.up)\b", s) is not None
         specified_stage = re.search(r"\bstage\s*[12]\b", s) is not None
-        specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older|\badult[os]?\b|\bpediatri[ck]|paediatri[ck]|\bni[ñn]os?\b)\b", s) is not None
+        specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older"
+                                   r"|\badulto?s?\b|\badults?\b|\bpediatri[ck]|paediatri[ck]|\bni[ñn]os?\b)\b", s) is not None
         # Queries sobre agregaciones (average, total, sum) con edad especificada son suficientemente claras
         has_aggregation = re.search(r"\b(average|avg|total|sum|count|how\s+many)\b", s) is not None
-        # Si especifica la edad, no pedir clarificación (asumimos "current" si no se especifica)
+        # Si especifica la edad, no pedir clarificación
         if specified_age:
             return None
-        # Si especifica el tipo Y la edad, no pedir clarificación
-        if specified_type and specified_age:
+        # Si especifica el tipo (ej. "actualmente", "newly diagnosed"), tampoco pedir clarificación
+        if specified_type:
             return None
         # Si especifica stage, tampoco pedir clarificación
         if specified_stage:
@@ -4940,26 +4947,35 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 _nd_topn = int(_m_topn.group(2)) if _m_topn else 10
                 _nd_topn = min(max(_nd_topn, 1), 50)
                 if _nd_by_country:
-                    # Aggregate ND by country
+                    # Fetch all sites with ND data, then aggregate in Python (GROUP BY SOQL has SF traversal issues)
                     soql_nd_agg = (
                         "SELECT Account.ShippingCountry, "
-                        "SUM(C_Number_of_new_T1D_diagnosed_O_18__c) ndO18, "
-                        "SUM(C_Number_of_new_T1D_diagnosed_U_18__c) ndU18 "
+                        "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c "
                         "FROM Opportunity "
                         "WHERE Account.RecordType.DeveloperName='SubAccount' "
                         "AND Account.C_Type__c='Clinical' "
-                        "GROUP BY Account.ShippingCountry "
-                        "ORDER BY SUM(C_Number_of_new_T1D_diagnosed_O_18__c) DESC NULLS LAST "
-                        "LIMIT 50"
+                        "LIMIT 2000"
                     )
                     raw_nd_agg = tool_salesforce_query(sf, soql_nd_agg)
                     recs_nd_agg = raw_nd_agg.get("records", []) if isinstance(raw_nd_agg, dict) else []
-                    rows_nd_agg = [
-                        {"country": r.get("Account", {}).get("ShippingCountry") or r.get("ShippingCountry", ""),
-                         "sf.C_Number_of_new_T1D_diagnosed_O_18__c": r.get("ndO18"),
-                         "sf.C_Number_of_new_T1D_diagnosed_U_18__c": r.get("ndU18")}
-                        for r in recs_nd_agg if r.get("Account", {}).get("ShippingCountry") or r.get("ShippingCountry")
-                    ]
+                    _nd_country_totals: dict = {}
+                    for r in recs_nd_agg:
+                        _c = (r.get("Account") or {}).get("ShippingCountry") or ""
+                        if not _c:
+                            continue
+                        _o18 = float(r.get("C_Number_of_new_T1D_diagnosed_O_18__c") or 0)
+                        _u18 = float(r.get("C_Number_of_new_T1D_diagnosed_U_18__c") or 0)
+                        if _c not in _nd_country_totals:
+                            _nd_country_totals[_c] = {"o18": 0.0, "u18": 0.0}
+                        _nd_country_totals[_c]["o18"] += _o18
+                        _nd_country_totals[_c]["u18"] += _u18
+                    rows_nd_agg = sorted(
+                        [{"country": c,
+                          "sf.C_Number_of_new_T1D_diagnosed_O_18__c": v["o18"],
+                          "sf.C_Number_of_new_T1D_diagnosed_U_18__c": v["u18"]}
+                         for c, v in _nd_country_totals.items()],
+                        key=lambda x: x["sf.C_Number_of_new_T1D_diagnosed_O_18__c"], reverse=True
+                    )
                     cols_nd_agg = [
                         {"key": "country", "label": "Country"},
                         {"key": "sf.C_Number_of_new_T1D_diagnosed_O_18__c", "label": "ND ≥18 (sum)"},

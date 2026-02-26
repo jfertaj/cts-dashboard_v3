@@ -252,7 +252,7 @@ def test_3_nd_patients():
     resp = moby("Show me the top 10 sites with the highest number of newly diagnosed adult T1D patients (over 18).",
                 section_name="ND-2")
     assert_moby_table(resp, "ND-2", min_rows=5,
-                      col_patterns=["account_name", "ND", "country"])
+                      col_patterns=["account_name", "diagnos", "country"])
 
     section("ND-3 — Moby: ND patients by country")
     resp3 = moby("How many newly diagnosed T1D patients (adult and pediatric) are there per country?",
