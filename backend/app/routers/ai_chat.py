@@ -5015,58 +5015,61 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
         # INTENCIÓN DIRECTA: "sites in [country]" → direct SF query (no internal HTTP)
         try:
+            # Maps user query alias → SF full country name (ShippingCountry stores full names, not ISO)
             _COUNTRY_MAP = {
-                "united kingdom": "GB", "great britain": "GB", "czech republic": "CZ",
-                "spain": "ES", "españa": "ES", "espagne": "ES",
-                "germany": "DE", "deutschland": "DE", "allemagne": "DE",
-                "france": "FR", "frankreich": "FR",
-                "italy": "IT", "italia": "IT", "italie": "IT",
-                "netherlands": "NL", "holland": "NL",
-                "belgium": "BE", "belgique": "BE", "bélgica": "BE",
-                "austria": "AT",
-                "switzerland": "CH", "suiza": "CH", "suisse": "CH",
-                "denmark": "DK", "dinamarca": "DK",
-                "sweden": "SE", "suecia": "SE",
-                "norway": "NO", "noruega": "NO",
-                "finland": "FI", "finlandia": "FI",
-                "portugal": "PT",
-                "poland": "PL", "polonia": "PL",
-                "czechia": "CZ",
-                "slovenia": "SI", "eslovenia": "SI",
-                "croatia": "HR", "croacia": "HR",
-                "romania": "RO", "rumania": "RO",
-                "hungary": "HU", "hungría": "HU",
-                "greece": "GR", "grecia": "GR",
-                "israel": "IL",
-                "estonia": "EE",
-                "ireland": "IE", "irlanda": "IE",
-                "bulgaria": "BG",
-                "slovakia": "SK", "eslovaquia": "SK",
-                "serbia": "RS",
-                "britain": "GB", "uk": "GB",
-                "luxembourg": "LU",
-                "cyprus": "CY",
-                "malta": "MT",
-                "latvia": "LV", "letonia": "LV",
-                "lithuania": "LT", "lituania": "LT",
-                "turkey": "TR", "turquía": "TR",
-                "us": "US", "usa": "US", "united states": "US",
-                "canada": "CA",
-                "australia": "AU",
+                "united kingdom": "United Kingdom", "great britain": "United Kingdom",
+                "britain": "United Kingdom", "uk": "United Kingdom",
+                "czech republic": "Czech Republic", "czechia": "Czech Republic",
+                "spain": "Spain", "españa": "Spain", "espagne": "Spain",
+                "germany": "Germany", "deutschland": "Germany", "allemagne": "Germany",
+                "france": "France", "frankreich": "France",
+                "italy": "Italy", "italia": "Italy", "italie": "Italy",
+                "netherlands": "Netherlands", "holland": "Netherlands",
+                "belgium": "Belgium", "belgique": "Belgium", "bélgica": "Belgium",
+                "austria": "Austria",
+                "switzerland": "Switzerland", "suiza": "Switzerland", "suisse": "Switzerland",
+                "denmark": "Denmark", "dinamarca": "Denmark",
+                "sweden": "Sweden", "suecia": "Sweden",
+                "norway": "Norway", "noruega": "Norway",
+                "finland": "Finland", "finlandia": "Finland",
+                "portugal": "Portugal",
+                "poland": "Poland", "polonia": "Poland",
+                "slovenia": "Slovenia", "eslovenia": "Slovenia",
+                "croatia": "Croatia", "croacia": "Croatia",
+                "romania": "Romania", "rumania": "Romania",
+                "hungary": "Hungary", "hungría": "Hungary",
+                "greece": "Greece", "grecia": "Greece",
+                "israel": "Israel",
+                "estonia": "Estonia",
+                "ireland": "Ireland", "irlanda": "Ireland",
+                "bulgaria": "Bulgaria",
+                "slovakia": "Slovakia", "eslovaquia": "Slovakia",
+                "serbia": "Serbia",
+                "luxembourg": "Luxembourg",
+                "cyprus": "Cyprus",
+                "malta": "Malta",
+                "latvia": "Latvia", "letonia": "Latvia",
+                "lithuania": "Lithuania", "lituania": "Lithuania",
+                "turkey": "Turkey", "turquía": "Turkey",
+                "united states": "United States", "usa": "United States", "us": "United States",
+                "canada": "Canada",
+                "australia": "Australia",
             }
             asks_country_sites = bool(re.search(
                 r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
             ))
             if asks_country_sites:
-                # Match longest country name first to avoid false positives
+                # Match longest alias first to avoid false positives
                 _matched_country = None
-                _matched_code = None
+                _matched_sf_name = None
                 for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
                     if _cn in s:
                         _matched_country = _cn
-                        _matched_code = _COUNTRY_MAP[_cn]
+                        _matched_sf_name = _COUNTRY_MAP[_cn]
                         break
-                if _matched_country and _matched_code and sf:
+                if _matched_country and _matched_sf_name and sf:
+                    # NOTE: SF ShippingCountry stores the full English name (e.g. "Spain"),
+                    # not ISO codes. Fetch all clinical accounts and filter in Python.
                     soql_country = (
                         "SELECT Account.Id, Account.Name, Account.ShippingCity, Account.ShippingCountry, "
                         "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
@@ -5075,9 +5078,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         "FROM Opportunity "
                         "WHERE Account.RecordType.DeveloperName='SubAccount' "
                         "AND Account.C_Type__c='Clinical' "
-                        f"AND Account.ShippingCountry = '{_matched_code}' "
                         "ORDER BY Account.Name ASC "
-                        "LIMIT 200"
+                        "LIMIT 2000"
                     )
                     raw_country = tool_salesforce_query(sf, soql_country)
                     recs_country = raw_country.get("records", []) if isinstance(raw_country, dict) else []
@@ -5087,6 +5089,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         acc = r.get("Account") or {}
                         aid = acc.get("Id") or r.get("AccountId", "")
                         if not aid or aid in seen_cids:
+                            continue
+                        # Filter by full country name as stored in SF ShippingCountry
+                        country_val = (acc.get("ShippingCountry") or "").lower()
+                        if country_val != _matched_sf_name.lower():
                             continue
                         seen_cids.add(aid)
                         rows_country.append({
@@ -5111,11 +5117,11 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         {"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2"},
                     ]
                     tbl_country = _normalize_table_for_ui({"columns": cols_country, "rows": rows_country})
-                    _dbg("Planner country deterministic (SF query): %d sites in %s (%s)",
-                         len(rows_country), _matched_country, _matched_code)
+                    _dbg("Planner country deterministic (SF query): %d sites in %s",
+                         len(rows_country), _matched_sf_name)
                     return {
                         "answer": f"<p>Found <strong>{len(rows_country)}</strong> clinical site(s) in "
-                                  f"<strong>{_matched_country.title()}</strong>.</p>",
+                                  f"<strong>{_matched_sf_name}</strong>.</p>",
                         "table": tbl_country,
                     }
         except Exception as _e:
