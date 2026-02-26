@@ -106,6 +106,48 @@ _INDEX_CACHE: Dict[str, Any] = {"ts": 0, "index": {}, "sf_fields": {}}
 # Limit for previewing aliases in the system hints (smaller → faster)
 INDEX_PREVIEW_LIMIT = int(os.environ.get("AI_INDEX_PREVIEW_LIMIT", "60"))
 
+# Country alias map: lowercase alias → (SF full name, ISO2 code)
+# Used by multiple planner handlers (pharmacy, country, nearest)
+_COUNTRY_MAP: Dict[str, tuple] = {
+    "united kingdom": ("United Kingdom", "GB"), "great britain": ("United Kingdom", "GB"),
+    "britain": ("United Kingdom", "GB"), "uk": ("United Kingdom", "GB"),
+    "czech republic": ("Czech Republic", "CZ"), "czechia": ("Czech Republic", "CZ"),
+    "spain": ("Spain", "ES"), "españa": ("Spain", "ES"), "espagne": ("Spain", "ES"),
+    "germany": ("Germany", "DE"), "deutschland": ("Germany", "DE"), "allemagne": ("Germany", "DE"),
+    "france": ("France", "FR"), "frankreich": ("France", "FR"),
+    "italy": ("Italy", "IT"), "italia": ("Italy", "IT"), "italie": ("Italy", "IT"),
+    "netherlands": ("Netherlands", "NL"), "holland": ("Netherlands", "NL"),
+    "belgium": ("Belgium", "BE"), "belgique": ("Belgium", "BE"), "bélgica": ("Belgium", "BE"),
+    "austria": ("Austria", "AT"),
+    "switzerland": ("Switzerland", "CH"), "suiza": ("Switzerland", "CH"), "suisse": ("Switzerland", "CH"),
+    "denmark": ("Denmark", "DK"), "dinamarca": ("Denmark", "DK"),
+    "sweden": ("Sweden", "SE"), "suecia": ("Sweden", "SE"),
+    "norway": ("Norway", "NO"), "noruega": ("Norway", "NO"),
+    "finland": ("Finland", "FI"), "finlandia": ("Finland", "FI"),
+    "portugal": ("Portugal", "PT"),
+    "poland": ("Poland", "PL"), "polonia": ("Poland", "PL"),
+    "slovenia": ("Slovenia", "SI"), "eslovenia": ("Slovenia", "SI"),
+    "croatia": ("Croatia", "HR"), "croacia": ("Croatia", "HR"),
+    "romania": ("Romania", "RO"), "rumania": ("Romania", "RO"),
+    "hungary": ("Hungary", "HU"), "hungría": ("Hungary", "HU"),
+    "greece": ("Greece", "GR"), "grecia": ("Greece", "GR"),
+    "israel": ("Israel", "IL"),
+    "estonia": ("Estonia", "EE"),
+    "ireland": ("Ireland", "IE"), "irlanda": ("Ireland", "IE"),
+    "bulgaria": ("Bulgaria", "BG"),
+    "slovakia": ("Slovakia", "SK"), "eslovaquia": ("Slovakia", "SK"),
+    "serbia": ("Serbia", "RS"),
+    "luxembourg": ("Luxembourg", "LU"),
+    "cyprus": ("Cyprus", "CY"),
+    "malta": ("Malta", "MT"),
+    "latvia": ("Latvia", "LV"), "letonia": ("Latvia", "LV"),
+    "lithuania": ("Lithuania", "LT"), "lituania": ("Lithuania", "LT"),
+    "turkey": ("Turkey", "TR"), "turquía": ("Turkey", "TR"),
+    "united states": ("United States", "US"), "usa": ("United States", "US"),
+    "canada": ("Canada", "CA"),
+    "australia": ("Australia", "AU"),
+}
+
 def _normalize(s: str) -> str:
     s = (s or "").strip().lower()
     s = re.sub(r"[_\-\/:]+", " ", s)
@@ -4875,10 +4917,12 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             has_s1 = bool(re.search(r"\bstage\s*1\b", s))
             has_s2 = bool(re.search(r"\bstage\s*2\b", s))
             asks_sites = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b", s))
-            if (has_s1 or has_s2) and not sf:
+            # If query asks for nearest/closest, skip deterministic handler → let Gemini use nearest_filtered_sites tool
+            _has_nearest = bool(re.search(r"\bnearest\b|\bclosest\b|\bnear\b|\bcerca\b|\bpróximo[s]?\b|\bproximite\b|\bvicino\b|\bnähe\b|\bnahe\b", s))
+            if (has_s1 or has_s2) and not _has_nearest and not sf:
                 return {"answer": "<p>⚠️ Stage 1/2 patient data is stored in Salesforce and requires an active session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
-            if (has_s1 or has_s2) and asks_sites and sf:
+            if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest:
                 stage_cond_parts = []
                 if has_s1:
                     stage_cond_parts.append("C_Number_of_Stage1_Individuals_followed__c > 0")
@@ -4940,17 +4984,27 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 # Step 1: find account IDs from local DB (site_qual)
                 ph_conds = []
                 ph_params: dict = {}
-                # Extract country filter from last_filters (multi-turn context)
+                # Extract country filter: first from query text, then from last_filters (multi-turn context)
                 _lf_country = None
+                # Try to extract country from the query text directly (e.g. "in France with pharmacy")
                 try:
-                    _lf = getattr(payload, 'last_filters', None)
-                    if _lf and isinstance(_lf.get("rules"), list):
-                        for _r in _lf["rules"]:
-                            if str(_r.get("field","")).lower() in ("site.country", "sf.account.shippingcountry") and _r.get("value"):
-                                _lf_country = str(_r["value"])
-                                break
+                    for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
+                        if _cn in s:
+                            _lf_country = _COUNTRY_MAP[_cn][0]  # full SF name
+                            break
                 except Exception:
                     pass
+                # Fall back to last_filters if no country found in text
+                if not _lf_country:
+                    try:
+                        _lf = getattr(payload, 'last_filters', None)
+                        if _lf and isinstance(_lf.get("rules"), list):
+                            for _r in _lf["rules"]:
+                                if str(_r.get("field","")).lower() in ("site.country", "sf.account.shippingcountry") and _r.get("value"):
+                                    _lf_country = str(_r["value"])
+                                    break
+                    except Exception:
+                        pass
                 if _lf_country:
                     ph_conds.append("LOWER(s.country) = :lf_country")
                     ph_params["lf_country"] = _lf_country.lower()
@@ -5057,47 +5111,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
         # INTENCIÓN DIRECTA: "sites in [country]" → direct SF query or DB fallback (no internal HTTP)
         try:
-            # Maps user query alias → (SF full country name, ISO2 code)
-            # SF ShippingCountry stores full names ("Spain"), local sites.country stores ISO2 ("ES")
-            _COUNTRY_MAP = {
-                "united kingdom": ("United Kingdom", "GB"), "great britain": ("United Kingdom", "GB"),
-                "britain": ("United Kingdom", "GB"), "uk": ("United Kingdom", "GB"),
-                "czech republic": ("Czech Republic", "CZ"), "czechia": ("Czech Republic", "CZ"),
-                "spain": ("Spain", "ES"), "españa": ("Spain", "ES"), "espagne": ("Spain", "ES"),
-                "germany": ("Germany", "DE"), "deutschland": ("Germany", "DE"), "allemagne": ("Germany", "DE"),
-                "france": ("France", "FR"), "frankreich": ("France", "FR"),
-                "italy": ("Italy", "IT"), "italia": ("Italy", "IT"), "italie": ("Italy", "IT"),
-                "netherlands": ("Netherlands", "NL"), "holland": ("Netherlands", "NL"),
-                "belgium": ("Belgium", "BE"), "belgique": ("Belgium", "BE"), "bélgica": ("Belgium", "BE"),
-                "austria": ("Austria", "AT"),
-                "switzerland": ("Switzerland", "CH"), "suiza": ("Switzerland", "CH"), "suisse": ("Switzerland", "CH"),
-                "denmark": ("Denmark", "DK"), "dinamarca": ("Denmark", "DK"),
-                "sweden": ("Sweden", "SE"), "suecia": ("Sweden", "SE"),
-                "norway": ("Norway", "NO"), "noruega": ("Norway", "NO"),
-                "finland": ("Finland", "FI"), "finlandia": ("Finland", "FI"),
-                "portugal": ("Portugal", "PT"),
-                "poland": ("Poland", "PL"), "polonia": ("Poland", "PL"),
-                "slovenia": ("Slovenia", "SI"), "eslovenia": ("Slovenia", "SI"),
-                "croatia": ("Croatia", "HR"), "croacia": ("Croatia", "HR"),
-                "romania": ("Romania", "RO"), "rumania": ("Romania", "RO"),
-                "hungary": ("Hungary", "HU"), "hungría": ("Hungary", "HU"),
-                "greece": ("Greece", "GR"), "grecia": ("Greece", "GR"),
-                "israel": ("Israel", "IL"),
-                "estonia": ("Estonia", "EE"),
-                "ireland": ("Ireland", "IE"), "irlanda": ("Ireland", "IE"),
-                "bulgaria": ("Bulgaria", "BG"),
-                "slovakia": ("Slovakia", "SK"), "eslovaquia": ("Slovakia", "SK"),
-                "serbia": ("Serbia", "RS"),
-                "luxembourg": ("Luxembourg", "LU"),
-                "cyprus": ("Cyprus", "CY"),
-                "malta": ("Malta", "MT"),
-                "latvia": ("Latvia", "LV"), "letonia": ("Latvia", "LV"),
-                "lithuania": ("Lithuania", "LT"), "lituania": ("Lithuania", "LT"),
-                "turkey": ("Turkey", "TR"), "turquía": ("Turkey", "TR"),
-                "united states": ("United States", "US"), "usa": ("United States", "US"), "us": ("United States", "US"),
-                "canada": ("Canada", "CA"),
-                "australia": ("Australia", "AU"),
-            }
+            # _COUNTRY_MAP is defined at module level (see top of file)
             asks_country_sites = bool(re.search(
                 r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
             ))
