@@ -4859,73 +4859,153 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner activities failed: %s", _e)
 
-        # INTENCIÓN DIRECTA: Stage 1/2 site list → explorer_search (deterministic, avoids LLM non-determinism)
+        # INTENCIÓN DIRECTA: Stage 1/2 site list → direct SF query (no internal HTTP)
         try:
             has_s1 = bool(re.search(r"\bstage\s*1\b", s))
             has_s2 = bool(re.search(r"\bstage\s*2\b", s))
             asks_sites = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b", s))
-            if (has_s1 or has_s2) and asks_sites:
-                # Build OR filter for Stage1/Stage2 > 0
-                s12_rules = []
+            if (has_s1 or has_s2) and asks_sites and sf:
+                stage_cond_parts = []
                 if has_s1:
-                    s12_rules.append({"field": "sf.C_Number_of_Stage1_Individuals_followed__c", "operator": ">", "value": 0})
+                    stage_cond_parts.append("C_Number_of_Stage1_Individuals_followed__c > 0")
                 if has_s2:
-                    s12_rules.append({"field": "sf.C_Number_of_Stage2_Individuals_followed__c", "operator": ">", "value": 0})
-                _s12_out = tool_explorer_search(
-                    request,
-                    filters={"logic": "OR", "rules": s12_rules},
-                    columns=[
-                        "sf.C_Number_of_Stage1_Individuals_followed__c",
-                        "sf.C_Number_of_Stage2_Individuals_followed__c",
-                    ],
+                    stage_cond_parts.append("C_Number_of_Stage2_Individuals_followed__c > 0")
+                stage_cond = " OR ".join(stage_cond_parts)
+                soql_s12 = (
+                    "SELECT Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity, "
+                    "C_Number_of_Stage1_Individuals_followed__c, C_Number_of_Stage2_Individuals_followed__c "
+                    "FROM Opportunity "
+                    "WHERE Account.RecordType.DeveloperName='SubAccount' "
+                    "AND Account.C_Type__c='Clinical' "
+                    f"AND ({stage_cond}) "
+                    "ORDER BY C_Number_of_Stage1_Individuals_followed__c DESC NULLS LAST "
+                    "LIMIT 200"
                 )
-                rows12 = _s12_out.get("rows") or []
-                if rows12:
-                    tbl12 = _normalize_table_for_ui({"columns": _s12_out.get("columns") or [], "rows": rows12})
-                    n1 = sum(1 for r in rows12 if r.get("data",{}).get("sf.C_Number_of_Stage1_Individuals_followed__c",0) or 0)
-                    n2 = sum(1 for r in rows12 if r.get("data",{}).get("sf.C_Number_of_Stage2_Individuals_followed__c",0) or 0)
+                raw_s12 = tool_salesforce_query(sf, soql_s12)
+                recs_s12 = raw_s12.get("records", []) if isinstance(raw_s12, dict) else []
+                if recs_s12:
+                    rows_s12 = []
+                    for r in recs_s12:
+                        acc = r.get("Account") or {}
+                        rows_s12.append({
+                            "account_id": acc.get("Id") or r.get("AccountId",""),
+                            "account_name": acc.get("Name",""),
+                            "country": acc.get("ShippingCountry",""),
+                            "city": acc.get("ShippingCity",""),
+                            "sf.C_Number_of_Stage1_Individuals_followed__c": r.get("C_Number_of_Stage1_Individuals_followed__c"),
+                            "sf.C_Number_of_Stage2_Individuals_followed__c": r.get("C_Number_of_Stage2_Individuals_followed__c"),
+                        })
+                    cols_s12 = [
+                        {"key":"account_name","label":"Site"},
+                        {"key":"country","label":"Country"},
+                        {"key":"city","label":"City"},
+                        {"key":"sf.C_Number_of_Stage1_Individuals_followed__c","label":"Stage 1"},
+                        {"key":"sf.C_Number_of_Stage2_Individuals_followed__c","label":"Stage 2"},
+                    ]
+                    tbl12 = _normalize_table_for_ui({"columns": cols_s12, "rows": rows_s12})
+                    n1 = sum(1 for r in rows_s12 if (r.get("sf.C_Number_of_Stage1_Individuals_followed__c") or 0) > 0)
+                    n2 = sum(1 for r in rows_s12 if (r.get("sf.C_Number_of_Stage2_Individuals_followed__c") or 0) > 0)
                     label = "Stage 1" if (has_s1 and not has_s2) else ("Stage 2" if (has_s2 and not has_s1) else "Stage 1 or Stage 2")
-                    _dbg("Planner Stage1/2 deterministic: %d sites found", len(rows12))
+                    _dbg("Planner Stage1/2 deterministic (SF query): %d sites found", len(rows_s12))
                     return {
-                        "answer": f"<p>Found <strong>{len(rows12)}</strong> sites with {label} individuals followed "
+                        "answer": f"<p>Found <strong>{len(rows_s12)}</strong> sites with {label} individuals followed "
                                   f"({n1} with Stage 1, {n2} with Stage 2).</p>",
                         "table": tbl12,
                     }
         except Exception as _e:
             _dbg("WARN: planner stage1/2 failed: %s", _e)
 
-        # INTENCIÓN DIRECTA: pharmacy + overnight stay (qual filters) → explorer_search
+        # INTENCIÓN DIRECTA: pharmacy + overnight stay → direct DB + SF query (no internal HTTP)
         try:
             has_pharmacy = bool(re.search(r"\bpharmac", s))
             has_overnight = bool(re.search(r"\bovernight\b", s))
             asks_sites2 = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b|show\b|find\b|list\b", s))
             if (has_pharmacy or has_overnight) and asks_sites2:
-                ph_rules = []
+                # Step 1: find account IDs from local DB (site_qual)
+                ph_conds = []
+                ph_params: dict = {}
                 if has_pharmacy:
-                    ph_rules.append({"field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus", "operator": "equals", "value": "On-site"})
+                    # Match 'On-site' in pharmacy field (various key formats: prefixed and bare)
+                    ph_conds.append(
+                        "(COALESCE("
+                        " sq.data->>'3_6__is_your_pharmacy_on_site_or_off_campus',"
+                        " sq.data->>'3.6__is_your_pharmacy_on_site_or_off_campus',"
+                        " sq.data->>'is_your_pharmacy_on_site_or_off_campus',"
+                        " '') ILIKE '%On-site%')"
+                    )
                 if has_overnight:
-                    ph_rules.append({"field": "qual.3_5_2__overnight_stay", "operator": "equals", "value": "Yes"})
-                logic_ph = "AND" if (has_pharmacy and has_overnight) else "AND"
-                _ph_out = tool_explorer_search(
-                    request,
-                    filters={"logic": logic_ph, "rules": ph_rules},
-                    columns=[
-                        "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
-                        "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
-                        "sf.C_Number_of_T1D_Patients_currently_O_18__c",
-                        "sf.C_Number_of_T1D_Patients_currently_U_18__c",
-                        "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
-                        "qual.3_5_2__overnight_stay",
-                    ],
+                    ph_conds.append(
+                        "(COALESCE("
+                        " sq.data->>'3_5_2__overnight_stay',"
+                        " sq.data->>'3.5.2__overnight_stay',"
+                        " sq.data->>'overnight_stay',"
+                        " '') = 'Yes')"
+                    )
+                db_q = text(
+                    "SELECT s.salesforce_account_id, s.name, s.city, s.country, "
+                    "COALESCE(sq.data->>'3_6__is_your_pharmacy_on_site_or_off_campus',"
+                    "  sq.data->>'3.6__is_your_pharmacy_on_site_or_off_campus',"
+                    "  sq.data->>'is_your_pharmacy_on_site_or_off_campus') AS pharm, "
+                    "COALESCE(sq.data->>'3_5_2__overnight_stay',"
+                    "  sq.data->>'3.5.2__overnight_stay',"
+                    "  sq.data->>'overnight_stay') AS overnight "
+                    "FROM public.sites s JOIN public.site_qual sq ON sq.site_id = s.id "
+                    f"WHERE {' AND '.join(ph_conds)}"
                 )
-                rows_ph = _ph_out.get("rows") or []
-                if rows_ph:
-                    tbl_ph = _normalize_table_for_ui({"columns": _ph_out.get("columns") or [], "rows": rows_ph})
+                db_result = db.execute(db_q)
+                db_rows = db_result.fetchall()
+                if db_rows:
+                    acc_ids_ph = [row[0] for row in db_rows if row[0]]
+                    site_meta = {row[0]: {"name": row[1], "city": row[2], "country": row[3],
+                                          "pharm": row[4], "overnight": row[5]} for row in db_rows if row[0]}
+                    # Step 2: get SF patient metrics for these accounts
+                    ids_in = ", ".join([f"'{aid}'" for aid in acc_ids_ph])
+                    soql_ph = (
+                        "SELECT Account.Id, "
+                        "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
+                        "C_Number_of_T1D_Patients_currently_O_18__c, C_Number_of_T1D_Patients_currently_U_18__c "
+                        f"FROM Opportunity WHERE AccountId IN ({ids_in})"
+                    )
+                    sf_ph_data: dict = {}
+                    if sf:
+                        raw_ph = tool_salesforce_query(sf, soql_ph)
+                        for r in (raw_ph.get("records", []) if isinstance(raw_ph, dict) else []):
+                            acc_id = (r.get("Account") or {}).get("Id") or r.get("AccountId")
+                            if acc_id:
+                                sf_ph_data[acc_id] = r
+                    rows_ph = []
+                    for aid in acc_ids_ph:
+                        meta = site_meta.get(aid, {})
+                        sfr = sf_ph_data.get(aid, {})
+                        rows_ph.append({
+                            "account_id": aid,
+                            "account_name": meta.get("name",""),
+                            "country": meta.get("country",""),
+                            "city": meta.get("city",""),
+                            "qual.3_6__is_your_pharmacy_on_site_or_off_campus": meta.get("pharm",""),
+                            "qual.3_5_2__overnight_stay": meta.get("overnight",""),
+                            "sf.C_Number_of_new_T1D_diagnosed_O_18__c": sfr.get("C_Number_of_new_T1D_diagnosed_O_18__c"),
+                            "sf.C_Number_of_new_T1D_diagnosed_U_18__c": sfr.get("C_Number_of_new_T1D_diagnosed_U_18__c"),
+                            "sf.C_Number_of_T1D_Patients_currently_O_18__c": sfr.get("C_Number_of_T1D_Patients_currently_O_18__c"),
+                            "sf.C_Number_of_T1D_Patients_currently_U_18__c": sfr.get("C_Number_of_T1D_Patients_currently_U_18__c"),
+                        })
+                    cols_ph = [
+                        {"key":"account_name","label":"Site"},
+                        {"key":"country","label":"Country"},
+                        {"key":"city","label":"City"},
+                        {"key":"sf.C_Number_of_new_T1D_diagnosed_O_18__c","label":"ND ≥18"},
+                        {"key":"sf.C_Number_of_new_T1D_diagnosed_U_18__c","label":"ND <18"},
+                        {"key":"sf.C_Number_of_T1D_Patients_currently_O_18__c","label":"T1D ≥18"},
+                        {"key":"sf.C_Number_of_T1D_Patients_currently_U_18__c","label":"T1D <18"},
+                        {"key":"qual.3_6__is_your_pharmacy_on_site_or_off_campus","label":"Pharmacy"},
+                        {"key":"qual.3_5_2__overnight_stay","label":"Overnight"},
+                    ]
+                    tbl_ph = _normalize_table_for_ui({"columns": cols_ph, "rows": rows_ph})
                     cond_txt = " and ".join(filter(None, [
                         "onsite pharmacy" if has_pharmacy else "",
                         "overnight stay" if has_overnight else "",
                     ]))
-                    _dbg("Planner pharmacy/overnight deterministic: %d sites found", len(rows_ph))
+                    _dbg("Planner pharmacy/overnight deterministic (DB+SF): %d sites found", len(rows_ph))
                     return {
                         "answer": f"<p>Found <strong>{len(rows_ph)}</strong> site(s) with {cond_txt}.</p>",
                         "table": tbl_ph,
