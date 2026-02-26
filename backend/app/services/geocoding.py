@@ -1,7 +1,7 @@
 import os, requests
 from typing import Optional, Tuple
 
-API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+API_KEY = os.getenv("GOOGLE_MAPS_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 _ISO2 = {
     # 🇪🇸 Southwestern Europe

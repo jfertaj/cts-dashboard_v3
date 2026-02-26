@@ -43,13 +43,13 @@ FIELDS_PATH = Path(__file__).parent.parent / "config" / "fields_opportunity_cura
 with open(FIELDS_PATH, encoding="utf-8") as f:
     FIELD_CONFIG: List[Dict[str, Any]] = json.load(f)
 
-# Mapa de tipos por clave sin prefijo "sf."
-TYPE_BY_KEY: Dict[str, str] = { f["key"].replace("sf.", ""): (f.get("type") or "string") for f in FIELD_CONFIG }
+# Mapa de tipos por clave sin prefijo "sf." (skip comment-only entries)
+TYPE_BY_KEY: Dict[str, str] = { f["key"].replace("sf.", ""): (f.get("type") or "string") for f in FIELD_CONFIG if "key" in f }
 
 CURATED_ALLOWED: Set[str] = {
     f["key"].replace("sf.", "")
     for f in FIELD_CONFIG
-    if f.get("source") == "sf"
+    if "key" in f and f.get("source") == "sf"
 }
 
 MIN_ALLOWED: Set[str] = {

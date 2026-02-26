@@ -595,6 +595,11 @@ export default function ChatView() {
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
+    // Prevent the table-restore useEffect from appending the previous session's
+    // table while this new query is being processed. Also clear the saved table
+    // so it doesn't get restored again if the new query returns the same data.
+    restoredTableRef.current = true;
+    try { sessionStorage.removeItem(TABLE_KEY); } catch {}
     setMessages((m) => [...m, { role: "user", content: text }]);
     setLastUserQ(text);
     setInput("");
@@ -616,33 +621,6 @@ export default function ChatView() {
           role: "assistant",
           content: `⚠️ Error contacting Moby: ${e?.message || "Unknown error"}`,
         },
-      ]);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // ---- Quick templates ----
-  const TEMPLATES: Array<{ label: string; prompt: string }> = [
-    { label: "Search comments: power outage plan", prompt: 'Search qualification comments for: "power outage plan"' },
-    { label: "Time series: Amount (quarter, 8)", prompt: "Time series (quarter) of Opportunity Amount last 8 quarters" },
-    { label: "Top 3 by Stage2 per country", prompt: "Top 3 sites per country by Stage 2" },
-    { label: "% with HLA typing per country", prompt: "% of sites per country with HLA typing" },
-    { label: "Top 5 sites with most patients", prompt: "Show me the top 5 sites with most patients per year" },
-  ];
-
-  const runTemplate = async (text: string) => {
-    if (busy) return;
-    setMessages((m) => [...m, { role: "user", content: text }]);
-    setLastUserQ(text);
-    setBusy(true);
-    try {
-      const resp: ChatResponse = await askAI(text, lastTableForAI, lastFiltersForAI);
-      handleArtifacts(resp);
-    } catch (e: any) {
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: `⚠️ Error contacting Moby: ${e?.message || "Unknown error"}` },
       ]);
     } finally {
       setBusy(false);
@@ -1073,21 +1051,8 @@ export default function ChatView() {
           {busy && <div className="text-sm text-gray-500">Moby is thinking…</div>}
         </div>
 
-        {/* Quick templates */}
+        {/* Input area */}
         <div className="border-t bg-gray-50 p-3">
-          <div className="mb-2 flex flex-wrap gap-2">
-            {TEMPLATES.map((t, i) => (
-              <button
-                key={i}
-                className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-white"
-                title={t.prompt}
-                onClick={() => void runTemplate(t.prompt)}
-                disabled={busy}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
           <div className="flex items-center gap-2">
             <input
               className="flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-[#0072CE] bg-white"

@@ -924,7 +924,7 @@ def tool_explorer_within_drive_km(
     """
     Proxy interno al endpoint /api/explorer/search/within-drive-km, preservando sesión/cookies.
     """
-    url = str(request.base_url).rstrip("/") + EXPLORER_DRIVE_KM_PATH
+    url = f"http://127.0.0.1:8000{EXPLORER_DRIVE_KM_PATH}"
     payload = {
         "base_account_id": base_account_id,
         "max_km": max_km,
@@ -960,7 +960,7 @@ def tool_explorer_search(
     Proxy interno al endpoint /api/explorer/search.
     Acepta FilterGroup con reglas qual.*, sf.* y site.* y devuelve una tabla unificada.
     """
-    url = str(request.base_url).rstrip("/") + EXPLORER_SEARCH_PATH
+    url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
     # Columnas por defecto si no se especifican
     default_cols = [
         "sf.Account.Id", "sf.Account.Name",
@@ -1008,6 +1008,192 @@ def tool_explorer_search(
         "columns": cols,
         "rows": flat_rows[:300],
         "meta": {"total": len(rows)},
+    }
+
+
+def tool_nearest_filtered_sites(
+    request: Request,
+    location: str,
+    filters: Optional[Dict[str, Any]] = None,
+    top_n: int = 10,
+    max_km: float = 1000,
+    db: Optional[Any] = None,
+) -> dict:
+    """
+    Find the nearest clinical sites to a city/address, optionally filtered by qual.* and sf.* fields.
+    Returns sites sorted by straight-line (Haversine) distance in km.
+
+    Fast path (no filters): queries local Site table directly — no Salesforce API call needed.
+    Filtered path: calls /api/explorer/search internally (requires valid session cookie).
+    """
+    import math
+    from app.models.site import Site as SiteModel
+
+    # 1. Geocode location via Google Geocoding API
+    google_key = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+    region = os.environ.get("GOOGLE_REGION_BIAS", "")
+    geo_lat, geo_lon, formatted = None, None, location
+    if google_key:
+        try:
+            with httpx.Client(timeout=10.0) as gcli:
+                gr = gcli.get(
+                    "https://maps.googleapis.com/maps/api/geocode/json",
+                    params={"address": location, "key": google_key, "region": region},
+                )
+                gj = gr.json()
+                if gj.get("results"):
+                    loc = gj["results"][0]["geometry"]["location"]
+                    geo_lat, geo_lon = float(loc["lat"]), float(loc["lng"])
+                    formatted = gj["results"][0].get("formatted_address", location)
+        except Exception as e:
+            _dbg("WARN: geocode failed: %s", e)
+    if geo_lat is None:
+        return {"error": f"Could not geocode '{location}'."}
+
+    # 2. Haversine distance helper
+    def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6371.0
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        )
+        return round(R * 2 * math.asin(math.sqrt(max(0.0, a))), 1)
+
+    has_filters = bool(filters and filters.get("rules"))
+    n_total_sites = 0  # set by whichever path runs, for diagnostics
+    n_no_coords = 0
+
+    # 3a. Fast path: no filters → query local Site table + explorer geocache (no Salesforce API call)
+    if not has_filters and db is not None:
+        _dbg("NEAREST: fast-path via local DB + geocache (no filters)")
+        # Lazy-import geocache + country normalizer from explorer (already loaded in memory, no overhead)
+        _geo_cache_get_fn = None
+        _country_norm_fn = None
+        try:
+            from app.routers.salesforce_explorer import _geo_cache_get as _geo_cache_get_fn  # noqa: F401
+            from app.routers.salesforce_explorer import _country_norm as _country_norm_fn  # noqa: F401
+        except Exception as _imp_err:
+            _dbg("NEAREST: could not import geocache helpers: %s", _imp_err)
+
+        sites_q = db.query(
+            SiteModel.salesforce_account_id,
+            SiteModel.name,
+            SiteModel.city,
+            SiteModel.country,
+            SiteModel.latitude,
+            SiteModel.longitude,
+        ).filter(
+            SiteModel.salesforce_account_id.isnot(None),
+        ).all()
+
+        enriched = []
+        n_db_coords = 0
+        n_cache_coords = 0
+        n_no_coords = 0
+        for s in sites_q:
+            lat, lng = s.latitude, s.longitude
+            if lat is None or lng is None:
+                # Fallback: look up explorer's in-memory geocache (city|country key)
+                if _geo_cache_get_fn is not None:
+                    # Try as-is first, then with normalized country (e.g. "Spain" → "ES")
+                    cached = _geo_cache_get_fn(s.city, s.country)
+                    if not cached and _country_norm_fn is not None and s.country:
+                        cached = _geo_cache_get_fn(s.city, _country_norm_fn(s.country))
+                    if cached:
+                        lat, lng = cached
+                        n_cache_coords += 1
+                    else:
+                        n_no_coords += 1
+                else:
+                    n_no_coords += 1
+            else:
+                n_db_coords += 1
+            if lat is None or lng is None:
+                continue
+            dist = haversine_km(geo_lat, geo_lon, float(lat), float(lng))
+            if dist <= max_km:
+                enriched.append({
+                    "account_id": s.salesforce_account_id,
+                    "account_name": s.name or "",
+                    "country": s.country or "",
+                    "city": s.city or "",
+                    "distance_km": dist,
+                })
+        n_total_sites = len(sites_q)
+        _dbg(
+            "NEAREST: fast-path: %d total sites, db_coords=%d cache_coords=%d no_coords=%d within_%skm=%d",
+            n_total_sites, n_db_coords, n_cache_coords, n_no_coords, int(max_km), len(enriched),
+        )
+
+    # 3b. Filtered path: call /api/explorer/search (requires session cookie)
+    else:
+        _dbg("NEAREST: filtered-path via internal HTTP (filters=%s)", bool(has_filters))
+        url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
+        headers = {}
+        if request:
+            ck = request.headers.get("cookie")
+            if ck:
+                headers["cookie"] = ck
+            auth = request.headers.get("authorization")
+            if auth:
+                headers["authorization"] = auth
+        with httpx.Client(timeout=90.0) as cli:
+            resp = cli.post(
+                url,
+                json={"filters": filters or {"logic": "AND", "rules": []}, "columns": []},
+                headers=headers,
+            )
+        _dbg("NEAREST: explorer/search status=%d", resp.status_code)
+        if resp.status_code >= 400:
+            raise HTTPException(resp.status_code, f"explorer_search failed: {resp.text[:300]}")
+        resp_json = resp.json()
+        points = resp_json.get("points") or []
+        point_coords: Dict[str, tuple] = {
+            p["account_id"]: (float(p["lat"]), float(p["lng"]))
+            for p in points
+            if p.get("account_id") and p.get("lat") and p.get("lng")
+        }
+        enriched = []
+        for row in resp_json.get("rows") or []:
+            aid = row.get("account_id", "")
+            if aid not in point_coords:
+                continue
+            lat, lng = point_coords[aid]
+            dist = haversine_km(geo_lat, geo_lon, lat, lng)
+            if dist > max_km:
+                continue
+            flat: Dict[str, Any] = {
+                "account_id": aid,
+                "account_name": row.get("account_name", ""),
+                "country": row.get("country", ""),
+                "city": row.get("city", ""),
+                "distance_km": dist,
+            }
+            data = row.get("data") or {}
+            flat.update(data)
+            enriched.append(flat)
+
+    enriched.sort(key=lambda r: r["distance_km"])
+    enriched = enriched[: min(top_n, 50)]
+
+    columns = [
+        {"key": "distance_km", "label": f"Distance from {formatted} (km)"},
+        {"key": "account_name", "label": "Site"},
+        {"key": "country", "label": "Country"},
+        {"key": "city", "label": "City"},
+    ]
+    return {
+        "columns": columns,
+        "rows": enriched,
+        "meta": {
+            "total": len(enriched),
+            "geocoded": formatted,
+            "note": "Straight-line distances (km). Use Explorer nearby for driving distance.",
+            "no_site_coords": n_no_coords,   # >0 means some sites had no geocoords (DB + cache both missed)
+            "n_total_sites": n_total_sites,
+        },
     }
 
 
@@ -3130,14 +3316,20 @@ TOOLS_SPEC = [
         "function": {
             "name": "explorer_search",
             "description": (
-                "Search clinical trial sites using a combined FilterGroup that can mix qual.*, sf.* and site.* fields in one call. "
-                "Use this tool when the query requires filtering on BOTH qualification checklist fields (qual.*) AND Salesforce fields (sf.*) simultaneously. "
-                "Examples: 'sites with on-site pharmacy AND >50 ND patients ≥18', 'sites with overnight stay AND Stage2>10 in Spain'. "
-                "The filter format is a nested AND/OR group. Operators: equals, not_equals, >, >=, <, <=, contains, in, not_in, is_empty, is_not_empty, between. "
-                "qual.* field keys use the format 'qual.<section_key>' (e.g. 'qual.3_6__is_your_pharmacy_on_site_or_off_campus'). "
-                "sf.* field keys use 'sf.<SalesforceField>' (e.g. 'sf.C_Number_of_ND_Patients_O_18__c'). "
-                "site.* field keys: 'site.country', 'site.city'. "
-                "After getting results you can call render_chart to visualize them."
+                "Search clinical trial sites using a FilterGroup (qual.*, sf.* and site.* fields). "
+                "Use for ANY site query that involves filtering by country, city, qual checklist fields, SF metrics, or combinations. "
+                "CRITICAL: ALWAYS express every filter as a rule — NEVER pass an empty filters object. "
+                "Country filter: {field:'site.country', operator:'equals', value:'Spain'}. "
+                "City filter: {field:'site.city', operator:'equals', value:'Barcelona'}. "
+                "Examples: "
+                "'sites in Spain' → filters={logic:'AND',rules:[{field:'site.country',operator:'equals',value:'Spain'}]}. "
+                "'sites in Germany and Italy' → filters={logic:'OR',rules:[{field:'site.country',operator:'equals',value:'Germany'},{field:'site.country',operator:'equals',value:'Italy'}]}. "
+                "'sites with pharmacy AND ND>50' → filters={logic:'AND',rules:[{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus',operator:'equals',value:'On-site'},{field:'sf.C_Number_of_new_T1D_diagnosed_O_18__c',operator:'>',value:50}]}. "
+                "Operators: equals, not_equals, >, >=, <, <=, contains, in, not_in, is_empty, is_not_empty, between. "
+                "qual.* keys: 'qual.<section_key>' (e.g. 'qual.3_6__is_your_pharmacy_on_site_or_off_campus'). "
+                "sf.* keys: 'sf.<ApiName>' (e.g. 'sf.C_Number_of_new_T1D_diagnosed_O_18__c'). "
+                "site.* keys: 'site.country', 'site.city'. "
+                "After results you can call render_chart to visualize them."
             ),
             "parameters": {
                 "type": "object",
@@ -3176,6 +3368,43 @@ TOOLS_SPEC = [
                     "filters":{"type":"object"},
                     "columns":{"type":"array","items":{"type":"string"}}
                 }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nearest_filtered_sites",
+            "description": (
+                "Find nearest clinical sites to a city/address, optionally filtered by qual.* and sf.* fields. "
+                "Returns sites sorted by straight-line distance (km). "
+                "Use when user asks for 'nearest sites to X', 'closest to X', 'centers near X', 'sites within N km of X with Y'. "
+                "Do NOT use explorer_within_drive_km for location-name queries — that tool requires a Salesforce Account ID. "
+                "Use this tool when the origin is a city name, address, or landmark."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "Reference city/address/landmark, e.g. 'Barcelona', 'Berlin, Germany', 'San Raffaele Hospital Milan'"
+                    },
+                    "filters": {
+                        "type": "object",
+                        "description": "Optional FilterGroup {logic:'AND'|'OR', rules:[...]} — same format as explorer_search. Use for qual.* and sf.* field filters."
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "How many nearest sites to return (default 10, max 50)",
+                        "default": 10
+                    },
+                    "max_km": {
+                        "type": "number",
+                        "description": "Maximum straight-line radius in km (default 1000)",
+                        "default": 1000
+                    }
+                },
+                "required": ["location"]
             }
         }
     },
@@ -3611,10 +3840,17 @@ FORMAT RULES (CRITICAL - follow exactly)
 
 OUTPUT SHAPE
 1) **answer**: 2–4 numbered bullets summarizing the result.
-2) **table**: {{ "columns":[{{"key":"...","label":"..."}},...], "rows":[{{...}},...] }}
+2) **table**: {{ “columns”:[{{“key”:”...”,”label”:”...”}},...], “rows”:[{{...}},...] }}
    - Use raw numeric values (no thousand separators).
-3) **visualization** (optional): {{ "type":"bar|line|pie|scatter","xKey":"...","yKeys":["..."],"data":[...], "meta":{{"title":"..."}} }}
+3) **visualization** (optional): {{ “type”:”bar|line|pie|scatter”,”xKey”:”...”,”yKeys”:[“...”],”data”:[...], “meta”:{{“title”:”...”}} }}
 4) **explorer_set_filters** when asked to “filter/show on the map”.
+
+EXPLORER INTEGRATION
+Every table rendered in chat has an “🎯 Open in Explorer (filter)” button below it.
+When user says “show on the map”, “show in explorer”, “ver en el mapa”, “muéstramelo en el mapa”, “open in map”:
+→ Reply: “Click **🎯 Open in Explorer (filter)** below the table to view these sites on the interactive map and table.”
+Do NOT try to render the map yourself — the button handles navigation automatically.
+After nearest_filtered_sites results appear, remind the user they can click 🎯 to view those sites on the map.
 
 DRIVE-KM ANSWERS
 - When you use explorer_within_drive_km:
@@ -3662,9 +3898,15 @@ QUERY ROUTING EXAMPLES (critical - follow these patterns exactly):
 • "Ongoing clinical trials" / "Phase I/II/III trials" → salesforce_query: Check fields C_Phase_I_Type1__c, C_Phase_II_Type1__c, C_Phase_III_Type1__c (counts) or C_List_of_trial_name_or_sponsors_Type1__c (names).
 • NEVER use site_qual for HLA typing or Clinical Trials unless asking for 'interest in conducting' checklists.
 
-**BLOCK 5: Stage 1/2 and screening (Salesforce)**
-• "Stage 2 individuals" / "Top sites by Stage 2" → salesforce_query: C_Number_of_Stage2_Individuals_followed__c from Opportunity
-• "Average Stage 2 per country" → salesforce_query with GROUP BY Account.ShippingCountry
+**BLOCK 5: Stage 1/2 and screening**
+• "Sites with Stage 1 or Stage 2 individuals" / "sites in a screening program" / "show Stage 1/2 sites" / "sites following Stage 1 or 2 patients"
+  → explorer_search(filters={{logic:'OR', rules:[
+      {{field:'sf.C_Number_of_Stage1_Individuals_followed__c', operator:'>', value:0}},
+      {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:0}}
+    ]}})
+  NOTE: Stage 1/2 fields live on Account (NOT Opportunity): C_Number_of_Stage1_Individuals_followed__c, C_Number_of_Stage2_Individuals_followed__c
+• "Top sites by Stage 2" → rank_sites(metric='Stage 2', top_n=10)
+• "Average Stage 2 per country" → salesforce_query: SELECT Account.ShippingCountry, AVG(C_Number_of_Stage2_Individuals_followed__c) FROM Opportunity GROUP BY Account.ShippingCountry
 
 **BLOCK 6: Time series (Salesforce)**
 • "Opportunity amount by quarter/month" → time_series_sf(field='Amount', period='quarter'|'month', last_n=8)
@@ -3677,8 +3919,22 @@ QUERY ROUTING EXAMPLES (critical - follow these patterns exactly):
 • "Sites in Spain with HLA typing and >10 patients" → salesforce_query with WHERE Account.ShippingCountry='Spain' AND C_Is_HLA_typing_performed__c='Yes' AND (C_Number_of_T1D_Patients_currently_U_18__c + C_Number_of_T1D_Patients_currently_O_18__c) > 10
 
 **BLOCK 9: Combined qual + SF queries → USE explorer_search**
-Use `explorer_search` when the query mixes qualification checklist fields (qual.*) AND Salesforce metrics (sf.*) or site location (site.*).
+Use `explorer_search` when the query mixes qualification checklist fields (qual.*) AND/OR Salesforce metrics (sf.*) AND/OR site location (site.*).
 This tool calls the Explorer's filter engine which handles the JOIN internally — do NOT use sql_query + salesforce_query separately for these.
+
+COUNTRY/CITY FILTERS: Always add them as explicit rules — NEVER pass empty filters when a country or city is mentioned.
+• "Sites in Spain" / "show me all Spanish sites" / "all centers in Spain"
+  → explorer_search(filters={{logic:'AND', rules:[
+      {{field:'site.country', operator:'equals', value:'Spain'}}
+    ]}})
+• "Sites in Germany and Italy"
+  → explorer_search(filters={{logic:'OR', rules:[
+      {{field:'site.country', operator:'equals', value:'Germany'}},
+      {{field:'site.country', operator:'equals', value:'Italy'}}
+    ]}})
+• "Sites in Spain" (with no other filters) → still use explorer_search with the country rule, NOT empty filters.
+  WRONG: explorer_search(filters={{}})  ← NEVER do this when a country is mentioned
+  RIGHT: explorer_search(filters={{logic:'AND', rules:[{{field:'site.country', operator:'equals', value:'Spain'}}]}})
 
 • "Sites with on-site pharmacy AND ND patients ≥18 > 50"
   → explorer_search(filters={{logic:'AND', rules:[
@@ -3787,6 +4043,34 @@ EXAMPLES:
   → salesforce_query: SELECT Id, C_Opportunity_Name__r.Name FROM Assignment__c WHERE C_Account__r.Name LIKE '%[site]%' AND C_Opportunity_Name__r.Name LIKE '%Fabulinus%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity'
 
 TABLE COLUMNS for activity queries: Activity, Site, Country, City, Assignment Stage (C_Assignment_Stage__c)
+
+**BLOCK 12: Nearest sites to a location → nearest_filtered_sites**
+Use when user asks for sites near/close to a city, address, or reference point (with or without filters).
+Do NOT use explorer_within_drive_km for city-name queries — that requires a Salesforce Account ID.
+
+• "Nearest 5 sites to Barcelona"
+  → nearest_filtered_sites(location='Barcelona', top_n=5)
+
+• "Closest sites to Berlin with on-site pharmacy"
+  → nearest_filtered_sites(location='Berlin', filters={{logic:'AND', rules:[
+      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}}
+    ]}}, top_n=10)
+
+• "Sites within 300km of Paris with Stage2 > 5"
+  → nearest_filtered_sites(location='Paris', filters={{logic:'AND', rules:[
+      {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:5}}
+    ]}}, max_km=300)
+
+• "Centros más cercanos a Madrid con ND > 20"
+  → nearest_filtered_sites(location='Madrid', filters={{logic:'AND', rules:[
+      {{field:'sf.C_Number_of_new_T1D_diagnosed_O_18__c', operator:'>', value:20}}
+    ]}})
+
+• "Sites near San Raffaele Hospital"
+  → nearest_filtered_sites(location='San Raffaele Hospital Milan')
+
+NOTE: Distances are straight-line (Haversine), not driving. For driving distances from a known site, use explorer_within_drive_km.
+After results appear, remind user they can click 🎯 Open in Explorer to view on the interactive map.
 
 STYLE
 - Be direct and neutral. Fall back gracefully between SF and Postgres and mention it briefly in bullets.
@@ -4000,8 +4284,8 @@ def _gemini_chat(
         full_funcs = _convert_tools_to_gemini(TOOLS_SPEC)
         tools_arg = _validate_and_filter_tools(full_funcs)
 
-    # Prefer GOOGLE_MODEL (user env), then GEMINI_MODEL (legacy), default to available model gemini-3-pro-preview
-    model_name = os.environ.get("GOOGLE_MODEL", os.environ.get("GEMINI_MODEL", "gemini-3-pro-preview"))
+    # Prefer GOOGLE_MODEL (user env), then GEMINI_MODEL (legacy), default to gemini-3.1-pro-preview
+    model_name = os.environ.get("GOOGLE_MODEL", os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview"))
     model = None
     
     # Intento 1: Con herramientas
@@ -4577,7 +4861,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         
         # Detectar follow-ups de visualización (frases cortas con palabras clave)
         is_chart_followup = bool(
-            re.search(r"\b(chart|graph|bar|pie|line|visuali[sz]e|display|show|plot)\b", s) and
+            # "show" alone is NOT a chart follow-up — "show me sites in X" is a data query
+            re.search(r"\b(chart|graph|bar|pie|line|visuali[sz]e|display|plot)\b", s) and
             len(s.split()) < 15  # Frases cortas son follow-ups
         )
         # "show table" ya fue gestionado arriba; evita que caiga en follow-up genérico
@@ -5030,6 +5315,46 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         pass
 
     # ===== Determinista (genérico): within X km + filtros SF y/o site_qual =====
+
+    def _build_nearest_filters(text: str) -> Dict[str, Any]:
+        """Parse common filter rules from free text for nearest_filtered_sites."""
+        rules: list = []
+        s_low = text.lower()
+        # Stage 1/2 with optional comparator+value
+        has_stage1 = bool(re.search(r"\bstage\s*1\b", s_low))
+        has_stage2 = bool(re.search(r"\bstage\s*2\b", s_low))
+        for stage_n in ("1", "2"):
+            if not (has_stage1 if stage_n == "1" else has_stage2):
+                continue
+            m_sv = re.search(rf"\bstage\s*{stage_n}\b\s*(>=|<=|>|<)\s*(\d+)", s_low)
+            if m_sv:
+                rules.append({"field": f"sf.C_Number_of_Stage{stage_n}_Individuals_followed__c",
+                               "operator": m_sv.group(1), "value": int(m_sv.group(2))})
+            else:
+                rules.append({"field": f"sf.C_Number_of_Stage{stage_n}_Individuals_followed__c",
+                               "operator": ">", "value": 0})
+        # OR logic for stages if both are mentioned together
+        logic = "OR" if (has_stage1 and has_stage2 and not re.search(r"stage\s*1.{1,20}stage\s*2", s_low)) else "AND"
+        # ND / newly diagnosed
+        m_nd = re.search(r"\b(?:nd|newly[\s-]diagnosed)\b.{0,25}?(>=|<=|>|<)\s*(\d+)", s_low, re.I)
+        if m_nd:
+            rules.append({"field": "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+                           "operator": m_nd.group(1), "value": int(m_nd.group(2))})
+        elif re.search(r"\b(?:nd|newly[\s-]diagnosed)\b", s_low, re.I):
+            rules.append({"field": "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+                           "operator": ">", "value": 0})
+        # Pharmacy on-site
+        if re.search(r"\bpharmac", s_low):
+            rules.append({"field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+                           "operator": "equals", "value": "On-site"})
+        # Overnight stay
+        if re.search(r"\bovernight", s_low):
+            rules.append({"field": "qual.3_5_2__overnight_stay", "operator": "equals", "value": "Yes"})
+        # If mixing stage rules with other rules, outer logic must be AND
+        if (has_stage1 or has_stage2) and len(rules) > (1 + int(has_stage1) + int(has_stage2) - 1):
+            logic = "AND"
+        return {"logic": logic, "rules": rules}
+
     try:
         qtxt = (payload.messages[-1].content or "") if payload.messages else ""
         s = qtxt.lower()
@@ -5039,6 +5364,27 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if m_dist and m_city and sf:
             max_km = float(m_dist.group(1))
             city = m_city.group(1).strip().strip(". ")
+            # Try nearest_filtered_sites first (returns distance_km, more reliable)
+            try:
+                _filters_p1 = _build_nearest_filters(qtxt)
+                _out_p1 = tool_nearest_filtered_sites(
+                    request, location=city, filters=_filters_p1,
+                    max_km=max_km, top_n=50, db=db,
+                )
+                if not _out_p1.get("error") and _out_p1.get("rows"):
+                    _meta_p1 = _out_p1.get("meta") or {}
+                    _geo_p1 = _meta_p1.get("geocoded") or city
+                    _tbl_p1 = _normalize_table_for_ui({"columns": _out_p1.get("columns") or [], "rows": _out_p1.get("rows") or []})
+                    _note_p1 = _meta_p1.get("note", "")
+                    _ans_p1 = f"<p>Found <strong>{len(_tbl_p1['rows'])}</strong> site(s) within {int(max_km)} km of <strong>{_geo_p1}</strong> matching your filters.</p>"
+                    if _note_p1:
+                        _ans_p1 += f"<p><em>{_note_p1}</em></p>"
+                    return {"answer": _ans_p1, "table": _tbl_p1}
+                elif _out_p1.get("error"):
+                    _dbg("WARN: nearest_filtered_sites (pipeline1) error: %s", _out_p1["error"])
+                # 0 results → fall through to old drive-km pipeline
+            except Exception as _ne_p1:
+                _dbg("WARN: nearest_filtered_sites (pipeline1) failed: %s", _ne_p1)
             # 1) Base account in that city (clinical subaccounts, active)
             esc_city = _sf_escape_value(city)
             soql_city = (
@@ -5174,6 +5520,71 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 }
     except Exception as _e:
         _dbg("WARN: generic within-km pipeline failed: %s", _e)
+
+    # ===== Determinista: nearest/closest N sites to <city> =====
+    try:
+        qtxt2 = (payload.messages[-1].content or "") if payload.messages else ""
+        s2 = qtxt2.lower()
+        # Detect "nearest N sites to <city>" or "closest N sites to <city>" or "N nearest sites to <city>"
+        m_nearest = re.search(
+            r"\b(?:nearest|closest|cerca(?:no)?s?|m[aá]s\s+cerca(?:no)?s?)\b",
+            s2, re.I
+        )
+        if m_nearest:
+            # Extract top_n (optional digit before or after nearest/closest/sites)
+            m_n = re.search(r"\b(\d+)\b", s2)
+            top_n_det = int(m_n.group(1)) if m_n else 10
+            top_n_det = min(max(top_n_det, 1), 50)
+            # Extract max_km if "within X km" is in the query
+            m_km = re.search(r"within\s+(\d+)\s*km", s2)
+            max_km_det = float(m_km.group(1)) if m_km else 2000.0
+            # Extract location: text after "to", "near", "of", "a" etc. (city must start with uppercase)
+            m_loc = re.search(
+                r"\b(?:to|near|of|cerca\s+de|desde|from|\ba\b)\s+([A-ZÀ-Ö×Ø-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s'\-]{1,40})"
+                r"(?:\s+(?:with|where|que|con|having|and)\b|\s*[.,]|\s*$)",
+                qtxt2,
+            )
+            city_det = m_loc.group(1).strip() if m_loc else None
+            if city_det and len(city_det) >= 2:
+                _filters_p2 = _build_nearest_filters(qtxt2)
+                _dbg("Deterministic nearest pipeline: top_n=%d, city=%s, max_km=%s, rules=%d",
+                     top_n_det, city_det, max_km_det, len(_filters_p2.get("rules") or []))
+                try:
+                    out_near = tool_nearest_filtered_sites(
+                        request,
+                        location=city_det,
+                        filters=_filters_p2,
+                        top_n=top_n_det,
+                        max_km=max_km_det,
+                        db=db,
+                    )
+                    if out_near.get("error"):
+                        raise RuntimeError(f"nearest error: {out_near['error']}")  # → fall to Gemini
+                    rows_near = out_near.get("rows") or []
+                    meta = out_near.get("meta") or {}
+                    geocoded = meta.get("geocoded") or city_det
+                    note = meta.get("note") or ""
+                    if not rows_near:
+                        # If we have sites in DB but couldn't resolve their geocoordinates → fall to Gemini
+                        if meta.get("no_site_coords", 0) > 0 or meta.get("n_total_sites", 0) > 0:
+                            _dbg("NEAREST: fast-path got 0 results but %d total sites, %d no-coords → Gemini",
+                                 meta.get("n_total_sites", 0), meta.get("no_site_coords", 0))
+                            raise RuntimeError("no_coords_fallback")  # → fall to Gemini
+                        return {"answer": f"<p>No sites found within {int(max_km_det)} km of {geocoded}.</p>"}
+                    ans_html = (
+                        f"<p>Found <strong>{len(rows_near)}</strong> nearest clinical site(s) to "
+                        f"<strong>{geocoded}</strong>, sorted by straight-line distance.</p>"
+                    )
+                    if note:
+                        ans_html += f"<p><em>{note}</em></p>"
+                    tbl_near = {"columns": out_near.get("columns") or [], "rows": rows_near}
+                    tbl_near = _normalize_table_for_ui(tbl_near)
+                    return {"answer": ans_html, "table": tbl_near}
+                except Exception as _ne:
+                    _dbg("WARN: deterministic nearest pipeline failed: %s", _ne)
+                    # fall through to Gemini
+    except Exception as _e:
+        _dbg("WARN: nearest-sites fast-path failed: %s", _e)
 
     msgs: List[Dict[str, Any]] = [{"role":"system","content":SYSTEM_PROMPT}]
     msgs.append({
@@ -5479,6 +5890,11 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             re.search(r"\b(country|countries|city|cities|per|by)\b", user_utterance) and
             not re.search(r"\b(patient|stage|screening|hla|pharmacy|overnight|t1d|diagnosis|qualification|with\s+)\b", user_utterance)
         )
+
+        # DETECCIÓN CRÍTICA: nearest/closest sites to a city/address
+        is_nearest_query = bool(
+            re.search(r"\b(nearest|closest|cerca(no)?s?|m[aá]s\s+cerca|near|within\s+\d+\s*km\s+of|within\s+\d+\s*km\s+from)\b", user_utterance, re.I)
+        )
         
         aliases = list(kindex.keys())
         best = _top_matches(user_utterance, aliases, k=5)
@@ -5518,6 +5934,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 "Do NOT call render_chart with empty or placeholder data."
             )
         
+        # Si es una query de "nearest/closest sites to <location>", forzar nearest_filtered_sites
+        elif is_nearest_query:
+            hints.append(
+                "📍 **NEAREST SITES**: User wants sites near a location. "
+                "You MUST use nearest_filtered_sites(location='<city/address>', top_n=<N>, max_km=<radius>). "
+                "Do NOT use salesforce_query or sql_query for this. "
+                "Example: nearest_filtered_sites(location='Barcelona', top_n=5). "
+                "Add filters={...} only if the user specifies additional field constraints."
+            )
+
         # Si es un conteo básico de sitios, forzar Salesforce Account
         elif is_basic_site_query:
             hints.append(
@@ -5569,8 +5995,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 ". Consider include_subaccounts when they mention clinical sub-accounts."
             )
         
-        # SIEMPRE añadir recordatorio de routing
-        if not is_basic_site_query:  # ya tiene su hint específico
+        # SIEMPRE añadir recordatorio de routing (excepto cuando ya hay hint específico)
+        if not is_basic_site_query and not is_nearest_query:
             hints.insert(0, "🔴 REMEMBER: Use Postgres (sql_query) ONLY for site_qual questions. Everything else uses Salesforce.")
         
         if hints:
@@ -5643,16 +6069,24 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
             if name == "sql_query":
                 try:
+                    _sql_raw = args.get("sql","")
+                    # Schema-exploration queries (jsonb_object_keys, information_schema, etc.) should
+                    # NOT set last_table — just return info to Gemini so it can make a follow-up query
+                    _is_schema_query = bool(re.search(
+                        r"jsonb_object_keys|information_schema|pg_catalog|SHOW TABLES|DESCRIBE\s",
+                        _sql_raw, re.I))
                     # Reset any previous table/visualization to avoid stale UI when a new tool runs
-                    last_table = None
-                    last_visualization = None
-                    out = tool_sql_query(db, args.get("sql",""), args.get("params") or {})
+                    if not _is_schema_query:
+                        last_table = None
+                        last_visualization = None
+                    out = tool_sql_query(db, _sql_raw, args.get("params") or {})
                     cols = out.get("columns") or []
                     dict_rows = [{cols[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
-                    last_table = {"columns": [{"key": c, "label": c} for c in cols], "rows": dict_rows}
+                    if not _is_schema_query:
+                        last_table = {"columns": [{"key": c, "label": c} for c in cols], "rows": dict_rows}
                     # --- NUEVO: enriquecer account_id por nombre de sitio si falta ---
                     try:
-                        rows0 = last_table.get("rows") or []
+                        rows0 = (last_table.get("rows") or []) if last_table else []
                         # extrae posibles nombres de sitio
                         name_keys = [
                             "site","sites.name","s.name","sf.Account.Name","Account.Name","name","account_name"
@@ -5701,70 +6135,84 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
                     else:
                         soql_orig = args.get("soql","")
-                        _validate_soql(soql_orig)
-                        raw = tool_salesforce_query(sf, soql_orig)
-                        # aplanamos para tabla
-                        records = raw.get("records", []) if isinstance(raw, dict) else []
-                        flat_rows, keys = [], set()
-                        # Extraer contexto del SOQL para mejores etiquetas
-                        soql_context = {}
-                        # Detectar aliases explicitamente nombrados en el SOQL
-                        alias_matches = re.findall(r"\b(AVG|COUNT|SUM|MIN|MAX)\([^)]+\)\s+(\w+)", soql_orig, re.I)
-                        for agg_func, alias_name in alias_matches:
-                            alias_lower = alias_name.lower()
-                            if alias_lower in ("total", "count"):
-                                soql_context[alias_name] = "Total"
-                            elif alias_lower == "sites":
-                                soql_context[alias_name] = "Sites"
-                            elif alias_lower == "country":
-                                soql_context[alias_name] = "Country"
-                            elif alias_lower == "avg" or agg_func.upper() == "AVG":
-                                if "T1D" in soql_orig and "U_18" in soql_orig:
-                                    soql_context[alias_name] = "Average T1D Patients <18"
-                                elif "T1D" in soql_orig and "O_18" in soql_orig:
-                                    soql_context[alias_name] = "Average T1D Patients ≥18"
+                        # REDIRECT: Stage 1/2 site-list queries → explorer_search (reliable path for these fields)
+                        _stage12_pat = r"Stage[_\s]?[12][_\s]?Individuals|Individuals[_\s]+with[_\s]+Stage[_\s]?[12]|Stage[12]_Individuals"
+                        if re.search(_stage12_pat, soql_orig, re.I):
+                            _dbg("SOQL-REDIRECT: Stage1/2 query → redirecting to explorer_search")
+                            _s12_out = tool_explorer_search(
+                                request,
+                                filters={"logic": "OR", "rules": [
+                                    {"field": "sf.C_Number_of_Stage1_Individuals_followed__c", "operator": ">", "value": 0},
+                                    {"field": "sf.C_Number_of_Stage2_Individuals_followed__c", "operator": ">", "value": 0},
+                                ]},
+                                columns=["sf.C_Number_of_Stage1_Individuals_followed__c",
+                                         "sf.C_Number_of_Stage2_Individuals_followed__c"],
+                            )
+                            last_table = {"columns": _s12_out.get("columns") or [], "rows": _s12_out.get("rows") or []}
+                            last_table = _normalize_table_for_ui(last_table)
+                            msgs.append({"role": "tool", "tool_call_id": tool_call_id,
+                                         "content": json.dumps(_s12_out, default=str)})
+                        else:
+                            _validate_soql(soql_orig)
+                            raw = tool_salesforce_query(sf, soql_orig)
+                            # aplanamos para tabla
+                            records = raw.get("records", []) if isinstance(raw, dict) else []
+                            flat_rows, keys = [], set()
+                            # Extraer contexto del SOQL para mejores etiquetas
+                            soql_context = {}
+                            # Detectar aliases explicitamente nombrados en el SOQL
+                            alias_matches = re.findall(r"\b(AVG|COUNT|SUM|MIN|MAX)\([^)]+\)\s+(\w+)", soql_orig, re.I)
+                            for agg_func, alias_name in alias_matches:
+                                alias_lower = alias_name.lower()
+                                if alias_lower in ("total", "count"):
+                                    soql_context[alias_name] = "Total"
+                                elif alias_lower == "sites":
+                                    soql_context[alias_name] = "Sites"
+                                elif alias_lower == "country":
+                                    soql_context[alias_name] = "Country"
+                                elif alias_lower == "avg" or agg_func.upper() == "AVG":
+                                    if "T1D" in soql_orig and "U_18" in soql_orig:
+                                        soql_context[alias_name] = "Average T1D Patients <18"
+                                    elif "T1D" in soql_orig and "O_18" in soql_orig:
+                                        soql_context[alias_name] = "Average T1D Patients ≥18"
+                                    else:
+                                        soql_context[alias_name] = "Average"
+                            # Fallback para expr0, expr1, etc. sin alias explícito
+                            if "AVG(" in soql_orig and "T1D" in soql_orig and "U_18" in soql_orig and "expr0" not in soql_context:
+                                soql_context["expr0"] = "Average T1D Patients <18"
+                            elif "AVG(" in soql_orig and "T1D" in soql_orig and "O_18" in soql_orig and "expr0" not in soql_context:
+                                soql_context["expr0"] = "Average T1D Patients ≥18"
+                            elif "AVG(" in soql_orig and "T1D" in soql_orig and "expr0" not in soql_context:
+                                soql_context["expr0"] = "Average T1D Patients"
+                            elif "COUNT(" in soql_orig and "expr0" not in soql_context:
+                                soql_context["expr0"] = "Total Count"
+                            for r in records:
+                                flat = {}
+                                for k, v in r.items():
+                                    if k == "attributes": continue
+                                    if isinstance(v, dict) and "attributes" in v:
+                                        for kk, vv in v.items():
+                                            if kk == "attributes": continue
+                                            flat[f"sf.Account.{kk}"] = vv
+                                            keys.add(f"sf.Account.{kk}")
+                                    else:
+                                        flat[f"sf.{k}"] = v
+                                        keys.add(f"sf.{k}")
+                                flat_rows.append(flat)
+                            # Columnas con etiquetas "humanas" usando contexto SOQL
+                            sf_fields_map = _INDEX_CACHE.get("sf_fields") or {}
+                            ordered = sorted(keys)
+                            cols = []
+                            for k in ordered:
+                                bare_key = k.replace("sf.", "")
+                                if bare_key.lower() in soql_context:
+                                    label = soql_context[bare_key.lower()]
                                 else:
-                                    soql_context[alias_name] = "Average"
-                        
-                        # Fallback para expr0, expr1, etc. sin alias explícito
-                        if "AVG(" in soql_orig and "T1D" in soql_orig and "U_18" in soql_orig and "expr0" not in soql_context:
-                            soql_context["expr0"] = "Average T1D Patients <18"
-                        elif "AVG(" in soql_orig and "T1D" in soql_orig and "O_18" in soql_orig and "expr0" not in soql_context:
-                            soql_context["expr0"] = "Average T1D Patients ≥18"
-                        elif "AVG(" in soql_orig and "T1D" in soql_orig and "expr0" not in soql_context:
-                            soql_context["expr0"] = "Average T1D Patients"
-                        elif "COUNT(" in soql_orig and "expr0" not in soql_context:
-                            soql_context["expr0"] = "Total Count"
-                        
-                        for r in records:
-                            flat = {}
-                            for k, v in r.items():
-                                if k == "attributes": continue
-                                if isinstance(v, dict) and "attributes" in v:
-                                    for kk, vv in v.items():
-                                        if kk == "attributes": continue
-                                        flat[f"sf.Account.{kk}"] = vv
-                                        keys.add(f"sf.Account.{kk}")
-                                else:
-                                    flat[f"sf.{k}"] = v
-                                    keys.add(f"sf.{k}")
-                            flat_rows.append(flat)
-                        # Columnas con etiquetas "humanas" usando contexto SOQL
-                        sf_fields_map = _INDEX_CACHE.get("sf_fields") or {}
-                        ordered = sorted(keys)
-                        cols = []
-                        for k in ordered:
-                            # Usar contexto SOQL para nombres más específicos
-                            bare_key = k.replace("sf.", "")
-                            if bare_key.lower() in soql_context:
-                                label = soql_context[bare_key.lower()]
-                            else:
-                                label = _pretty_label(k)
-                            cols.append({"key": k, "label": label})
-                        last_table = {"columns": cols, "rows": flat_rows}
-                        # ---- NORMALIZACIÓN PARA BOTONES ----
-                        last_table = _normalize_table_for_ui(last_table)
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(raw, default=str)})
+                                    label = _pretty_label(k)
+                                cols.append({"key": k, "label": label})
+                            last_table = {"columns": cols, "rows": flat_rows}
+                            last_table = _normalize_table_for_ui(last_table)
+                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(raw, default=str)})
                 except Exception as e:
                     msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(e)})})
 
@@ -6131,15 +6579,77 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
             elif name == "explorer_search":
                     try:
-                        used_filters = args.get("filters") or {"logic": "AND", "rules": []}
+                        _raw_filters = args.get("filters")
+                        _rules = (_raw_filters.get("rules") or []) if isinstance(_raw_filters, dict) else []
+                        _injected_cols = list(args.get("columns") or [])  # may be extended during auto-inject
+                        # Auto-inject filters when Gemini sends empty {} — detect intent from user message
+                        if not _rules and not (isinstance(_raw_filters, dict) and _raw_filters.get("logic")):
+                            _last_user = ""
+                            for _m in reversed(msgs):
+                                if _m.get("role") == "user":
+                                    _last_user = str(_m.get("content") or "").lower()
+                                    break
+                            _injected_rules = []
+                            _injected_logic = "AND"
+                            # Stage 1/2 → OR filter (sites with Stage 1 OR Stage 2 > 0)
+                            if re.search(r"\bstage\s*[12]\b|\bscreening.program\b|\bpre.?symptomatic\b", _last_user):
+                                _injected_rules = [
+                                    {"field": "sf.C_Number_of_Stage1_Individuals_followed__c", "operator": ">", "value": 0},
+                                    {"field": "sf.C_Number_of_Stage2_Individuals_followed__c", "operator": ">", "value": 0},
+                                ]
+                                _injected_logic = "OR"
+                                # Auto-add Stage 1/2 columns if not already in request
+                                for _sf_col in ["sf.C_Number_of_Stage1_Individuals_followed__c", "sf.C_Number_of_Stage2_Individuals_followed__c"]:
+                                    if _sf_col not in _injected_cols:
+                                        _injected_cols.append(_sf_col)
+                            else:
+                                _country_map = {
+                                    "spain":"Spain","france":"France","germany":"Germany","italy":"Italy",
+                                    "portugal":"Portugal","uk":"United Kingdom","england":"United Kingdom",
+                                    "belgium":"Belgium","netherlands":"Netherlands","austria":"Austria",
+                                    "sweden":"Sweden","norway":"Norway","denmark":"Denmark","finland":"Finland",
+                                    "poland":"Poland","czech":"Czech Republic","hungary":"Hungary",
+                                    "greece":"Greece","croatia":"Croatia","romania":"Romania","bulgaria":"Bulgaria",
+                                    "switzerland":"Switzerland","ireland":"Ireland","slovakia":"Slovakia",
+                                }
+                                for k, v in _country_map.items():
+                                    if re.search(rf"\b{k}\b", _last_user):
+                                        _injected_rules.append({"field": "site.country", "operator": "equals", "value": v})
+                                        break
+                                if re.search(r"\bpharmac", _last_user):
+                                    _injected_rules.append({"field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus", "operator": "equals", "value": "On-site"})
+                                if re.search(r"\bovernight", _last_user):
+                                    _injected_rules.append({"field": "qual.3_5_2__overnight_stay", "operator": "equals", "value": "Yes"})
+                            if _injected_rules:
+                                _dbg("FILTER-INJECT: empty filters → injecting %d rules (logic=%s) from user msg", len(_injected_rules), _injected_logic)
+                                _raw_filters = {"logic": _injected_logic, "rules": _injected_rules}
+                            else:
+                                _dbg("FILTER-INJECT: empty filters, no keywords detected → passing empty (all sites)")
+                        used_filters = _raw_filters if isinstance(_raw_filters, dict) and _raw_filters else {"logic": "AND", "rules": []}
                         out = tool_explorer_search(
                             request,
                             filters=used_filters,
-                            columns=args.get("columns") or [],
+                            columns=_injected_cols,
                         )
                         last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
                         last_table = _normalize_table_for_ui(last_table)
                         last_explorer_filters = used_filters  # guardar para follow-ups
+                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
+                    except Exception as ee:
+                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+            elif name == "nearest_filtered_sites":
+                    try:
+                        out = tool_nearest_filtered_sites(
+                            request,
+                            location=args.get("location", ""),
+                            filters=args.get("filters") or {"logic": "AND", "rules": []},
+                            top_n=int(args.get("top_n") or 10),
+                            max_km=float(args.get("max_km") or 1000),
+                            db=db,
+                        )
+                        last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
+                        last_table = _normalize_table_for_ui(last_table)
                         msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
                     except Exception as ee:
                         msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
