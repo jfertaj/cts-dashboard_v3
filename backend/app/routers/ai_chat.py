@@ -1220,12 +1220,26 @@ def tool_nearest_filtered_sites(
     enriched.sort(key=lambda r: r["distance_km"])
     enriched = enriched[: min(top_n, 50)]
 
+    # Base columns always shown
     columns = [
         {"key": "distance_km", "label": f"Distance from {formatted} (km)"},
         {"key": "account_name", "label": "Site"},
         {"key": "country", "label": "Country"},
         {"key": "city", "label": "City"},
     ]
+    # Auto-detect SF metric fields present in rows and add them as columns
+    _sf_key_labels = {
+        "sf.C_Number_of_Stage1_Individuals_followed__c": "Stage 1",
+        "sf.C_Number_of_Stage2_Individuals_followed__c": "Stage 2",
+        "sf.C_Number_of_new_T1D_diagnosed_O_18__c": "ND ≥18",
+        "sf.C_Number_of_new_T1D_diagnosed_U_18__c": "ND <18",
+        "sf.C_Number_of_T1D_Patients_currently_O_18__c": "T1D ≥18",
+        "sf.C_Number_of_T1D_Patients_currently_U_18__c": "T1D <18",
+    }
+    _present_sf_keys = {k for row in enriched for k in row if k.startswith("sf.")}
+    for sf_key, sf_label in _sf_key_labels.items():
+        if sf_key in _present_sf_keys:
+            columns.append({"key": sf_key, "label": sf_label})
     return {
         "columns": columns,
         "rows": enriched,
@@ -4527,9 +4541,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if re.search(r"\b(pa?ediatric)\b", s):
             _dbg("Skipping clarification: 'paediatric' detected")
             return None
-        specified_type = re.search(r"\b(new|newly|diagnos(ed)?|dx|actual(es)?|current(ly)?)\b", s) is not None
+        specified_type = re.search(r"\b(new|newly|diagnos(ed)?|dx|actual(es)?|actualmente|current(ly)?|seguimiento|followed|follow.up)\b", s) is not None
         specified_stage = re.search(r"\bstage\s*[12]\b", s) is not None
-        specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older)\b", s) is not None
+        specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older|\badult[os]?\b|\bpediatri[ck]|paediatri[ck]|\bni[ñn]os?\b)\b", s) is not None
         # Queries sobre agregaciones (average, total, sum) con edad especificada son suficientemente claras
         has_aggregation = re.search(r"\b(average|avg|total|sum|count|how\s+many)\b", s) is not None
         # Si especifica la edad, no pedir clarificación (asumimos "current" si no se especifica)
@@ -4911,6 +4925,97 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     return {"answer": f"<p>{ans}</p>", "table": table}
         except Exception as _e:
             _dbg("WARN: planner activities failed: %s", _e)
+
+        # INTENCIÓN DIRECTA: Newly Diagnosed (ND) ranking or aggregation → direct SF query
+        try:
+            _nd_intent = bool(re.search(r"\b(newly\s+diagnosed|new\s+diagnos|nd\b|newly\s*dx|newly\s*t1d)\b", s))
+            _nd_by_country = bool(re.search(r"\b(per\s+country|by\s+country|por\s+pa[ií]s|por\s+pais|by\s+region)\b", s))
+            _nd_top = bool(re.search(r"\b(top|highest|most|mayor|más|mas|ranking|rank)\b", s))
+            if _nd_intent and not sf:
+                return {"answer": "<p>⚠️ Newly Diagnosed T1D data is stored in Salesforce and requires an active session. "
+                                  "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
+            if _nd_intent and sf and (_nd_top or _nd_by_country):
+                # Extract top N (default 10)
+                _m_topn = re.search(r"\b(top\s+)?(\d+)\b", s)
+                _nd_topn = int(_m_topn.group(2)) if _m_topn else 10
+                _nd_topn = min(max(_nd_topn, 1), 50)
+                if _nd_by_country:
+                    # Aggregate ND by country
+                    soql_nd_agg = (
+                        "SELECT Account.ShippingCountry, "
+                        "SUM(C_Number_of_new_T1D_diagnosed_O_18__c) ndO18, "
+                        "SUM(C_Number_of_new_T1D_diagnosed_U_18__c) ndU18 "
+                        "FROM Opportunity "
+                        "WHERE Account.RecordType.DeveloperName='SubAccount' "
+                        "AND Account.C_Type__c='Clinical' "
+                        "GROUP BY Account.ShippingCountry "
+                        "ORDER BY SUM(C_Number_of_new_T1D_diagnosed_O_18__c) DESC NULLS LAST "
+                        "LIMIT 50"
+                    )
+                    raw_nd_agg = tool_salesforce_query(sf, soql_nd_agg)
+                    recs_nd_agg = raw_nd_agg.get("records", []) if isinstance(raw_nd_agg, dict) else []
+                    rows_nd_agg = [
+                        {"country": r.get("Account", {}).get("ShippingCountry") or r.get("ShippingCountry", ""),
+                         "sf.C_Number_of_new_T1D_diagnosed_O_18__c": r.get("ndO18"),
+                         "sf.C_Number_of_new_T1D_diagnosed_U_18__c": r.get("ndU18")}
+                        for r in recs_nd_agg if r.get("Account", {}).get("ShippingCountry") or r.get("ShippingCountry")
+                    ]
+                    cols_nd_agg = [
+                        {"key": "country", "label": "Country"},
+                        {"key": "sf.C_Number_of_new_T1D_diagnosed_O_18__c", "label": "ND ≥18 (sum)"},
+                        {"key": "sf.C_Number_of_new_T1D_diagnosed_U_18__c", "label": "ND <18 (sum)"},
+                    ]
+                    tbl_nd_agg = _normalize_table_for_ui({"columns": cols_nd_agg, "rows": rows_nd_agg})
+                    _dbg("Planner ND by country: %d countries", len(rows_nd_agg))
+                    return {
+                        "answer": f"<p>Newly Diagnosed T1D totals across {len(rows_nd_agg)} countries.</p>",
+                        "table": tbl_nd_agg,
+                    }
+                else:
+                    # Top N sites by ND ≥18
+                    soql_nd = (
+                        "SELECT Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity, "
+                        "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c "
+                        "FROM Opportunity "
+                        "WHERE Account.RecordType.DeveloperName='SubAccount' "
+                        "AND Account.C_Type__c='Clinical' "
+                        "AND C_Number_of_new_T1D_diagnosed_O_18__c > 0 "
+                        "ORDER BY C_Number_of_new_T1D_diagnosed_O_18__c DESC NULLS LAST "
+                        f"LIMIT {_nd_topn}"
+                    )
+                    raw_nd = tool_salesforce_query(sf, soql_nd)
+                    recs_nd = raw_nd.get("records", []) if isinstance(raw_nd, dict) else []
+                    rows_nd = []
+                    seen_nd: set = set()
+                    for r in recs_nd:
+                        acc = r.get("Account") or {}
+                        aid = acc.get("Id") or ""
+                        if not aid or aid in seen_nd:
+                            continue
+                        seen_nd.add(aid)
+                        rows_nd.append({
+                            "account_id": aid,
+                            "account_name": acc.get("Name", ""),
+                            "country": acc.get("ShippingCountry", ""),
+                            "city": acc.get("ShippingCity", ""),
+                            "sf.C_Number_of_new_T1D_diagnosed_O_18__c": r.get("C_Number_of_new_T1D_diagnosed_O_18__c"),
+                            "sf.C_Number_of_new_T1D_diagnosed_U_18__c": r.get("C_Number_of_new_T1D_diagnosed_U_18__c"),
+                        })
+                    cols_nd = [
+                        {"key": "account_name", "label": "Site"},
+                        {"key": "country", "label": "Country"},
+                        {"key": "city", "label": "City"},
+                        {"key": "sf.C_Number_of_new_T1D_diagnosed_O_18__c", "label": "ND ≥18"},
+                        {"key": "sf.C_Number_of_new_T1D_diagnosed_U_18__c", "label": "ND <18"},
+                    ]
+                    tbl_nd = _normalize_table_for_ui({"columns": cols_nd, "rows": rows_nd})
+                    _dbg("Planner ND top %d: %d sites", _nd_topn, len(rows_nd))
+                    return {
+                        "answer": f"<p>Top <strong>{len(rows_nd)}</strong> sites by newly diagnosed adult T1D patients (≥18).</p>",
+                        "table": tbl_nd,
+                    }
+        except Exception as _e:
+            _dbg("WARN: planner ND handler failed: %s", _e)
 
         # INTENCIÓN DIRECTA: Stage 1/2 site list → direct SF query (no internal HTTP)
         try:
