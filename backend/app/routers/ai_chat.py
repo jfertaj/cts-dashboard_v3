@@ -4476,6 +4476,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         has_pat = re.search(r"\b(pacientes|patients?|t1d)\b", s) is not None
         if not has_pat:
             return None
+        # Don't trigger for facility/infrastructure queries — "patients" is incidental
+        if re.search(r"\b(overnight|pharmacy|pharmac|stay|facility|facilities|infrastructure|"
+                     r"hla|typing|activit|stage\s*[12]|assignment|enrollment|enroll)\b", s):
+            return None
         # Señales de desambiguación ya especificadas
         # "paediatric"/"pediatric" implies under 18 -> no clarification needed
         if re.search(r"\b(pa?ediatric)\b", s):
@@ -5013,47 +5017,48 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner pharmacy/overnight failed: %s", _e)
 
-        # INTENCIÓN DIRECTA: "sites in [country]" → direct SF query (no internal HTTP)
+        # INTENCIÓN DIRECTA: "sites in [country]" → direct SF query or DB fallback (no internal HTTP)
         try:
-            # Maps user query alias → SF full country name (ShippingCountry stores full names, not ISO)
+            # Maps user query alias → (SF full country name, ISO2 code)
+            # SF ShippingCountry stores full names ("Spain"), local sites.country stores ISO2 ("ES")
             _COUNTRY_MAP = {
-                "united kingdom": "United Kingdom", "great britain": "United Kingdom",
-                "britain": "United Kingdom", "uk": "United Kingdom",
-                "czech republic": "Czech Republic", "czechia": "Czech Republic",
-                "spain": "Spain", "españa": "Spain", "espagne": "Spain",
-                "germany": "Germany", "deutschland": "Germany", "allemagne": "Germany",
-                "france": "France", "frankreich": "France",
-                "italy": "Italy", "italia": "Italy", "italie": "Italy",
-                "netherlands": "Netherlands", "holland": "Netherlands",
-                "belgium": "Belgium", "belgique": "Belgium", "bélgica": "Belgium",
-                "austria": "Austria",
-                "switzerland": "Switzerland", "suiza": "Switzerland", "suisse": "Switzerland",
-                "denmark": "Denmark", "dinamarca": "Denmark",
-                "sweden": "Sweden", "suecia": "Sweden",
-                "norway": "Norway", "noruega": "Norway",
-                "finland": "Finland", "finlandia": "Finland",
-                "portugal": "Portugal",
-                "poland": "Poland", "polonia": "Poland",
-                "slovenia": "Slovenia", "eslovenia": "Slovenia",
-                "croatia": "Croatia", "croacia": "Croatia",
-                "romania": "Romania", "rumania": "Romania",
-                "hungary": "Hungary", "hungría": "Hungary",
-                "greece": "Greece", "grecia": "Greece",
-                "israel": "Israel",
-                "estonia": "Estonia",
-                "ireland": "Ireland", "irlanda": "Ireland",
-                "bulgaria": "Bulgaria",
-                "slovakia": "Slovakia", "eslovaquia": "Slovakia",
-                "serbia": "Serbia",
-                "luxembourg": "Luxembourg",
-                "cyprus": "Cyprus",
-                "malta": "Malta",
-                "latvia": "Latvia", "letonia": "Latvia",
-                "lithuania": "Lithuania", "lituania": "Lithuania",
-                "turkey": "Turkey", "turquía": "Turkey",
-                "united states": "United States", "usa": "United States", "us": "United States",
-                "canada": "Canada",
-                "australia": "Australia",
+                "united kingdom": ("United Kingdom", "GB"), "great britain": ("United Kingdom", "GB"),
+                "britain": ("United Kingdom", "GB"), "uk": ("United Kingdom", "GB"),
+                "czech republic": ("Czech Republic", "CZ"), "czechia": ("Czech Republic", "CZ"),
+                "spain": ("Spain", "ES"), "españa": ("Spain", "ES"), "espagne": ("Spain", "ES"),
+                "germany": ("Germany", "DE"), "deutschland": ("Germany", "DE"), "allemagne": ("Germany", "DE"),
+                "france": ("France", "FR"), "frankreich": ("France", "FR"),
+                "italy": ("Italy", "IT"), "italia": ("Italy", "IT"), "italie": ("Italy", "IT"),
+                "netherlands": ("Netherlands", "NL"), "holland": ("Netherlands", "NL"),
+                "belgium": ("Belgium", "BE"), "belgique": ("Belgium", "BE"), "bélgica": ("Belgium", "BE"),
+                "austria": ("Austria", "AT"),
+                "switzerland": ("Switzerland", "CH"), "suiza": ("Switzerland", "CH"), "suisse": ("Switzerland", "CH"),
+                "denmark": ("Denmark", "DK"), "dinamarca": ("Denmark", "DK"),
+                "sweden": ("Sweden", "SE"), "suecia": ("Sweden", "SE"),
+                "norway": ("Norway", "NO"), "noruega": ("Norway", "NO"),
+                "finland": ("Finland", "FI"), "finlandia": ("Finland", "FI"),
+                "portugal": ("Portugal", "PT"),
+                "poland": ("Poland", "PL"), "polonia": ("Poland", "PL"),
+                "slovenia": ("Slovenia", "SI"), "eslovenia": ("Slovenia", "SI"),
+                "croatia": ("Croatia", "HR"), "croacia": ("Croatia", "HR"),
+                "romania": ("Romania", "RO"), "rumania": ("Romania", "RO"),
+                "hungary": ("Hungary", "HU"), "hungría": ("Hungary", "HU"),
+                "greece": ("Greece", "GR"), "grecia": ("Greece", "GR"),
+                "israel": ("Israel", "IL"),
+                "estonia": ("Estonia", "EE"),
+                "ireland": ("Ireland", "IE"), "irlanda": ("Ireland", "IE"),
+                "bulgaria": ("Bulgaria", "BG"),
+                "slovakia": ("Slovakia", "SK"), "eslovaquia": ("Slovakia", "SK"),
+                "serbia": ("Serbia", "RS"),
+                "luxembourg": ("Luxembourg", "LU"),
+                "cyprus": ("Cyprus", "CY"),
+                "malta": ("Malta", "MT"),
+                "latvia": ("Latvia", "LV"), "letonia": ("Latvia", "LV"),
+                "lithuania": ("Lithuania", "LT"), "lituania": ("Lithuania", "LT"),
+                "turkey": ("Turkey", "TR"), "turquía": ("Turkey", "TR"),
+                "united states": ("United States", "US"), "usa": ("United States", "US"), "us": ("United States", "US"),
+                "canada": ("Canada", "CA"),
+                "australia": ("Australia", "AU"),
             }
             asks_country_sites = bool(re.search(
                 r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
@@ -5062,11 +5067,39 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 # Match longest alias first to avoid false positives
                 _matched_country = None
                 _matched_sf_name = None
+                _matched_iso = None
                 for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
                     if _cn in s:
                         _matched_country = _cn
-                        _matched_sf_name = _COUNTRY_MAP[_cn]
+                        _matched_sf_name, _matched_iso = _COUNTRY_MAP[_cn]
                         break
+                if _matched_country and _matched_sf_name and not sf and _matched_iso:
+                    # SF session not available → fallback: query local sites table using ISO code
+                    db_country_q = text(
+                        "SELECT s.salesforce_account_id, s.name, s.city, s.country "
+                        "FROM public.sites s "
+                        "WHERE UPPER(s.country) = :iso "
+                        "ORDER BY s.name ASC LIMIT 200"
+                    )
+                    db_country_rows_fb = db.execute(db_country_q, {"iso": _matched_iso.upper()}).fetchall()
+                    rows_country_fb = [
+                        {"account_id": r[0] or "", "account_name": r[1] or "",
+                         "city": r[2] or "", "country": r[3] or ""}
+                        for r in db_country_rows_fb if r[0]
+                    ]
+                    cols_country_fb = [
+                        {"key": "account_name", "label": "Site"},
+                        {"key": "city", "label": "City"},
+                        {"key": "country", "label": "Country"},
+                    ]
+                    tbl_country_fb = _normalize_table_for_ui({"columns": cols_country_fb, "rows": rows_country_fb})
+                    _dbg("Planner country DB fallback (no SF): %d sites in %s", len(rows_country_fb), _matched_sf_name)
+                    return {
+                        "answer": f"<p>Found <strong>{len(rows_country_fb)}</strong> clinical site(s) in "
+                                  f"<strong>{_matched_sf_name}</strong> (from local database; "
+                                  f"some metrics require a fresh Salesforce session).</p>",
+                        "table": tbl_country_fb,
+                    }
                 if _matched_country and _matched_sf_name and sf:
                     # NOTE: SF ShippingCountry stores the full English name (e.g. "Spain"),
                     # not ISO codes. Fetch all clinical accounts and filter in Python.
