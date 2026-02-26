@@ -4560,7 +4560,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             if (sc_intent or pi_intent) and sf:
                 # Parse optional country list: "in Germany and Spain"
                 # Capture 'in <country>' anywhere, optionally followed by 'site(s)'
-                m_c = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+?)(?:\s+sites?\b|$)", s)
+                m_c = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+?)(?:\s+sites?\b|[?!.,;]|$)", s)
                 countries = []
                 if m_c:
                     raw = m_c.group(1).strip()
@@ -5197,10 +5197,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     tbl_country = _normalize_table_for_ui({"columns": cols_country, "rows": rows_country})
                     _dbg("Planner country deterministic (SF query): %d sites in %s",
                          len(rows_country), _matched_sf_name)
+                    _country_sf_lf = {
+                        "logic": "AND",
+                        "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
+                    }
                     return {
                         "answer": f"<p>Found <strong>{len(rows_country)}</strong> clinical site(s) in "
                                   f"<strong>{_matched_sf_name}</strong>.</p>",
                         "table": tbl_country,
+                        "last_filters": _country_sf_lf,
                     }
         except Exception as _e:
             _dbg("WARN: planner country sites failed: %s", _e)
