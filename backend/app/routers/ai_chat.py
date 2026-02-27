@@ -5052,6 +5052,70 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner ND handler failed: %s", _e)
 
+        # INTENCIÓN DIRECTA: T1D currently followed (threshold filter) → internal explorer_search
+        try:
+            # Match: (t1d|type1|diabetes) near (currently|actualmente|seguimiento|followed)
+            _cf_intent = bool(re.search(
+                r"(t1d|type\s*1|diabetes).{0,60}(current(ly)?|actualmente|seguimiento|followed)"
+                r"|(current(ly)?|actualmente|seguimiento|followed).{0,60}(t1d|type\s*1|diabetes)",
+                s, re.I))
+            if _cf_intent:
+                if not sf:
+                    return {"answer": "<p>⚠️ T1D patient data is stored in Salesforce and requires an active session. "
+                                      "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
+                _cf_field_o18 = "sf.C_Number_of_T1D_Patients_currently_O_18__c"
+                _cf_field_u18 = "sf.C_Number_of_T1D_Patients_currently_U_18__c"
+                # Age group
+                _cf_under18 = bool(re.search(r"\bunder\s*18\b|<\s*18|u\s*18|\bni[ñn]os?\b|\bped", s, re.I))
+                _cf_field = _cf_field_u18 if _cf_under18 else _cf_field_o18
+                # Threshold extraction
+                _m_cf_thresh = re.search(r"\b(more\s+than|over|greater\s+than|m[aá]s\s+de|mayor\s+de|mayor\s+a|superior\s+a|>)\s*(\d+)", s, re.I)
+                _m_cf_atleast = re.search(r"\b(at\s+least|al\s+menos|>=|≥)\s*(\d+)", s, re.I)
+                _m_cf_less = re.search(r"\b(less\s+than|fewer\s+than|menos\s+de|<)\s*(\d+)", s, re.I)
+                _cf_rules = []
+                if _m_cf_thresh:
+                    _cf_rules.append({"field": _cf_field, "operator": ">", "value": int(_m_cf_thresh.group(2))})
+                    _thresh_label = f">{_m_cf_thresh.group(2)}"
+                elif _m_cf_atleast:
+                    _cf_rules.append({"field": _cf_field, "operator": ">=", "value": int(_m_cf_atleast.group(2))})
+                    _thresh_label = f">={_m_cf_atleast.group(2)}"
+                elif _m_cf_less:
+                    _cf_rules.append({"field": _cf_field, "operator": "<", "value": int(_m_cf_less.group(2))})
+                    _thresh_label = f"<{_m_cf_less.group(2)}"
+                else:
+                    _cf_rules.append({"field": _cf_field, "operator": ">", "value": 0})
+                    _thresh_label = ""
+                _cf_url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
+                _cf_ck = request.headers.get("cookie") if request else None
+                _cf_hdrs = {"cookie": _cf_ck} if _cf_ck else {}
+                _cf_cols = ["sf.Account.Id", "sf.Account.Name", "sf.Account.ShippingCountry",
+                            "sf.Account.ShippingCity", _cf_field_o18, _cf_field_u18]
+                with httpx.Client(timeout=60.0) as _cf_cli:
+                    _cf_resp = _cf_cli.post(
+                        _cf_url,
+                        json={"filters": {"logic": "AND", "rules": _cf_rules}, "columns": _cf_cols},
+                        headers=_cf_hdrs,
+                    )
+                rows_cf = _cf_resp.json().get("rows") or []
+                if rows_cf:
+                    rows_cf.sort(key=lambda r: float((r.get("data") or {}).get(_cf_field_o18) or 0), reverse=True)
+                    cols_cf = [
+                        {"key": "account_name", "label": "Site"},
+                        {"key": "country", "label": "Country"},
+                        {"key": "city", "label": "City"},
+                        {"key": _cf_field_o18, "label": "T1D ≥18 (currently)"},
+                        {"key": _cf_field_u18, "label": "T1D <18 (currently)"},
+                    ]
+                    tbl_cf = _normalize_table_for_ui({"columns": cols_cf, "rows": rows_cf})
+                    _dbg("Planner T1D currently %s: %d sites", _thresh_label, len(rows_cf))
+                    return {
+                        "answer": f"<p>Found <strong>{len(rows_cf)}</strong> site(s) with T1D patients currently followed"
+                                  f"{(' ' + _thresh_label) if _thresh_label else ''}.</p>",
+                        "table": tbl_cf,
+                    }
+        except Exception as _e:
+            _dbg("WARN: planner T1D currently handler failed: %s", _e)
+
         # INTENCIÓN DIRECTA: Stage 1/2 by country (aggregation) → like ND by country
         try:
             _bc_has_s1 = bool(re.search(r"\bstage\s*1\b", s))
