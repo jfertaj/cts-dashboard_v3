@@ -5168,61 +5168,48 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner stage1/2 failed: %s", _e)
 
-        # INTENCIÓN DIRECTA: Phase I/II/III clinical trials → direct SF query
+        # INTENCIÓN DIRECTA: Phase I/II/III clinical trials → internal explorer_search (proven path)
         try:
             _ct_phase1 = bool(re.search(r"\bphase\s*[i1]\b", s, re.I))
-            _ct_phase2 = bool(re.search(r"\bphase\s*[i2]{2}\b|\bphase\s*2\b", s, re.I))
-            _ct_phase3 = bool(re.search(r"\bphase\s*[i3]{3}\b|\bphase\s*3\b", s, re.I))
-            _ct_t1d = bool(re.search(r"\btype\s*1\b|\bt1d\b|\bdiabet|\bT1D\b", s, re.I))
+            _ct_phase2 = bool(re.search(r"\bphase\s*(?:ii|2)\b", s, re.I))
+            _ct_phase3 = bool(re.search(r"\bphase\s*(?:iii|3)\b", s, re.I))
+            _ct_t1d = bool(re.search(r"\btype\s*1\b|\bt1d\b|\bdiabet", s, re.I))
             _ct_asks = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b|show|find|list|which|participat|involve|conduc", s))
             if (_ct_phase1 or _ct_phase2 or _ct_phase3) and (_ct_t1d or _ct_asks):
                 if not sf:
                     return {"answer": "<p>⚠️ Clinical trial data is stored in Salesforce and requires an active session. "
                                       "Please log in via the <strong>Salesforce</strong> menu.</p>"}
-                _ct_conds = []
+                # Use internal explorer_search — same proven path Gemini uses (sf.C_Phase_*_Type1__c filter)
+                _ct_rules = []
                 if _ct_phase1:
-                    _ct_conds.append("C_Phase_I_Type1__c = true" if _ct_t1d else "(C_Phase_I_Type1__c = true OR C_Phase_I_NonType1__c = true)")
+                    _ct_rules.append({"field": "sf.C_Phase_I_Type1__c", "operator": "equals", "value": True})
                 if _ct_phase2:
-                    _ct_conds.append("C_Phase_II_Type1__c = true" if _ct_t1d else "(C_Phase_II_Type1__c = true OR C_Phase_II_NonType1__c = true)")
+                    _ct_rules.append({"field": "sf.C_Phase_II_Type1__c", "operator": "equals", "value": True})
                 if _ct_phase3:
-                    _ct_conds.append("C_Phase_III_Type1__c = true" if _ct_t1d else "(C_Phase_III_Type1__c = true OR C_Phase_III_NonType1__c = true)")
-                _ct_cond_str = " OR ".join(_ct_conds) if _ct_conds else "C_Phase_I_Type1__c = true"
-                _ct_fields = ", ".join([
-                    f for f in ["C_Phase_I_Type1__c", "C_Phase_II_Type1__c", "C_Phase_III_Type1__c"]
-                    if (_ct_phase1 and "I_T" in f) or (_ct_phase2 and "II_T" in f) or (_ct_phase3 and "III_T" in f)
-                    or (not _ct_phase2 and not _ct_phase3 and "I_T" in f)
-                ])
-                soql_ct = (
-                    f"SELECT Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity, {_ct_fields} "
-                    "FROM Opportunity "
-                    "WHERE Account.RecordType.DeveloperName='SubAccount' "
-                    "AND Account.C_Type__c='Clinical' "
-                    f"AND ({_ct_cond_str}) "
-                    "LIMIT 300"
-                )
-                raw_ct = tool_salesforce_query(sf, soql_ct)
-                recs_ct = raw_ct.get("records", []) if isinstance(raw_ct, dict) else []
-                if recs_ct:
-                    rows_ct, seen_ct = [], set()
-                    for _r in recs_ct:
-                        _acc = _r.get("Account") or {}
-                        _aid = _acc.get("Id") or ""
-                        if not _aid or _aid in seen_ct:
-                            continue
-                        seen_ct.add(_aid)
-                        _row = {
-                            "account_id": _aid,
-                            "account_name": _acc.get("Name", ""),
-                            "country": _acc.get("ShippingCountry", ""),
-                            "city": _acc.get("ShippingCity", ""),
-                        }
-                        if _ct_phase1:
-                            _row["sf.C_Phase_I_Type1__c"] = _r.get("C_Phase_I_Type1__c")
-                        if _ct_phase2:
-                            _row["sf.C_Phase_II_Type1__c"] = _r.get("C_Phase_II_Type1__c")
-                        if _ct_phase3:
-                            _row["sf.C_Phase_III_Type1__c"] = _r.get("C_Phase_III_Type1__c")
-                        rows_ct.append(_row)
+                    _ct_rules.append({"field": "sf.C_Phase_III_Type1__c", "operator": "equals", "value": True})
+                _ct_sf_cols = ["sf.Account.Id", "sf.Account.Name", "sf.Account.ShippingCountry", "sf.Account.ShippingCity"]
+                if _ct_phase1:
+                    _ct_sf_cols.append("sf.C_Phase_I_Type1__c")
+                if _ct_phase2:
+                    _ct_sf_cols.append("sf.C_Phase_II_Type1__c")
+                if _ct_phase3:
+                    _ct_sf_cols.append("sf.C_Phase_III_Type1__c")
+                _ct_url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
+                _ct_hdrs = {}
+                _ct_ck = request.headers.get("cookie") if request else None
+                if _ct_ck:
+                    _ct_hdrs["cookie"] = _ct_ck
+                with httpx.Client(timeout=60.0) as _ct_cli:
+                    _ct_resp = _ct_cli.post(
+                        _ct_url,
+                        json={"filters": {"logic": "OR" if len(_ct_rules) > 1 else "AND", "rules": _ct_rules},
+                              "columns": _ct_sf_cols},
+                        headers=_ct_hdrs,
+                    )
+                if _ct_resp.status_code >= 400:
+                    raise RuntimeError(f"explorer_search failed: {_ct_resp.text[:200]}")
+                rows_ct = _ct_resp.json().get("rows") or []
+                if rows_ct:
                     cols_ct = [{"key": "account_name", "label": "Site"}, {"key": "country", "label": "Country"}, {"key": "city", "label": "City"}]
                     if _ct_phase1:
                         cols_ct.append({"key": "sf.C_Phase_I_Type1__c", "label": "Phase I (T1D)"})
@@ -5231,15 +5218,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     if _ct_phase3:
                         cols_ct.append({"key": "sf.C_Phase_III_Type1__c", "label": "Phase III (T1D)"})
                     tbl_ct = _normalize_table_for_ui({"columns": cols_ct, "rows": rows_ct})
-                    _ct_by_country = {}
-                    for _r in rows_ct:
+                    _ct_by_country: dict = {}
+                    for _r in (tbl_ct.get("rows") or []):
                         _c = _r.get("country", "")
                         _ct_by_country[_c] = _ct_by_country.get(_c, 0) + 1
                     _ct_top = sorted(_ct_by_country.items(), key=lambda x: x[1], reverse=True)[:5]
-                    _ct_phase_label = "/".join([f"Phase {'I' if _ct_phase1 else ''}{'II' if _ct_phase2 else ''}{'III' if _ct_phase3 else ''}".strip("/")])
-                    _dbg("Planner CT: %d sites (Phase I=%s, II=%s, III=%s)", len(rows_ct), _ct_phase1, _ct_phase2, _ct_phase3)
+                    _n_ct = len(tbl_ct.get("rows") or [])
+                    _dbg("Planner CT: %d sites via explorer_search (Phase I=%s, II=%s, III=%s)", _n_ct, _ct_phase1, _ct_phase2, _ct_phase3)
                     return {
-                        "answer": f"<p>{len(rows_ct)} total across {len(_ct_by_country)} groups. "
+                        "answer": f"<p>{_n_ct} total across {len(_ct_by_country)} groups. "
                                   f"Top: {', '.join(f'{c}: {n}.0' for c, n in _ct_top)}.</p>",
                         "table": tbl_ct,
                     }
