@@ -260,8 +260,7 @@ const PRESETS = {
   NotesAndVerification: [
     "sf.C_Comments__c",
     "sf.C_Additional_Comments__c",
-    "sf.Certification_Output__c",
-    "sf.C_Account_Verified__c",
+    "sf.C_Certification_Output__c",
     "sf.C_Contact_Verified__c",
   ],
 };
@@ -390,11 +389,24 @@ const EXCLUDED_VISIBLE_COLUMNS = new Set<string>([
 // --- Campos que NO mostramos en el FilterBuilder ---
 // - ShippingCountry/City → redundantes con site.country / site.city (que sí funcionan)
 // - Lat/Lng → no tienen sentido como filtro de texto
+// - ID-type lookup fields → show raw Salesforce IDs, not useful for filtering
 const EXCLUDED_FILTER_FIELDS = new Set<string>([
   "sf.Account.ShippingCountry",
   "sf.Account.ShippingCity",
   "sf.Account.ShippingLatitude",
   "sf.Account.ShippingLongitude",
+  // Raw Salesforce ID fields — impossible to filter without knowing internal IDs
+  "sf.Id",
+  "sf.Account.Id",
+  "sf.RecordTypeId",
+  "sf.C_Centralized_Facility_Contact_Person__c",
+  "sf.C_Lead_Study_Coordinator_SC__c",
+  "sf.C_Lead_Study_Nurse__c",
+  "sf.C_Principal_Investigator__c",
+  "sf.C_Assignment__c",
+  "sf.Assignment.C_Account__c",
+  "sf.Assignment.C_Contact_Name__c",
+  "sf.Assignment.C_Opportunity_Name__c",
 ]);
 
 function useDebouncedEffect(fn: () => void, deps: any[], delay = 250) {

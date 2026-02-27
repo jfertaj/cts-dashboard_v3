@@ -3,7 +3,6 @@
   { "key": "sf.Name", "label": "Opportunity Name", "type": "string", "source": "sf" },
   { "key": "sf.Type", "label": "Opportunity Type", "type": "string", "source": "sf" },
   { "key": "sf.StageName", "label": "Stage", "type": "string", "source": "sf" },
-  { "key": "sf.Amount", "label": "Amount", "type": "double", "source": "sf" },
   { "key": "sf.CloseDate", "label": "Close Date", "type": "date", "source": "sf" },
   { "key": "sf.RecordTypeId", "label": "Record Type", "type": "ID", "source": "sf" },
   { "key": "sf.CreatedDate", "label": "Created On", "type": "dateTime", "source": "sf" },

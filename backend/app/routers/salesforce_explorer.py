@@ -2453,7 +2453,11 @@ def explorer_fields(db: Session = Depends(get_db)):
     account_fields_cfg: List[Dict[str, Any]] = []
     for name, meta in ACCOUNT_EXTRA_FIELDS.items():
         # Hide fields not desired in the table selector
-        if name in {"C_Account_Verified__c", "C_Contribution_to_INNODIA__c", "ShippingAddress"}:
+        # Also hide the 3 that duplicate sf.Account.* entries already in the JSON curated catalog
+        if name in {"C_Account_Verified__c", "C_Contribution_to_INNODIA__c", "ShippingAddress",
+                    "INNODIA_Clinical_Trial_Site__c",  # duplicate of sf.Account.INNODIA_Clinical_Trial_Site__c
+                    "Clinical_Site_CS__c",             # duplicate of sf.Account.Clinical_Site_CS__c
+                    "Accredited__c"}:                  # duplicate of sf.Account.Accredited__c
             continue
         account_fields_cfg.append({
             "key":   f"Account.{name}",
@@ -2462,10 +2466,7 @@ def explorer_fields(db: Session = Depends(get_db)):
             "source":"account",
             "group": "Account",
         })
-    # Conveniencia: MemberName (Account.*) — también exponemos sf.MemberName en sf_fields
-    account_fields_cfg += [
-        {"key": "Account.MemberName", "label": "Member (lookup name)", "type": "string",  "source": "account", "group": "Account"},
-    ]
+    # Note: Account.MemberName removed — sf.MemberName (in sf_fields above) covers the same field
 
     # --- NUEVO: Catálogo extra.* (Salesforce extras batch) ---
     # Estos campos los rellena batch_fetch_account_extras() y se pueden filtrar/mostrar.
