@@ -1476,7 +1476,6 @@ export default function ExplorerView() {
         setChartType(v.type === "line" ? "line" : "bar");
         setChartXKey(v.xKey);
         setChartYKeys(Array.isArray(v.yKeys) ? v.yKeys : []);
-        setChartData(Array.isArray(v.data) ? v.data : []);
         setChartTitle(v.meta?.title || "Explorer Chart");
         setChartOpen(true);
       }
@@ -2303,7 +2302,6 @@ export default function ExplorerView() {
   const [chartTitle, setChartTitle] = useState<string>("Chart");
   const [chartXKey, setChartXKey] = useState<string>("sf.Account.Name");
   const [chartYKeys, setChartYKeys] = useState<string[]>([]);
-  const [chartData, setChartData] = useState<Array<Record<string, any>>>([]);
   const [chartYCandidates, setChartYCandidates] = useState<string[]>([]);
   const [chartXCandidates, setChartXCandidates] = useState<string[]>([]);
 
@@ -2357,6 +2355,14 @@ export default function ExplorerView() {
     return arr;
   }, []);
 
+  // chartData is derived (not stored) — auto-updates whenever rows or axis config changes
+  const chartData = useMemo(() => {
+    if (!chartOpen || !chartYKeys.length) return [];
+    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+    if (!currentRows?.length) return [];
+    return buildChartDataset(currentRows, chartXKey, chartYKeys);
+  }, [chartOpen, nearbyActive, fullNearbyRows, fullRows, chartXKey, chartYKeys, buildChartDataset]);
+
   // Abre el modal con defaults razonables
   const openChartWizard = useCallback(() => {
     const currentRows = nearbyActive ? fullNearbyRows : fullRows;
@@ -2390,8 +2396,7 @@ export default function ExplorerView() {
     setChartYKeys(suggestedY.length ? suggestedY : []);
     setChartType("bar");
     setChartTitle("Explorer Chart");
-    setChartData(buildChartDataset(currentRows, defaultX, suggestedY));
-    setChartOpen(true);
+    setChartOpen(true); // chartData recomputes automatically via useMemo
   }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn, buildChartDataset]);
 
   // ====== Export TSV (toda la tabla filtrada) ======
@@ -2953,14 +2958,20 @@ showPresets={false}
           >
             Export filtered (TSV)
           </button>
-          {/* … dentro de la barra superior (junto a Export filtered) … */}
+          {/* Chart button — updates live as filters are applied */}
           <div className="relative">
             <button
-              className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
+              className="ml-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-40"
               onClick={openChartWizard}
-              title="Visualize current table as chart"
+              disabled={(nearbyActive ? fullNearbyRows : fullRows).length === 0}
+              title="Visualize current filtered rows as chart — updates automatically when filters change"
             >
-              Chart…
+              📊 Chart
+              {(nearbyActive ? fullNearbyRows : fullRows).length > 0 && (
+                <span className="ml-1.5 rounded-full bg-blue-200 px-1.5 py-0.5 text-xs font-medium">
+                  {(nearbyActive ? fullNearbyRows : fullRows).length}
+                </span>
+              )}
             </button>
             <button
             className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -3173,18 +3184,11 @@ showPresets={false}
         labelByKey={labelByKey}
         onChangeTitle={(t) => setChartTitle(t)}
         onChangeType={(t) => setChartType(t)}
-        onChangeXKey={(x) => {
-          setChartXKey(x);
-          const currentRows = nearbyActive ? fullNearbyRows : fullRows;
-          setChartData(buildChartDataset(currentRows, x, chartYKeys));
-        }}
+        onChangeXKey={(x) => setChartXKey(x)}
         onToggleYKey={(y) => {
-          const next = chartYKeys.includes(y)
-            ? chartYKeys.filter(k => k !== y)
-            : [...chartYKeys, y];
-          setChartYKeys(next);
-          const currentRows = nearbyActive ? fullNearbyRows : fullRows;
-          setChartData(buildChartDataset(currentRows, chartXKey, next));
+          setChartYKeys(prev =>
+            prev.includes(y) ? prev.filter(k => k !== y) : [...prev, y]
+          );
         }}
       />
     </div>

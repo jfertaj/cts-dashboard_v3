@@ -4153,6 +4153,29 @@ Do NOT use explorer_within_drive_km for city-name queries — that requires a Sa
 NOTE: Distances are straight-line (Haversine), not driving. For driving distances from a known site, use explorer_within_drive_km.
 After results appear, remind user they can click 🎯 Open in Explorer to view on the interactive map.
 
+**BLOCK 13: Chart generation → render_chart (CRITICAL)**
+When the user asks for a bar chart, pie chart, line chart, or any visualization, you MUST:
+1. Call the appropriate data tool (salesforce_query / explorer_search / sql_query) to get rows
+2. ALWAYS call render_chart with the data — do NOT return only a table
+
+EXAMPLES (mandatory render_chart after data fetch):
+• "Bar chart of ND adults per country"
+  → salesforce_query: SELECT Account.ShippingCountry country, SUM(C_Number_of_new_T1D_diagnosed_O_18__c) nd_o18 FROM Opportunity WHERE StageName NOT IN ('Inactive','Closed Lost') AND Account.RecordType.DeveloperName='SubAccount' AND Account.C_Type__c='Clinical' AND C_Number_of_new_T1D_diagnosed_O_18__c > 0 GROUP BY Account.ShippingCountry ORDER BY 2 DESC
+  → render_chart(kind="bar", data=[rows], xKey="country", yKeys=["nd_o18"], meta={{"title":"Newly Diagnosed T1D Adults per Country"}})
+
+• "Pie chart of sites per country"
+  → salesforce_query: SELECT ShippingCountry country, COUNT(Id) sites FROM Account WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' AND (Account_Inactive__c=false OR Account_Inactive__c=null) GROUP BY ShippingCountry ORDER BY 2 DESC
+  → render_chart(kind="pie", data=[rows], xKey="country", yKeys=["sites"], meta={{"title":"Sites per Country"}})
+
+• "Grouped bar chart Stage 1 vs Stage 2 by country"
+  → salesforce_query: SELECT Account.ShippingCountry country, SUM(C_Number_of_Stage1_Individuals_followed__c) stage1, SUM(C_Number_of_Stage2_Individuals_followed__c) stage2 FROM Opportunity WHERE StageName NOT IN ('Inactive','Closed Lost') AND Account.RecordType.DeveloperName='SubAccount' GROUP BY Account.ShippingCountry ORDER BY 2 DESC
+  → render_chart(kind="bar", data=[rows], xKey="country", yKeys=["stage1","stage2"], meta={{"title":"Stage 1 vs Stage 2 by Country"}})
+
+• "gráfico de barras de sitios por país" / "Dame un gráfico…"
+  → Same as pie/bar chart examples above — render_chart is ALWAYS required
+
+⛔ NEVER return ONLY a table when the user asks for a chart — always call render_chart after fetching data.
+
 STYLE
 - Be direct and neutral. Fall back gracefully between SF and Postgres and mention it briefly in bullets.
 - Do **not** show internal SQL/SOQL unless explicitly requested.
@@ -4631,7 +4654,142 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if not user_text:
             return None
         s = user_text.lower()
-        
+
+        # INTENCIÓN DIRECTA: "show on map / ver en el mapa" → direct to 🎯 Explorer button
+        try:
+            if re.search(r"\b(map|mapa)\b", s) and re.search(r"\b(show|ver|display|open|muestra|see|view)\b", s):
+                return {
+                    "answer": "<p>Click <strong>🎯 Open in Explorer (filter)</strong> below the table to view these sites on the interactive map and table.</p>"
+                }
+        except Exception as _e:
+            _dbg("WARN: planner show-on-map handler failed: %s", _e)
+
+        # EARLY: "show as [grouped] bar chart" with last_table provided → convert table directly (no LLM)
+        try:
+            if (has_table and payload.last_table and
+                    re.search(r"\b(chart|bar|pie|graph|grouped|stacked)\b", s) and
+                    len(s.split()) < 15):
+                _lt = payload.last_table
+                _lt_rows = _lt.get("rows") or []
+                _lt_cols = _lt.get("columns") or []
+                if _lt_rows and _lt_cols:
+                    _lt_col_keys = [c.get("key") if isinstance(c, dict) else str(c) for c in _lt_cols]
+                    _xkey_t = _lt_col_keys[0] if _lt_col_keys else "label"
+                    _ykeys_t = [
+                        _ck for _ck in _lt_col_keys[1:]
+                        if any(isinstance(_r.get(_ck), (int, float)) for _r in _lt_rows[:5])
+                    ]
+                    if _ykeys_t:
+                        _type_t = "pie" if re.search(r"\bpie\b", s) else "bar"
+                        _viz_t = tool_render_chart(_type_t, _lt_rows, _xkey_t, _ykeys_t,
+                                                   {"title": "Chart from table"}, {})
+                        _dbg("Planner EARLY table-to-chart: type=%s xKey=%s yKeys=%s rows=%d",
+                             _type_t, _xkey_t, str(_ykeys_t[:3]), len(_lt_rows))
+                        return {
+                            "answer": f"<p>Here is the {_type_t} chart.</p>",
+                            "table": _normalize_table_for_ui(_lt),
+                            "visualization": _viz_t.get("visualization"),
+                        }
+        except Exception as _e:
+            _dbg("WARN: planner EARLY table-to-chart failed: %s", _e)
+
+        # EARLY: "sites per country" + chart word → pie/bar chart (catch before is_chart_followup exit)
+        try:
+            _early_chart_country = (
+                re.search(r"\b(chart|bar|pie|graph|gr[aá]fico|barras|visuali[sz]e|plot)\b", s) and
+                re.search(r"\b(sites?|sitios?|centers?|centres?|clinical|cl[ií]nico[s]?|distributed)\b", s) and
+                re.search(r"\b(country|countries|pa[ií]s|pa[ií]ses|por\s+pa[ií]s|per\s+country|by\s+country)\b", s) and
+                not re.search(r"\bhla\b|\bstage\b|\bnd\b|activit|assignment|\bnewly\b|\bdiagnos\b|\bexplorer\b|\bsearch\s+for\b", s)
+            )
+            if _early_chart_country and sf:
+                # Use sf.query_all directly (FROM Account needs special handling — skip tool_salesforce_query validator)
+                _soql_ec = (
+                    "SELECT ShippingCountry, COUNT(Id) "
+                    "FROM Account "
+                    "WHERE RecordType.DeveloperName='SubAccount' "
+                    "AND C_Type__c='Clinical' "
+                    "AND ShippingCountry != null "
+                    "AND (Account_Inactive__c=false OR Account_Inactive__c=null) "
+                    "AND (Subaccount_Inactive__c=false OR Subaccount_Inactive__c=null) "
+                    "GROUP BY ShippingCountry "
+                    "ORDER BY COUNT(Id) DESC"
+                )
+                _raw_ec = sf.query_all(_soql_ec)
+                _recs_ec = _raw_ec.get("records", []) if isinstance(_raw_ec, dict) else []
+                _rows_ec = [
+                    {"country": _r.get("ShippingCountry", ""),
+                     "sites": int(_r.get("expr0") or _r.get("COUNT(Id)") or 0)}
+                    for _r in _recs_ec if _r.get("ShippingCountry")
+                ]
+                if _rows_ec:
+                    _kind_ec = "pie" if re.search(r"\b(pie|circular|dona|donut|ring)\b", s) else "bar"
+                    _total_ec = sum(r["sites"] for r in _rows_ec)
+                    _tbl_ec = _normalize_table_for_ui({
+                        "columns": [{"key": "country", "label": "Country"}, {"key": "sites", "label": "Sites"}],
+                        "rows": _rows_ec,
+                    })
+                    _viz_ec = tool_render_chart(_kind_ec, _rows_ec, "country", ["sites"],
+                                               {"title": "Clinical Sites per Country"}, {})
+                    _dbg("Planner EARLY sites-per-country chart (%s): %d countries", _kind_ec, len(_rows_ec))
+                    return {
+                        "answer": f"<p>{_total_ec} sites across {len(_rows_ec)} countries.</p>",
+                        "table": _tbl_ec,
+                        "visualization": _viz_ec.get("visualization"),
+                    }
+        except Exception as _e:
+            _dbg("WARN: planner EARLY sites-per-country chart failed: %s", _e)
+
+        # EARLY: HLA % per country (bar chart) — catch before LLM misroutes to rank_sites_by_group
+        try:
+            if (re.search(r"%\s*of\s*sites", s) and
+                    re.search(r"\bhla\s*typing\b", s) and
+                    re.search(r"\bper\s*country\b|\bby\s*country\b", s) and sf):
+                _soql_tot_e = (
+                    "SELECT ShippingCountry, COUNT(Id) "
+                    "FROM Account "
+                    "WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
+                    "AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
+                    "AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null) "
+                    "AND ShippingCountry != null "
+                    "GROUP BY ShippingCountry"
+                )
+                _tot_e = sf.query_all(_soql_tot_e).get("records", [])
+                _totals_e = {r.get("ShippingCountry"): int(r.get("expr0") or 0) for r in _tot_e}
+                _soql_hla_e = (
+                    "SELECT AccountId, Account.ShippingCountry "
+                    "FROM Opportunity "
+                    "WHERE C_Is_HLA_typing_performed__c = 'Yes' "
+                    "AND Account.ShippingCountry != null"
+                )
+                _recs_hla_e = sf.query_all(_soql_hla_e).get("records", [])  # no GROUP BY — dedup in Python
+                _hla_cnt_e: Dict[str, int] = {}
+                _seen_e: set = set()
+                for _r in _recs_hla_e:
+                    _aid_e = _r.get("AccountId")
+                    _acc_e = _r.get("Account") or {}
+                    _c_e = _acc_e.get("ShippingCountry")
+                    if not _aid_e or not _c_e or _aid_e in _seen_e: continue
+                    _seen_e.add(_aid_e)
+                    _hla_cnt_e[_c_e] = _hla_cnt_e.get(_c_e, 0) + 1
+                _rows_hla_e = []
+                for _country_e, _total_e in _totals_e.items():
+                    _has_e = _hla_cnt_e.get(_country_e, 0)
+                    _ratio_e = round(float(_has_e) / float(_total_e), 4) if _total_e else 0.0
+                    _rows_hla_e.append({"country": _country_e, "with_hla": _has_e,
+                                        "total": _total_e, "ratio": _ratio_e})
+                _rows_hla_e.sort(key=lambda x: x.get("ratio", 0), reverse=True)
+                _tbl_hla_e = {"columns": [{"key":"country","label":"Country"},{"key":"with_hla","label":"With HLA"},
+                                          {"key":"total","label":"Total"},{"key":"ratio","label":"Ratio"}],
+                              "rows": _rows_hla_e}
+                _viz_hla_e = tool_render_chart("bar", _rows_hla_e, "country", ["with_hla"],
+                                              {"title": "Sites with HLA Typing per Country"}, {})
+                _dbg("Planner EARLY HLA %% per country: %d countries", len(_rows_hla_e))
+                return {"answer": f"<p>HLA typing ratio for {len(_rows_hla_e)} countries.</p>",
+                        "table": _normalize_table_for_ui(_tbl_hla_e),
+                        "visualization": _viz_hla_e.get("visualization")}
+        except Exception as _e:
+            _dbg("WARN: planner EARLY HLA %% per country failed: %s", _e)
+
         # INTENCIÓN DIRECTA: Study Coordinator(s) → llamar determinísticamente a study_coordinators_with_activities
         try:
             sc_intent = re.search(r"\bstudy\s*coordinators?\b", s) is not None
@@ -4943,6 +5101,14 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         name = m_qname.group(1).strip()
                         byname = tool_sites_by_activity(sf, name=name, countries=countries2 or None, exact=False)
                         return {"answer": "<p>Sites by activity name.</p>", "table": byname}
+                    # "sites per activity" + chart keyword → bar chart by activity
+                    if re.search(r"\b(chart|bar|graph|pie|visuali[sz]e)\b", s):
+                        tbl_act = tool_activity_country_matrix(sf, stacked=False)
+                        rows_act = tbl_act.get("rows") or []
+                        viz_act = tool_render_chart("bar", rows_act, "activity_name", ["sites_total"],
+                                                   {"title": "Sites per Activity"}, {})
+                        return {"answer": f"<p>{len(rows_act)} activities found.</p>",
+                                "table": tbl_act, "visualization": viz_act.get("visualization")}
                     # Otherwise list sites with activities (with optional country filter)
                     table = tool_sites_with_any_activity(sf, countries=countries2 or None)
                     rows = table.get("rows") or []
@@ -5002,10 +5168,17 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     ]
                     tbl_nd_agg = _normalize_table_for_ui({"columns": cols_nd_agg, "rows": rows_nd_agg})
                     _dbg("Planner ND by country: %d countries", len(rows_nd_agg))
-                    return {
+                    nd_out: Dict[str, Any] = {
                         "answer": f"<p>Newly Diagnosed T1D totals across {len(rows_nd_agg)} countries.</p>",
                         "table": tbl_nd_agg,
                     }
+                    if re.search(r"\b(chart|bar|pie|graph|visuali[sz]e)\b", s):
+                        _nd_viz_key = "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
+                        _nd_viz = tool_render_chart("bar", rows_nd_agg, "country",
+                                                    [_nd_viz_key, "sf.C_Number_of_new_T1D_diagnosed_U_18__c"],
+                                                    {"title": "Newly Diagnosed T1D per Country"}, {})
+                        nd_out["visualization"] = _nd_viz.get("visualization")
+                    return nd_out
                 else:
                     # Top N sites by ND ≥18
                     soql_nd = (
@@ -5164,10 +5337,21 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 tbl_s12_bc = _normalize_table_for_ui({"columns": cols_s12_bc, "rows": rows_s12_bc})
                 _bc_label = "Stage 2" if (_bc_has_s2 and not _bc_has_s1) else ("Stage 1" if (_bc_has_s1 and not _bc_has_s2) else "Stage 1/2")
                 _dbg("Planner Stage1/2 by country: %d countries", len(rows_s12_bc))
-                return {
+                _s12_out: Dict[str, Any] = {
                     "answer": f"<p>{_bc_label} totals across {len(rows_s12_bc)} countries.</p>",
                     "table": tbl_s12_bc,
                 }
+                if re.search(r"\b(chart|bar|pie|graph|grouped|visuali[sz]e)\b", s):
+                    _s12_ykeys = []
+                    if _bc_has_s1: _s12_ykeys.append("sf.C_Number_of_Stage1_Individuals_followed__c")
+                    if _bc_has_s2: _s12_ykeys.append("sf.C_Number_of_Stage2_Individuals_followed__c")
+                    if not _s12_ykeys:
+                        _s12_ykeys = ["sf.C_Number_of_Stage1_Individuals_followed__c",
+                                      "sf.C_Number_of_Stage2_Individuals_followed__c"]
+                    _s12_viz = tool_render_chart("bar", rows_s12_bc, "country", _s12_ykeys,
+                                                {"title": f"{_bc_label} Individuals Followed per Country"}, {})
+                    _s12_out["visualization"] = _s12_viz.get("visualization")
+                return _s12_out
         except Exception as _e:
             _dbg("WARN: planner stage1/2 by country failed: %s", _e)
 
@@ -5579,7 +5763,51 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner 'group countries by Opportunity Name' failed: %s", _e)
             pass
-        
+
+        # INTENCIÓN DIRECTA: "sites per country" + chart word → pie/bar chart
+        try:
+            _wants_chart_country = (
+                re.search(r"\b(chart|bar|pie|graph|gr[aá]fico|barras|visuali[sz]e|plot)\b", s) and
+                re.search(r"\b(sites?|sitios?|centers?|centres?|clinical|cl[ií]nico[s]?)\b", s) and
+                re.search(r"\b(country|countries|pa[ií]s|pa[ií]ses|por\s+pa[ií]s|per\s+country|by\s+country)\b", s) and
+                not re.search(r"\bhla\b|\bstage\b|\bnd\b|activit|assignment", s)
+            )
+            if _wants_chart_country and sf:
+                soql_ctr = (
+                    "SELECT ShippingCountry country, COUNT(Id) sites "
+                    "FROM Account "
+                    "WHERE RecordType.DeveloperName='SubAccount' "
+                    "AND C_Type__c='Clinical' "
+                    "AND ShippingCountry != null "
+                    "AND (Account_Inactive__c=false OR Account_Inactive__c=null) "
+                    "AND (Subaccount_Inactive__c=false OR Subaccount_Inactive__c=null) "
+                    "GROUP BY ShippingCountry "
+                    "ORDER BY COUNT(Id) DESC"
+                )
+                raw_ctr = tool_salesforce_query(sf, soql_ctr)
+                recs_ctr = raw_ctr.get("records", []) if isinstance(raw_ctr, dict) else []
+                rows_ctr = [
+                    {"country": r.get("country", ""), "sites": int(r.get("sites") or r.get("expr0") or 0)}
+                    for r in recs_ctr if r.get("country")
+                ]
+                if rows_ctr:
+                    kind_ctr = "pie" if re.search(r"\b(pie|circular|dona|donut|ring)\b", s) else "bar"
+                    total_ctr = sum(r["sites"] for r in rows_ctr)
+                    tbl_ctr = _normalize_table_for_ui({
+                        "columns": [{"key": "country", "label": "Country"}, {"key": "sites", "label": "Sites"}],
+                        "rows": rows_ctr,
+                    })
+                    viz_ctr = tool_render_chart(kind_ctr, rows_ctr, "country", ["sites"],
+                                               {"title": "Clinical Sites per Country"}, {})
+                    _dbg("Planner sites-per-country chart (%s): %d countries", kind_ctr, len(rows_ctr))
+                    return {
+                        "answer": f"<p>{total_ctr} sites across {len(rows_ctr)} countries.</p>",
+                        "table": tbl_ctr,
+                        "visualization": viz_ctr.get("visualization"),
+                    }
+        except Exception as _e:
+            _dbg("WARN: planner sites-per-country chart failed: %s", _e)
+
         # Si hay tabla previa y piden gráfico, NO usar el planner
         # También saltar si solo piden visualización sin especificar métrica/filtro
         chart_only_request = bool(
@@ -5642,7 +5870,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
         # Porcentaje HLA typing por país (ratio)
         try:
-            if re.search(r"\b%\s*of\s*sites\b", s) and re.search(r"\bhla\s*typing\b", s) and re.search(r"\bper\s*country\b|\bby\s*country\b", s):
+            if re.search(r"%\s*of\s*sites", s) and re.search(r"\bhla\s*typing\b", s) and re.search(r"\bper\s*country\b|\bby\s*country\b", s):
                 if sf:
                     # 1) Total activos por país
                     soql_tot = (
@@ -5658,18 +5886,18 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     totals = {r.get("country"): (r.get("expr0") or r.get("total") or 0) for r in tot}
                     # 2) Con HLA=true: obtener cuentas únicas desde Opportunity
                     soql_hla = (
-                        "SELECT Account.Id, Account.ShippingCountry "
+                        "SELECT AccountId, Account.ShippingCountry "
                         "FROM Opportunity "
-                        "WHERE C_Is_HLA_typing_performed__c = true "
-                        "AND Account.ShippingCountry != null "
-                        "GROUP BY Account.Id, Account.ShippingCountry"
+                        "WHERE C_Is_HLA_typing_performed__c = 'Yes' "
+                        "AND Account.ShippingCountry != null"
                     )
-                    recs = tool_salesforce_query(sf, soql_hla).get("records", [])
+                    recs = sf.query_all(soql_hla).get("records", [])  # no GROUP BY — dedup in Python
                     hla_counts: Dict[str, int] = {}
                     seen = set()
                     for r in recs:
+                        aid = r.get("AccountId")
                         acc = r.get("Account") or {}
-                        aid = acc.get("Id"); c = acc.get("ShippingCountry")
+                        c = acc.get("ShippingCountry")
                         if not aid or not c or aid in seen:
                             continue
                         seen.add(aid)
@@ -5686,6 +5914,41 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner HLA % per country failed: %s", _e)
             pass
+
+        # HLA typing COUNT per country (bar chart) — "how many sites per country do HLA typing"
+        try:
+            if (re.search(r"\bhla\s*typing\b", s) and
+                    re.search(r"per\s+country|by\s+country|por\s+pa[ií]s", s) and
+                    not re.search(r"\bin\s+[a-z]", s)):
+                if sf:
+                    soql_hla2 = (
+                        "SELECT AccountId, Account.ShippingCountry "
+                        "FROM Opportunity "
+                        "WHERE C_Is_HLA_typing_performed__c = 'Yes' "
+                        "AND Account.ShippingCountry != null"
+                    )
+                    recs2 = sf.query_all(soql_hla2).get("records", [])  # no GROUP BY — dedup in Python
+                    hla_ct: Dict[str, int] = {}
+                    seen2: set = set()
+                    for r in recs2:
+                        aid = r.get("AccountId")
+                        acc = r.get("Account") or {}
+                        c = acc.get("ShippingCountry")
+                        if not aid or not c or aid in seen2:
+                            continue
+                        seen2.add(aid)
+                        hla_ct[c] = hla_ct.get(c, 0) + 1
+                    rows_hla = sorted([{"country": c, "sites_with_hla": n} for c, n in hla_ct.items()],
+                                      key=lambda x: x["sites_with_hla"], reverse=True)
+                    tbl_hla = {"columns": [{"key": "country", "label": "Country"},
+                                           {"key": "sites_with_hla", "label": "Sites with HLA Typing"}],
+                               "rows": rows_hla}
+                    viz_hla = tool_render_chart("bar", rows_hla, "country", ["sites_with_hla"],
+                                               {"title": "Sites with HLA Typing per Country"}, {})
+                    return {"answer": f"<p>{sum(r['sites_with_hla'] for r in rows_hla)} sites across {len(rows_hla)} countries perform HLA typing.</p>",
+                            "table": tbl_hla, "visualization": viz_hla.get("visualization")}
+        except Exception as _e:
+            _dbg("WARN: planner HLA count per country chart failed: %s", _e)
 
         # Caso específico: "how many sites are in <country>" → conteo directo en SF (soporta múltiples países)
         m_in_country = re.search(r"\bhow\s+many\s+sites?\s+(are\s+)?in\s+([a-zA-ZÀ-ÿ'\- ,/&]+)\b", s)
