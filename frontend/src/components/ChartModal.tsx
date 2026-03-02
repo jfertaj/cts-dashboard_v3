@@ -54,6 +54,7 @@ export default function ChartModal({
 
   const Empty = data.length === 0 || yKeys.length === 0;
   const label = (k: string) => {
+    if (k === '__count__') return 'Count (rows)';
     if (k === 'sf.Account.Name') return 'Account Name';
     if (k === 'sf.Account.Id') return 'Account Id';
     if (k === 'country') return 'Country';

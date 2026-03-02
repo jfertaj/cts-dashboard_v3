@@ -2342,22 +2342,26 @@ export default function ExplorerView() {
       const buckets = new Map<string, Record<string, any>>();
       for (const r of rowsIn) {
         const key = String(readDataCell(r as any, xKey) ?? '').trim() || '(empty)';
-        const bucket = buckets.get(key) || { [xKey]: key };
+        const bucket = buckets.get(key) || { [xKey]: key, __count__: 0 };
+        bucket.__count__ = (bucket.__count__ || 0) + 1;
         for (const y of yKeys) {
+          if (y === '__count__') continue;
           const raw = readDataCell(r as any, y);
           const n = Number(String(raw ?? '').replace(/,/g, ''));
           bucket[y] = (Number.isFinite(n) ? (bucket[y] || 0) + n : (bucket[y] || 0));
         }
         buckets.set(key, bucket);
       }
-      return Array.from(buckets.values());
+      return Array.from(buckets.values()).sort((a, b) => (b.__count__ ?? 0) - (a.__count__ ?? 0));
     }
     // Default: row-wise dataset
     const arr: Array<Record<string, any>> = [];
     for (const r of rowsIn) {
       const row: Record<string, any> = {};
       row[xKey] = readDataCell(r as any, xKey) ?? "";
+      row.__count__ = 1;
       for (const y of yKeys) {
+        if (y === '__count__') continue;
         const raw = readDataCell(r as any, y);
         const n = Number(String(raw ?? '').replace(/,/g, ''));
         row[y] = Number.isFinite(n) ? n : null;
@@ -2392,6 +2396,8 @@ export default function ExplorerView() {
 
     // Sugerir Y numéricas a partir de columnas visibles
     const numericKeys = visibleColumns.filter(k => isNumericColumn(k, currentRows));
+    // Always offer a "Count" virtual Y key (counts rows per X group)
+    const yCands = ["__count__", ...numericKeys];
     const suggestedY = numericKeys.slice(0, 3); // hasta 3 series por defecto
 
     // candidatos
@@ -2402,10 +2408,11 @@ export default function ExplorerView() {
     ].filter((v, i, a) => a.indexOf(v) === i);
 
     setChartXCandidates(xCands);
-    setChartYCandidates(numericKeys);
+    setChartYCandidates(yCands);
 
     setChartXKey(defaultX);
-    setChartYKeys(suggestedY.length ? suggestedY : []);
+    // Default to Count if no numeric columns, otherwise use the numeric ones
+    setChartYKeys(suggestedY.length ? suggestedY : ["__count__"]);
     setChartType("bar");
     setChartTitle("Explorer Chart");
     setChartOpen(true); // chartData recomputes automatically via useMemo
