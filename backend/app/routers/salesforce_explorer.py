@@ -1233,9 +1233,27 @@ _ISO2 = {
     "lithuania": "LT", "lietuva": "LT", "lt": "LT",
     "cyprus": "CY", "kypros": "CY", "cy": "CY",
     "malta": "MT", "mt": "MT",
+    "austria": "AT", "österreich": "AT", "oesterreich": "AT", "at": "AT",
+    "slovenia": "SI", "slovenija": "SI", "si": "SI",
     # bordes frecuentes
     "switzerland": "CH", "suisse": "CH", "schweiz": "CH", "svizzera": "CH", "ch": "CH",
     "turkey": "TR", "türkiye": "TR", "tr": "TR",
+}
+
+# Reverse map ISO2 → English display name (used for country filter matching)
+_ISO2_TO_DISPLAY: Dict[str, str] = {
+    "AD": "Andorra", "AL": "Albania", "AT": "Austria",
+    "BA": "Bosnia and Herzegovina", "BE": "Belgium", "BG": "Bulgaria",
+    "CH": "Switzerland", "CY": "Cyprus", "CZ": "Czechia",
+    "DE": "Germany", "DK": "Denmark", "EE": "Estonia",
+    "ES": "Spain", "FI": "Finland", "FR": "France",
+    "GB": "United Kingdom", "GR": "Greece", "HR": "Croatia",
+    "HU": "Hungary", "IE": "Ireland", "IT": "Italy",
+    "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
+    "ME": "Montenegro", "MK": "North Macedonia", "MT": "Malta",
+    "NL": "Netherlands", "NO": "Norway", "PL": "Poland",
+    "PT": "Portugal", "RO": "Romania", "RS": "Serbia",
+    "SE": "Sweden", "SI": "Slovenia", "SK": "Slovakia", "TR": "Turkey",
 }
 
 # alias de ciudades por país (añade las que vayas viendo)
@@ -2954,6 +2972,26 @@ async def explorer_search(
                     items = [x.lower() for x in raw_items]
                     present = val.lower() in items
                 return present if op == "in" else not present
+            # For site.country string ops also match against English display name
+            # so "Germany" / "Ger" / "ger" all match the stored ISO2 "DE".
+            if rule.field == "site.country" and op in (
+                "equals","=","not_equals","!=","contains","not_contains","starts_with","ends_with"
+            ):
+                iso = (_country_norm(val) or val).upper()
+                display = _ISO2_TO_DISPLAY.get(iso, iso)
+                s_iso = (_country_norm(s) or "").upper()
+                # Normalize search string to ISO too if it's a full country name
+                s_norm = s_iso if s_iso else s
+                def _country_match(v: str, needle: str) -> bool:
+                    vl, nl = v.lower(), needle.lower()
+                    if   op in ("equals","="):       return iso.lower() == nl or display.lower() == nl
+                    elif op in ("not_equals","!="):  return iso.lower() != nl and display.lower() != nl
+                    elif op == "contains":           return nl in iso.lower() or nl in display.lower()
+                    elif op == "not_contains":       return nl not in iso.lower() and nl not in display.lower()
+                    elif op == "starts_with":        return iso.lower().startswith(nl) or display.lower().startswith(nl)
+                    elif op == "ends_with":          return iso.lower().endswith(nl) or display.lower().endswith(nl)
+                    return True
+                return _country_match(iso, s_norm)
             if   op in ("equals","="):      return val.lower() == s.lower()
             elif op in ("not_equals","!="): return val.lower() != s.lower()
             elif op == "contains":          return s.lower() in val.lower()
@@ -4489,6 +4527,24 @@ async def explorer_search_within_drive_km(
                     items = [x.lower() for x in raw_items]
                     present = val.lower() in items
                 return present if op == "in" else not present
+            # For site.country string ops also match against English display name
+            if rule.field == "site.country" and op in (
+                "equals","=","not_equals","!=","contains","not_contains","starts_with","ends_with"
+            ):
+                iso = (_country_norm(val) or val).upper()
+                display = _ISO2_TO_DISPLAY.get(iso, iso)
+                s_iso = (_country_norm(s) or "").upper()
+                s_norm = s_iso if s_iso else s
+                def _cmatch(needle: str) -> bool:
+                    nl = needle.lower()
+                    if   op in ("equals","="):       return iso.lower() == nl or display.lower() == nl
+                    elif op in ("not_equals","!="):  return iso.lower() != nl and display.lower() != nl
+                    elif op == "contains":           return nl in iso.lower() or nl in display.lower()
+                    elif op == "not_contains":       return nl not in iso.lower() and nl not in display.lower()
+                    elif op == "starts_with":        return iso.lower().startswith(nl) or display.lower().startswith(nl)
+                    elif op == "ends_with":          return iso.lower().endswith(nl) or display.lower().endswith(nl)
+                    return True
+                return _cmatch(s_norm)
             if op in ("equals","="): return val.lower() == s.lower()
             if op in ("not_equals","!="): return val.lower() != s.lower()
             if op == "contains": return s.lower() in val.lower()

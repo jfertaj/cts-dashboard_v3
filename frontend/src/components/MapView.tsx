@@ -13,6 +13,7 @@ import {
   useJsApiLoader,
 } from "@react-google-maps/api";
 import type { ExplorerPoint } from "../lib/api";
+import { displayCountry } from "../lib/countryUtils";
 
 /** Contenedor del mapa */
 const containerStyle = { height: 420, width: "100%" } as const;
@@ -863,7 +864,7 @@ export default function MapView({
                   <div className="text-lg space-y-3" style={{ minWidth: 460, maxWidth: 580 }}>
                     <div>
                       <div className="font-semibold">{p.account_name}</div>
-                      <div className="text-xs text-gray-600">{p.city ?? "-"}, {p.country ?? "-"}</div>
+                      <div className="text-xs text-gray-600">{p.city ?? "-"}, {displayCountry(p.country) || "-"}</div>
                     </div>
 
                     <div className="text-sm text-gray-700">

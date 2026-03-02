@@ -15,6 +15,7 @@ import FilterBuilder from "../components/FilterBuilder";
 import MapView from "../components/MapView";
 import ColumnPicker from "../components/ColumnPicker";
 import ChartModal from "../components/ChartModal";
+import { displayCountry } from "../lib/countryUtils";
 
 import {
   ColumnDef,
@@ -2108,10 +2109,21 @@ export default function ExplorerView() {
   const fixedDefs = useMemo<ColumnDef<ExplorerRow>[]>(() => ([
     { id: "country", header: "Country",
       accessorFn: (r) => (r.country === null || r.country === undefined || String(r.country).trim()==="" ? undefined : r.country),
-      enableSorting: true, enableColumnFilter: true, filterFn: containsCI,
-      // Siempre mandar los undefined al final
+      enableSorting: true, enableColumnFilter: true,
+      filterFn: (row, columnId, filterValue) => {
+        const raw = String(row.getValue(columnId) ?? "");
+        const name = displayCountry(raw);
+        const needle = String(filterValue).toLowerCase();
+        return raw.toLowerCase().includes(needle) || name.toLowerCase().includes(needle);
+      },
       sortUndefined: 'last',
       sortingFn: 'alphanumeric',
+      cell: ({ getValue }) => {
+        const raw = String(getValue() ?? "");
+        if (!raw) return "—";
+        const name = displayCountry(raw);
+        return name !== raw ? <span title={raw}>{name}</span> : <>{name}</>;
+      },
     },
     { id: "city", header: "City",
       accessorFn: (r) => (r.city === null || r.city === undefined || String(r.city).trim()==="" ? undefined : r.city),
