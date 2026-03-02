@@ -268,43 +268,44 @@ export default function ChartModal({
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               {type === "bar" ? (
-                <BarChart data={data} margin={{ top: 20, right: 24, left: 16, bottom: 180 }}>
+                // bottom margin just enough for angled tick labels; legend sits inside SVG
+                <BarChart data={data} margin={{ top: 16, right: 30, left: 60, bottom: 16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis 
-                    dataKey={xKey} 
-                    tickFormatter={(v) => String(v)} 
-                    angle={-35}
+                  <XAxis
+                    dataKey={xKey}
+                    tickFormatter={(v) => String(v)}
+                    angle={-40}
                     textAnchor="end"
-                    height={110}
-                    tick={{ fontSize: 12 }}
-                    label={{ value: label(xKey), position: "insideBottom", offset: -24, style: { fontSize: 14, fontWeight: "bold" } }}
-
+                    height={80}
+                    tick={{ fontSize: 11 }}
+                    interval={0}
+                    label={{ value: label(xKey), position: "insideBottom", offset: -4, style: { fontSize: 13, fontWeight: "bold" } }}
                   />
-                  <YAxis 
+                  <YAxis
                     tick={{ fontSize: 12 }}
-                    label={{ value: yKeys.length === 1 ? label(yKeys[0]) : "Values", angle: -90, position: "insideLeft", style: { fontSize: 14, fontWeight: "bold" } }}
+                    width={60}
+                    label={{ value: yKeys.length === 1 ? label(yKeys[0]) : "Values", angle: -90, position: "insideLeft", offset: 10, style: { fontSize: 13, fontWeight: "bold" } }}
                   />
                   <Tooltip
                     formatter={(val: any, name: string) => [val, label(name)]}
                     labelFormatter={(lbl) => `${label(xKey)}: ${lbl}`}
                     contentStyle={{ backgroundColor: "rgba(255, 255, 255, 0.95)", border: "1px solid #ccc", borderRadius: "4px" }}
                   />
-                  <Legend
-                    formatter={(value) => String(value)}
-                    verticalAlign="bottom"
-                    align="center"
-                    wrapperStyle={{ maxHeight: 120, overflowY: "auto", paddingTop: 32 }}
-
-                    payload={legendPayloadForSeries() as any}
-                  />
-
+                  {yKeys.length > 1 && (
+                    <Legend
+                      formatter={(value) => label(value)}
+                      verticalAlign="bottom"
+                      align="center"
+                      wrapperStyle={{ paddingTop: 6 }}
+                      payload={legendPayloadForSeries() as any}
+                    />
+                  )}
                   {yKeys.map((k, idx) => {
                     const isMulti = yKeys.length > 1;
                     const stackId = isMulti && stacked ? "stack" : undefined;
-                    const radius: [number,number,number,number] = isMulti && stacked ? [0,0,0,0] : [4,4,0,0];
+                    const radius: [number,number,number,number] = isMulti && stacked ? [0,0,0,0] : [3,3,0,0];
                     return (
                       <Bar key={k} dataKey={k} fill={COLORS[idx % COLORS.length]} radius={radius} stackId={stackId}>
-                        {/* Per-datum coloring solo en serie única (stacking usa color de serie) */}
                         {!isMulti && Array.isArray(data) && data.length > 0 && (
                           data.map((entry, i) => (
                             <Cell key={`cell-${k}-${i}`} fill={entry?._color || COLORS[idx % COLORS.length]} />
@@ -315,68 +316,86 @@ export default function ChartModal({
                   })}
                 </BarChart>
               ) : type === "line" ? (
-                <LineChart data={data} margin={{ top: 20, right: 24, left: 16, bottom: 180 }}>
+                <LineChart data={data} margin={{ top: 16, right: 30, left: 60, bottom: 16 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis 
-                    dataKey={xKey} 
+                  <XAxis
+                    dataKey={xKey}
                     tickFormatter={(v) => String(v)}
-                    angle={-35}
+                    angle={-40}
                     textAnchor="end"
-                    height={70}
-                    tick={{ fontSize: 12 }}
-                    label={{ value: label(xKey), position: "insideBottom", offset: -12, style: { fontSize: 14, fontWeight: "bold" } }}
+                    height={80}
+                    tick={{ fontSize: 11 }}
+                    interval={0}
+                    label={{ value: label(xKey), position: "insideBottom", offset: -4, style: { fontSize: 13, fontWeight: "bold" } }}
                   />
-                  <YAxis 
+                  <YAxis
                     tick={{ fontSize: 12 }}
-                    label={{ value: yKeys.length === 1 ? label(yKeys[0]) : "Values", angle: -90, position: "insideLeft", style: { fontSize: 14, fontWeight: "bold" } }}
+                    width={60}
+                    label={{ value: yKeys.length === 1 ? label(yKeys[0]) : "Values", angle: -90, position: "insideLeft", offset: 10, style: { fontSize: 13, fontWeight: "bold" } }}
                   />
                   <Tooltip
                     formatter={(val: any, name: string) => [val, label(name)]}
                     labelFormatter={(lbl) => `${label(xKey)}: ${lbl}`}
                     contentStyle={{ backgroundColor: "rgba(255, 255, 255, 0.95)", border: "1px solid #ccc", borderRadius: "4px" }}
                   />
-                  <Legend 
-                    formatter={(value) => String(value)}
-                    verticalAlign="bottom"
-                    align="center"
-                    wrapperStyle={{ maxHeight: 72, overflowY: "auto", paddingTop: 8 }}
-                    payload={legendPayloadForSeries() as any}
-                  />
-                  {yKeys.map((k, idx) => (
-                    <Line key={k} type="monotone" dataKey={k} stroke={COLORS[idx % COLORS.length]} strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                  ))}
-                </LineChart>
-              ) : (
-                <PieChart margin={{ top: 20, right: 24, left: 16, bottom: 160 }}>
-                  <Pie
-                    data={plotData}
-                    dataKey={y0}
-                    nameKey={xKey}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={120}
-                    label={showSliceLabels ? ((entry: any) => `${String(entry[xKey] ?? "").slice(0,28)}: ${entry[y0]}`) : false}
-                    labelLine={showSliceLabels ? { stroke: "#999", strokeWidth: 1 } : false}
-                  >
-                    {plotData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry?._color || COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(val: any, name: string) => [val, label(name)]}
-                    contentStyle={{ backgroundColor: "rgba(255, 255, 255, 0.95)", border: "1px solid #ccc", borderRadius: "4px" }}
-                  />
-                  {showLegend && (
+                  {yKeys.length > 1 && (
                     <Legend
-                      formatter={(value) => String(value)}
+                      formatter={(value) => label(value)}
                       verticalAlign="bottom"
                       align="center"
-                      wrapperStyle={{ maxHeight: 120, overflowY: "auto", paddingTop: 32 }}
-                      payload={legendPayloadForPie() as any}
+                      wrapperStyle={{ paddingTop: 6 }}
+                      payload={legendPayloadForSeries() as any}
                     />
                   )}
-                </PieChart>
-              )}
+                  {yKeys.map((k, idx) => (
+                    <Line key={k} type="monotone" dataKey={k} stroke={COLORS[idx % COLORS.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  ))}
+                </LineChart>
+              ) : (() => {
+                // Pie: show inline labels only when few slices; scale radius responsively
+                const pieTotal = plotData.reduce((s: number, r: any) => s + (Number(r[y0]) || 0), 0);
+                const hasLabels = plotData.length <= 10;
+                const pieCy  = hasLabels ? "38%" : "46%";
+                const pieR   = hasLabels ? "30%" : "42%";
+                const pieLabel = hasLabels
+                  ? (entry: any) => {
+                      const pct = pieTotal > 0 ? (Number(entry[y0]) / pieTotal) * 100 : 0;
+                      if (pct < 4) return "";
+                      return `${String(entry[xKey] ?? "").slice(0, 22)}: ${entry[y0]}`;
+                    }
+                  : false;
+                return (
+                  <PieChart margin={{ top: 10, right: 20, left: 20, bottom: 10 }}>
+                    <Pie
+                      data={plotData}
+                      dataKey={y0}
+                      nameKey={xKey}
+                      cx="50%"
+                      cy={pieCy}
+                      outerRadius={pieR}
+                      label={pieLabel}
+                      labelLine={hasLabels ? { stroke: "#999", strokeWidth: 1 } : false}
+                    >
+                      {plotData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry?._color || COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(val: any, name: string) => [val, label(name)]}
+                      contentStyle={{ backgroundColor: "rgba(255, 255, 255, 0.95)", border: "1px solid #ccc", borderRadius: "4px" }}
+                    />
+                    {showLegend && (
+                      <Legend
+                        formatter={(value) => String(value)}
+                        verticalAlign="bottom"
+                        align="center"
+                        wrapperStyle={{ maxHeight: 100, overflowY: "auto", paddingTop: 8 }}
+                        payload={legendPayloadForPie() as any}
+                      />
+                    )}
+                  </PieChart>
+                );
+              })()}
             </ResponsiveContainer>
           )}
         </div>

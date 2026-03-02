@@ -1207,7 +1207,7 @@ _ISO2 = {
     "germany": "DE", "deutschland": "DE", "de": "DE",
     "italy": "IT", "italia": "IT", "it": "IT",
     "belgium": "BE", "belgië": "BE", "belgie": "BE", "belgique": "BE", "be": "BE",
-    "netherlands": "NL", "nederland": "NL", "holland": "NL", "nl": "NL",
+    "netherlands": "NL", "the netherlands": "NL", "nederland": "NL", "holland": "NL", "nl": "NL",
     "luxembourg": "LU", "luxemburg": "LU", "lu": "LU",
     "united kingdom": "GB", "uk": "GB", "gb": "GB",
     "ireland": "IE", "eire": "IE", "ie": "IE",
