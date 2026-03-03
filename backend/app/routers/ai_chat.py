@@ -33,6 +33,10 @@ EXPLORER_SEARCH_PATH   = "/api/explorer/search"
 # Max user turns to keep in history before truncating (each turn = 1 user + 1 assistant message).
 # Keeps context focused and prevents unbounded token growth in long conversations.
 MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "12"))
+# Token budget for extended thinking on complex queries.
+# The model may use up to this many tokens to reason before responding.
+# max_tokens is automatically raised to budget + 8192 when thinking is enabled.
+CLAUDE_THINKING_BUDGET = int(os.environ.get("CLAUDE_THINKING_BUDGET", "8000"))
 
 def _dbg(msg: str, *args):
     if DEBUG:
@@ -4196,6 +4200,45 @@ F) Qualification features filter (onsite pharmacy, overnight stay)
 Return only the data structures and short text described above; the UI handles rendering.
 """
 
+def _is_complex_query(text: str) -> bool:
+    """
+    Return True for queries that benefit from extended thinking:
+    - Nearest/closest + additional filter criteria
+    - Two or more distinct clinical data concepts in the same question
+    - Explicit multi-condition phrasing
+
+    Queries handled by the deterministic planner never reach Claude,
+    so we only need to catch the harder cases that do.
+    """
+    s = (text or "").lower()
+
+    # Nearest / distance + any filter qualifier → always complex
+    if re.search(r"\b(nearest|closest|cerca\s+de|próxim\w*|vicino|nahe)\b", s) and \
+       re.search(r"\b(with|that\s+have|which\s+have|que\s+tengan|stage|pharmacy|nd\b|overnight|pi\b)\b", s):
+        return True
+
+    # Count distinct clinical data concepts; ≥ 2 together = complex
+    concepts = [
+        bool(re.search(r"\bstage\s*[12]\b", s)),
+        bool(re.search(r"\b(nd\b|newly.diagnosed|new.diagnos|recién.diagnos)", s)),
+        bool(re.search(r"\b(pharmacy|farmacia|on.?site.?pharm)", s)),
+        bool(re.search(r"\b(overnight|pernoctaci|stay\s+overnight)", s)),
+        bool(re.search(r"\b(pi\b|principal.investigator|coord\w+)", s)),
+        bool(re.search(r"\b(hla|typing)\b", s)),
+        bool(re.search(r"\b(phase\s*[i123]|ct.?site|clinical.trial\s+site)", s)),
+        bool(re.search(r"\b(assignment|mca|payment)\b", s)),
+    ]
+    if sum(concepts) >= 2:
+        return True
+
+    # Explicit multi-condition connectors in a data query
+    if re.search(r"\b(and\s+(?:also|with|have)|además\s+de|y\s+también)\b", s) and \
+       re.search(r"\b(site|center|centro|account)\b", s):
+        return True
+
+    return False
+
+
 def _truncate_history(messages: List[Any], max_turns: int = MAX_HISTORY_TURNS) -> List[Any]:
     """
     Keep only the last `max_turns` user messages and everything after them.
@@ -4232,6 +4275,7 @@ def _claude_chat(
     tool_choice: str = "required",
     *,
     force_no_tools: bool = False,
+    use_thinking: bool = False,
 ):
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -4342,10 +4386,24 @@ def _claude_chat(
         kwargs["tools"] = cached_tools
         kwargs["tool_choice"] = {"type": "any"} if tool_choice == "required" else {"type": "auto"}
 
+    # Extended thinking — enabled for complex multi-condition queries.
+    # Claude reasons silently before choosing tools/writing its answer.
+    # budget_tokens = max internal reasoning tokens (not billed as output).
+    # max_tokens is raised so the response fits after the thinking budget.
+    if use_thinking and CLAUDE_THINKING_BUDGET > 0:
+        kwargs["thinking"] = {"type": "enabled", "budget_tokens": CLAUDE_THINKING_BUDGET}
+        kwargs["max_tokens"] = CLAUDE_THINKING_BUDGET + 8192
+        kwargs["betas"] = ["interleaved-thinking-2025-05-14"]
+        _dbg("Extended thinking ENABLED — budget=%d tokens", CLAUDE_THINKING_BUDGET)
+
     # 4. Call Claude API
+    # When thinking is enabled we pass `betas` via extra_headers so the standard
+    # messages.create() endpoint handles it without needing the beta namespace.
     try:
         aclient = _anthropic_sdk.Anthropic(api_key=api_key)
-        response = aclient.messages.create(**kwargs)
+        betas = kwargs.pop("betas", None)
+        extra_headers = {"anthropic-beta": ",".join(betas)} if betas else {}
+        response = aclient.messages.create(**kwargs, extra_headers=extra_headers)
         # Log cache efficiency stats
         if DEBUG and hasattr(response, "usage"):
             u = response.usage
@@ -4391,10 +4449,18 @@ def _claude_chat(
         elif block.type == "tool_use":
             args_str = json.dumps(block.input or {}, default=str)
             tool_calls.append(MockToolCall(block.id, block.name, args_str))
+        # "thinking" blocks are internal reasoning — skipped intentionally
 
     content_str = "\n".join(text_parts) if text_parts else None
-    _dbg("Claude Response: text=%d chars, tools=%d stop=%s",
-         len(content_str or ""), len(tool_calls), response.stop_reason)
+
+    if DEBUG:
+        thinking_blocks = [b for b in (response.content or []) if getattr(b, "type", "") == "thinking"]
+        thinking_chars = sum(len(getattr(b, "thinking", "") or "") for b in thinking_blocks)
+        _dbg("Claude Response: text=%d chars, tools=%d, thinking=%d chars, stop=%s",
+             len(content_str or ""), len(tool_calls), thinking_chars, response.stop_reason)
+    else:
+        _dbg("Claude Response: text=%d chars, tools=%d stop=%s",
+             len(content_str or ""), len(tool_calls), response.stop_reason)
 
     return OpenAICompatibleResponse(OpenAICompatibleMessage(content_str, tool_calls if tool_calls else None))
 
@@ -6858,9 +6924,11 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     # Si hay intención de datos → obligamos tool-calls
     tool_mode = "required" if data_intent else "auto"
     reinforced_once = False
-    _dbg("ROUND call → tool_choice=%s | data_intent=%s", tool_mode, data_intent)
+    # Enable extended thinking for complex multi-condition queries.
+    _complex = _is_complex_query(user_utterance)
+    _dbg("ROUND call → tool_choice=%s | data_intent=%s | thinking=%s", tool_mode, data_intent, _complex)
     try:
-        resp = _claude_chat(msgs, tool_choice=tool_mode)
+        resp = _claude_chat(msgs, tool_choice=tool_mode, use_thinking=_complex)
     except (APITimeoutError, APIConnectionError, RateLimitError) as e:
         _dbg("OpenAI Error (1st attempt): %s", e)
         return {"answer": f"<p>Service temporarily unavailable (timeout/connection). Please try again later. ({str(e)[:50]})</p>"}
@@ -6883,9 +6951,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             )
         })
         reinforced_once = True
-        # Reintento inmediato forzando herramientas
+        # Retry without thinking — the reinforcement hint is enough for retries
         try:
-            resp = _claude_chat(msgs, tool_choice="required")
+            resp = _claude_chat(msgs, tool_choice="required", use_thinking=False)
         except (APITimeoutError, APIConnectionError, RateLimitError) as e:
             _dbg("OpenAI Error (retry): %s", e)
             return {"answer": f"<p>Service temporarily unavailable (timeout/connection) during retry. ({str(e)[:50]})</p>"}
