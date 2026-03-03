@@ -51,6 +51,62 @@ export async function askAI(
 }
 
 
+/**
+ * Streaming version of askAI — uses the /api/ai/chat/stream SSE endpoint.
+ * Calls `onToken(chunk)` for each text fragment Claude generates,
+ * then returns the complete ChatResponse when the stream finishes.
+ */
+export async function askAIStream(
+  prompt: string,
+  lastTable?: TablePayload | null,
+  lastFilters?: Record<string, any> | null,
+  onToken?: (text: string) => void,
+): Promise<ChatResponse> {
+  const payload: any = { messages: [{ role: "user", content: prompt }] };
+  if (lastTable && lastTable.rows && lastTable.rows.length > 0)
+    payload.last_table = lastTable;
+  if (lastFilters && Array.isArray(lastFilters.rules) && lastFilters.rules.length > 0)
+    payload.last_filters = lastFilters;
+
+  const res = await fetch("/api/ai/chat/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResult: ChatResponse = {};
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      let data: any;
+      try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+      if (data.type === "token") {
+        onToken?.(data.text ?? "");
+      } else if (data.type === "done") {
+        const { type: _t, ...rest } = data;
+        finalResult = rest as ChatResponse;
+      } else if (data.type === "error") {
+        throw new Error(data.message ?? "Stream error");
+      }
+    }
+  }
+  return finalResult;
+}
+
 // ---- Explorer helpers for follow-up ---------------------------------
 export async function columnsFill(accountIds: string[], columns: string[]) {
   const res = await fetch("/api/explorer/columns/fill", {

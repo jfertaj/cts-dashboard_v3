@@ -3,6 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Literal, Optional, Any, Dict, Tuple
 import os, json, re
+import threading
+import queue as _std_queue
 import httpx
 import unicodedata
 from sqlalchemy import text
@@ -37,6 +39,9 @@ MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "12"))
 # The model may use up to this many tokens to reason before responding.
 # max_tokens is automatically raised to budget + 8192 when thinking is enabled.
 CLAUDE_THINKING_BUDGET = int(os.environ.get("CLAUDE_THINKING_BUDGET", "8000"))
+# Thread-local used by the /chat/stream endpoint to receive token chunks
+# from _claude_chat without changing any function signatures.
+_STREAM_Q: threading.local = threading.local()
 
 def _dbg(msg: str, *args):
     if DEBUG:
@@ -4399,11 +4404,24 @@ def _claude_chat(
     # 4. Call Claude API
     # When thinking is enabled we pass `betas` via extra_headers so the standard
     # messages.create() endpoint handles it without needing the beta namespace.
+    # When _STREAM_Q.q is set (by /chat/stream endpoint), we use streaming mode:
+    # text chunks are put into the queue so the SSE endpoint can yield them
+    # progressively; the final Message object is used the same way as non-streaming.
     try:
         aclient = _anthropic_sdk.Anthropic(api_key=api_key)
         betas = kwargs.pop("betas", None)
         extra_headers = {"anthropic-beta": ",".join(betas)} if betas else {}
-        response = aclient.messages.create(**kwargs, extra_headers=extra_headers)
+        token_q = getattr(_STREAM_Q, "q", None)
+
+        if token_q is not None:
+            # Streaming mode — yield text chunks into the queue
+            with aclient.messages.stream(**kwargs, extra_headers=extra_headers) as stream:
+                for text_chunk in stream.text_stream:
+                    token_q.put(text_chunk)
+                response = stream.get_final_message()
+        else:
+            response = aclient.messages.create(**kwargs, extra_headers=extra_headers)
+
         # Log cache efficiency stats
         if DEBUG and hasattr(response, "usage"):
             u = response.usage
@@ -4470,6 +4488,67 @@ def _sf_escape_value(v: str) -> str:
         return str(v).replace("'", "\\'")
     except Exception:
         return ""
+
+
+@router.post("/chat/stream")
+def chat_stream_api(payload: ChatRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    SSE streaming endpoint.
+    Yields text tokens as Claude generates them, then a final 'done' event
+    with the full JSON payload (answer, table, last_filters, visualization).
+
+    Event format:
+      data: {"type":"token","text":"<html chunk>"}
+      data: {"type":"done","answer":"...","table":{...},...}
+      data: {"type":"error","message":"..."}
+    """
+    from fastapi.responses import StreamingResponse as _SR
+
+    token_q: _std_queue.Queue = _std_queue.Queue()
+    result_holder: Dict[str, Any] = {}
+
+    def worker():
+        _STREAM_Q.q = token_q
+        try:
+            result_holder["r"] = chat_api(payload, request, db)
+        except Exception as exc:
+            import traceback
+            _dbg("STREAM worker error: %s\n%s", exc, traceback.format_exc())
+            result_holder["error"] = str(exc)
+        finally:
+            _STREAM_Q.q = None
+            token_q.put(None)  # sentinel — signals end of stream
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+
+    def generate():
+        while True:
+            try:
+                chunk = token_q.get(timeout=180)
+            except _std_queue.Empty:
+                yield f"data: {json.dumps({'type':'error','message':'Stream timeout'})}\n\n"
+                break
+            if chunk is None:
+                break
+            yield f"data: {json.dumps({'type':'token','text':chunk})}\n\n"
+
+        t.join(timeout=10)
+        if "error" in result_holder:
+            yield f"data: {json.dumps({'type':'error','message':result_holder['error']})}\n\n"
+        else:
+            r = result_holder.get("r") or {}
+            yield f"data: {json.dumps({'type':'done', **r}, default=str)}\n\n"
+
+    return _SR(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disable nginx buffering for SSE
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.post("/chat")

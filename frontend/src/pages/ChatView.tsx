@@ -1,6 +1,6 @@
 // src/pages/ChatView.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { askAI, ChatResponse, getFieldsIndex } from "../lib/ai";
+import { askAI, askAIStream, ChatResponse, getFieldsIndex } from "../lib/ai";
 import ChartModal from "../components/ChartModal";
 import Moby from "../assets/Moby.png";
 import AIResultTable from "../components/AIResultTable";
@@ -48,6 +48,8 @@ export default function ChatView() {
 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // Accumulates text tokens while Claude streams; cleared when done
+  const [streamText, setStreamText] = useState("");
   const [lastUserQ, setLastUserQ] = useState<string>("");
   const [lastTableForAI, setLastTableForAI] = useState<{columns: any[], rows: any[]} | null>(null);
   const [lastFiltersForAI, setLastFiltersForAI] = useState<Record<string,any> | null>(null);
@@ -611,8 +613,12 @@ export default function ChatView() {
         setBusy(false);
         return;
       }
-      // LLM
-      const resp: ChatResponse = await askAI(text, lastTableForAI, lastFiltersForAI);
+      // LLM (streaming)
+      setStreamText("");
+      const resp = await askAIStream(text, lastTableForAI, lastFiltersForAI, (chunk) => {
+        setStreamText((prev) => prev + chunk);
+      });
+      setStreamText("");
       handleArtifacts(resp);
     } catch (e: any) {
       setMessages((m) => [
@@ -1048,7 +1054,15 @@ export default function ChatView() {
               </div>
             </div>
           ))}
-          {busy && <div className="text-sm text-gray-500">Moby is thinking…</div>}
+          {streamText && (
+            <div className="flex justify-start">
+              <div
+                className={`rounded-xl px-3 py-2 bg-gray-100 ${ASSISTANT_HTML_CLS}`}
+                dangerouslySetInnerHTML={{ __html: streamText + "▋" }}
+              />
+            </div>
+          )}
+          {busy && !streamText && <div className="text-sm text-gray-500">Moby is thinking…</div>}
         </div>
 
         {/* Input area */}
