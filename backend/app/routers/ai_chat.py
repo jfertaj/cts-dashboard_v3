@@ -22,9 +22,7 @@ from app.routers.salesforce_explorer import _build_account_map
 from openai import OpenAI, APITimeoutError, APIConnectionError, RateLimitError
 from app.services.sf_labels import humanize_headers
 from app.utils.soql_helpers import build_followup_accounts_query
-import google.generativeai as genai
-from google.ai.generativelanguage import Content, Part, FunctionCall, FunctionResponse
-from google.protobuf.struct_pb2 import Struct
+import anthropic as _anthropic_sdk
 
 DEBUG = os.environ.get("AI_CHAT_DEBUG", "0") == "1"
 INDEX_REFRESH_SEC = int(os.environ.get("AI_INDEX_REFRESH_SEC", "600"))
@@ -4195,7 +4193,7 @@ F) Qualification features filter (onsite pharmacy, overnight stay)
 Return only the data structures and short text described above; the UI handles rendering.
 """
 
-# --- Adapter for Gemini ---
+# --- OpenAI-compatible adapter (used by _claude_chat) ---
 class OpenAICompatibleMessage:
     def __init__(self, content, tool_calls=None):
         self.content = content
@@ -4209,298 +4207,155 @@ class OpenAICompatibleResponse:
     def __init__(self, message):
         self.choices = [OpenAICompatibleChoice(message)]
 
-def _strip_unsupported_fields(schema: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(schema, dict):
-        return schema
-    # Remove additionalProperties and default as Gemini doesn't support them in FunctionDeclaration wrapper
-    new_schema = {k: v for k, v in schema.items() if k not in ("additionalProperties", "default")}
-    
-    # Recurse for properties
-    if "properties" in new_schema and isinstance(new_schema["properties"], dict):
-         new_schema["properties"] = {
-             pk: _strip_unsupported_fields(pv) 
-             for pk, pv in new_schema["properties"].items()
-         }
-         # Remove properties if empty to avoid Schema validation errors
-         if not new_schema["properties"]:
-             del new_schema["properties"]
-    
-    # Clean 'required' list: remove keys that are not in 'properties'
-    if "required" in new_schema and isinstance(new_schema["required"], list):
-        props = new_schema.get("properties", {})
-        new_schema["required"] = [k for k in new_schema["required"] if k in props]
-        if not new_schema["required"]:
-            del new_schema["required"]
-
-    # Recurse for items (arrays)
-    if "items" in new_schema and isinstance(new_schema["items"], dict):
-        new_schema["items"] = _strip_unsupported_fields(new_schema["items"])
-
-    # Recurse for type object
-    if new_schema.get("type") == "object" and "properties" not in new_schema:
-        # If object has no properties, it might be treated as generic Dict, ensuring no required
-        if "required" in new_schema:
-             del new_schema["required"]
-        
-    return new_schema
-
-def _convert_tools_to_gemini(tools_spec):
-    # Gemini uses a list of FunctionDeclarations wrapped in a 'tools' list
-    funcs = []
-    for t in tools_spec:
-        f = t["function"]
-        # Basic mapping. Gemini handles the JSON schema in 'parameters' quite well.
-        # BUT we must strip 'additionalProperties' which causes ValueError
-        params = f.get("parameters")
-        if params:
-            params = _strip_unsupported_fields(params)
-            
-        funcs.append(genai.types.FunctionDeclaration(
-            name=f["name"],
-            description=f.get("description"),
-            parameters=params
-        ))
-    return funcs
-
-def _validate_and_filter_tools(funcs):
-    """
-    Iteratively validates function declarations by trying to create a Tool with each one.
-    Returns only the valid functions.
-    """
-    valid_funcs = []
-    for f in funcs:
-        try:
-            # Try creating a Tool with just this single function
-            # Note: Tool constructor expects a list of FunctionDeclarations
-            genai.types.Tool(function_declarations=[f])
-            valid_funcs.append(f)
-        except Exception as e:
-            _dbg("SKIPPING IMPOSSIBLE TOOL '%s': %s", f.name, e)
-    
-    if len(valid_funcs) < len(funcs):
-        _dbg("Dropped %d tools due to schema validation errors.", len(funcs) - len(valid_funcs))
-    
-    return valid_funcs
-
-def _gemini_chat(
+def _claude_chat(
     messages: List[Dict[str, Any]],
     tool_choice: str = "required",
     *,
     force_no_tools: bool = False,
 ):
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        _dbg("ERROR: GOOGLE_API_KEY not found. Fallback or fail.")
-        # If no key, maybe fallback to OpenAI or raise error? 
-        # For now let's raise error so user knows setup is incomplete
-        raise Exception("GOOGLE_API_KEY not set")
+        raise Exception("ANTHROPIC_API_KEY not set")
 
-    genai.configure(api_key=api_key)
-    
-    # 1. Extract System Instruction & Map Tool IDs
-    system_instruction = None
-    tool_id_map = {} # map tool_call_id -> function_name
+    model_name = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
-    # First pass to find tool call ids
-    for m in messages:
-        if m.get("role") == "assistant" and m.get("tool_calls"):
-            for tc in m["tool_calls"]:
-                # tc is an object from OpenAI SDK or a dict? structure in ai_chat logic uses objects usually?
-                # current logic in ai_chat constructs manual dicts for history?
-                # Check lines 5119: msgs.append({"role":"tool"...})
-                # Check lines 4964: assistant_msg.tool_calls (object)
-                # But when appending to history (line 4998), it appends assistant_msg.content (str)
-                # Wait, does ai_chat append the full tool_calls object to history?
-                # Line 4998: msgs.append({"role": "assistant", "content": ..., "tool_calls": ...})?
-                # I need to check how it saves assistant message.
-                # Assuming standard OpenAI format: dict with 'tool_calls' list
-                if hasattr(tc, 'id'):
-                    tool_id_map[tc.id] = tc.function.name
-                elif isinstance(tc, dict):
-                     tool_id_map.get(tc.get("id"), tc.get("function", {}).get("name"))
-                     # Dict structure: {'id': '...', 'function': {'name': '...'}}
-                     tool_id_map[tc["id"]] = tc["function"]["name"]
-
-    # 2. Build Gemini History
-    history = []
-    for m in messages:
-        role = m.get("role")
-        content = m.get("content")
-        
-        if role == "system":
-            system_instruction = content
-        elif role == "user":
-            history.append({"role": "user", "parts": [content]})
-        elif role == "assistant":
-            parts = []
-            if content:
-                parts.append(content)
-            
-            tcs = m.get("tool_calls")
-            if tcs:
-                for tc in tcs:
-                    # Construct FunctionCall part
-                    if hasattr(tc, 'function'): # Object
-                        fname = tc.function.name
-                        fargs = json.loads(tc.function.arguments)
-                        # We also update map here if missed
-                        if hasattr(tc, 'id'): tool_id_map[tc.id] = fname
-                    else: # Dict
-                        fname = tc["function"]["name"]
-                        fargs = json.loads(tc["function"]["arguments"])
-                        if "id" in tc: tool_id_map[tc["id"]] = fname
-                    
-                    parts.append(genai.types.content_types.Part(
-                        function_call=genai.types.content_types.FunctionCall(name=fname, args=fargs)
-                    ))
-            
-            history.append({"role": "model", "parts": parts})
-            
-        elif role == "tool":
-            # Gemini 'function_response' must be sent by User
-            tid = m.get("tool_call_id")
-            fname = tool_id_map.get(tid)
-            if not fname:
-                _dbg("WARN: Unknown tool_call_id %s, skipping", tid)
-                continue
-            
-            # Content is JSON string
-            try:
-                response_data = json.loads(content)
-            except:
-                response_data = {"result": str(content)}
-                
-            history.append({
-                "role": "user",
-                "parts": [
-                    genai.types.content_types.Part(
-                        function_response=genai.types.content_types.FunctionResponse(name=fname, response=response_data)
-                    )
-                ]
+    # 1. Convert TOOLS_SPEC (OpenAI format) → Claude format
+    claude_tools = []
+    if not force_no_tools:
+        for t in TOOLS_SPEC:
+            f = t["function"]
+            params = f.get("parameters") or {"type": "object", "properties": {}}
+            claude_tools.append({
+                "name": f["name"],
+                "description": f.get("description", ""),
+                "input_schema": params,
             })
 
-    # 3. Configure Model
-    # Gemini 1.5 Flash is fast and cheap
-    # Tools
-    tools_arg = []
-    if not force_no_tools:
-        # Pasa lista plana para evitar errores de constructor Tool(list)
-        full_funcs = _convert_tools_to_gemini(TOOLS_SPEC)
-        tools_arg = _validate_and_filter_tools(full_funcs)
+    # 2. Separate system prompt and build Claude message list
+    system_parts: List[str] = []
+    claude_messages: List[Dict[str, Any]] = []
 
-    # Prefer GOOGLE_MODEL (user env), then GEMINI_MODEL (legacy), default to gemini-3.1-pro-preview
-    model_name = os.environ.get("GOOGLE_MODEL", os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview"))
-    model = None
-    
-    # Intento 1: Con herramientas
-    try:
-        if tools_arg:
-            # Create a Tool object from the list of FunctionDeclarations
-            tool_obj = genai.types.Tool(function_declarations=tools_arg)
-            model = genai.GenerativeModel(model_name, tools=[tool_obj], system_instruction=system_instruction)
-    except Exception as e:
-        _dbg("Gemini Tool Init Failed (falling back to no tools): %s", e)
-        # Fallback explícito a sin herramientas
-        tools_arg = []
-    
-    # Intento 2 (o por defecto): Sin herramientas si falló el anterior o no había
-    if model is None:
-        try:
-            model = genai.GenerativeModel(model_name, tools=None, system_instruction=system_instruction)
-        except Exception as e:
-            _dbg("Gemini Model Init Critical Failure: %s", e)
-            return OpenAICompatibleResponse(OpenAICompatibleMessage(f"System Error: Failed to initialize AI model. ({str(e)})"))
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        role = m.get("role")
+        content = m.get("content") or ""
 
-    # Tool Config
-    # tool_choice='required' -> ANY
-    # tool_choice='auto' -> AUTO
-    tool_config = None
-    if not force_no_tools and tools_arg: # Only apply tool_config if tools were successfully initialized
-        mode = "AUTO"
-        if tool_choice == "required":
-            mode = "ANY"
-        tool_config = {"function_calling_config": {"mode": mode}}
-    
-    # 4. Generate
+        if role == "system":
+            system_parts.append(content)
+            i += 1
+
+        elif role == "user":
+            claude_messages.append({"role": "user", "content": content})
+            i += 1
+
+        elif role == "assistant":
+            tcs = m.get("tool_calls")
+            if tcs:
+                parts: List[Dict[str, Any]] = []
+                if content:
+                    parts.append({"type": "text", "text": content})
+                for tc in tcs:
+                    if hasattr(tc, "function"):
+                        name = tc.function.name
+                        args = json.loads(tc.function.arguments or "{}")
+                        tid = tc.id
+                    elif isinstance(tc, dict):
+                        fn = tc.get("function", {})
+                        name = fn.get("name", "")
+                        args = json.loads(fn.get("arguments", "{}"))
+                        tid = tc.get("id", "")
+                    else:
+                        continue
+                    parts.append({"type": "tool_use", "id": tid, "name": name, "input": args})
+                claude_messages.append({"role": "assistant", "content": parts})
+            else:
+                claude_messages.append({"role": "assistant", "content": content})
+            i += 1
+
+        elif role == "tool":
+            # Collect consecutive tool-result messages into one user turn
+            tool_results: List[Dict[str, Any]] = []
+            while i < len(messages) and messages[i].get("role") == "tool":
+                tm = messages[i]
+                raw = tm.get("content") or ""
+                # Keep as string for Claude tool_result content
+                try:
+                    parsed = json.loads(raw)
+                    result_str = json.dumps(parsed, default=str) if not isinstance(parsed, str) else parsed
+                except Exception:
+                    result_str = str(raw)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tm.get("tool_call_id", ""),
+                    "content": result_str,
+                })
+                i += 1
+            claude_messages.append({"role": "user", "content": tool_results})
+
+        else:
+            i += 1
+
+    system_text = "\n\n".join(system_parts) if system_parts else None
+
+    # 3. Build API call kwargs
+    kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "max_tokens": 8192,
+        "messages": claude_messages,
+    }
+    if system_text:
+        kwargs["system"] = system_text
+    if claude_tools:
+        kwargs["tools"] = claude_tools
+        kwargs["tool_choice"] = {"type": "any"} if tool_choice == "required" else {"type": "auto"}
+
+    # 4. Call Claude API
     try:
-        response = model.generate_content(history, tool_config=tool_config if tools_arg else None)
+        aclient = _anthropic_sdk.Anthropic(api_key=api_key)
+        response = aclient.messages.create(**kwargs)
     except Exception as e:
         import traceback
-        from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable, NotFound
-        
-        err_msg = f"AI Service Error: {str(e)}"
-        if isinstance(e, ResourceExhausted):
-            err_msg = "Quota Exceeded: The free tier quota for Gemini API has been exhausted. Please try again later."
-        elif isinstance(e, ServiceUnavailable):
-            err_msg = "Service Unavailable: Gemini API is currently down. Please try again later."
-        elif isinstance(e, NotFound):
-             err_msg = f"Model Not Found: {model_name} is unavailable or invalid."
+        _dbg("Claude API Error: %s\n%s", e, traceback.format_exc())
+        return OpenAICompatibleResponse(OpenAICompatibleMessage(f"AI Service Error: {str(e)}"))
 
-        _dbg("Gemini Generate Error: %s\n%s", e, traceback.format_exc())
-        return OpenAICompatibleResponse(OpenAICompatibleMessage(err_msg))
-
-    # 5. Adapt Response to OpenAI format
-    # Response might have text, or function calls, or both.
-    
-    try:
-        cand = response.candidates[0]
-        parts = cand.content.parts
-    except:
-         # Blocked or empty?
-        _dbg("Gemini Empty/Blocked Response: %s", response)
-        return OpenAICompatibleResponse(OpenAICompatibleMessage("I'm sorry, I couldn't generate a response."))
-        
-    final_text = []
-    final_tool_calls = []
-    
-    # Mock class for ToolCall
+    # 5. Parse response content blocks → MockToolCall adapters
     class MockFunction:
-        def __init__(self, name, args_str):
+        def __init__(self, name: str, args_str: str):
             self.name = name
             self.arguments = args_str
+
     class MockToolCall:
-        def __init__(self, id, name, args_str):
-            self.id = id
-            self.type = 'function'
+        def __init__(self, tid: str, name: str, args_str: str):
+            self.id = tid
+            self.type = "function"
             self.function = MockFunction(name, args_str)
-            
-        def model_dump(self):
+
+        def model_dump(self) -> Dict[str, Any]:
             return {
                 "id": self.id,
                 "type": self.type,
                 "function": {
                     "name": self.function.name,
-                    "arguments": self.function.arguments
-                }
+                    "arguments": self.function.arguments,
+                },
             }
 
-    for p in parts:
-        if p.text:
-            final_text.append(p.text)
-        if p.function_call:
-            # We need a dummy ID because OpenAI expects one to link the response later
-            # We can generate a UUID or just use 'call_<random>'
-            import uuid
-            call_id = f"call_{str(uuid.uuid4())[:8]}"
-            # args to json string
-            # Convert protobuf args to dict recursively to handle RepeatedComposite
-            def _proto_to_dict(obj):
-                if hasattr(obj, "items"):
-                    return {k: _proto_to_dict(v) for k, v in obj.items()}
-                elif hasattr(obj, "__iter__") and not isinstance(obj, (str, bytes)):
-                    return [_proto_to_dict(v) for v in obj]
-                return obj
+    text_parts: List[str] = []
+    tool_calls: List[MockToolCall] = []
 
-            args_dict = _proto_to_dict(p.function_call.args)
-            args_str = json.dumps(args_dict)
-            final_tool_calls.append(MockToolCall(call_id, p.function_call.name, args_str))
-            
-    content_str = "\n".join(final_text) if final_text else None
-    
-    # Debug
-    _dbg("Gemini Response: text=%d chars, tools=%d", len(content_str or ""), len(final_tool_calls))
-    
-    return OpenAICompatibleResponse(OpenAICompatibleMessage(content_str, final_tool_calls if final_tool_calls else None))
+    for block in (response.content or []):
+        if block.type == "text":
+            text_parts.append(block.text)
+        elif block.type == "tool_use":
+            args_str = json.dumps(block.input or {}, default=str)
+            tool_calls.append(MockToolCall(block.id, block.name, args_str))
+
+    content_str = "\n".join(text_parts) if text_parts else None
+    _dbg("Claude Response: text=%d chars, tools=%d stop=%s",
+         len(content_str or ""), len(tool_calls), response.stop_reason)
+
+    return OpenAICompatibleResponse(OpenAICompatibleMessage(content_str, tool_calls if tool_calls else None))
 
 # ====== Endpoint ======
 def _sf_escape_value(v: str) -> str:
@@ -6964,7 +6819,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     reinforced_once = False
     _dbg("ROUND call → tool_choice=%s | data_intent=%s", tool_mode, data_intent)
     try:
-        resp = _gemini_chat(msgs, tool_choice=tool_mode)
+        resp = _claude_chat(msgs, tool_choice=tool_mode)
     except (APITimeoutError, APIConnectionError, RateLimitError) as e:
         _dbg("OpenAI Error (1st attempt): %s", e)
         return {"answer": f"<p>Service temporarily unavailable (timeout/connection). Please try again later. ({str(e)[:50]})</p>"}
@@ -6989,7 +6844,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         reinforced_once = True
         # Reintento inmediato forzando herramientas
         try:
-            resp = _gemini_chat(msgs, tool_choice="required")
+            resp = _claude_chat(msgs, tool_choice="required")
         except (APITimeoutError, APIConnectionError, RateLimitError) as e:
             _dbg("OpenAI Error (retry): %s", e)
             return {"answer": f"<p>Service temporarily unavailable (timeout/connection) during retry. ({str(e)[:50]})</p>"}

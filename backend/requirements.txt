@@ -13,5 +13,5 @@ simple-salesforce
 httpx
 itsdangerous
 openai>=1.35.0
-google-generativeai
+anthropic>=0.40.0
 # typing  <-- sobra, quítalo (es parte de la stdlib en Python 3.11)
