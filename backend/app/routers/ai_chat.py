@@ -30,6 +30,9 @@ FIELDS_SF_JSON_PATH = os.environ.get("FIELDS_SF_JSON_PATH", "app/config/fields_o
 QUAL_ALIAS_JSON_PATH = os.environ.get("QUAL_ALIAS_JSON_PATH", "app/config/qualification_aliases.json")
 EXPLORER_DRIVE_KM_PATH = "/api/explorer/search/within-drive-km"
 EXPLORER_SEARCH_PATH   = "/api/explorer/search"
+# Max user turns to keep in history before truncating (each turn = 1 user + 1 assistant message).
+# Keeps context focused and prevents unbounded token growth in long conversations.
+MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "12"))
 
 def _dbg(msg: str, *args):
     if DEBUG:
@@ -4193,6 +4196,23 @@ F) Qualification features filter (onsite pharmacy, overnight stay)
 Return only the data structures and short text described above; the UI handles rendering.
 """
 
+def _truncate_history(messages: List[Any], max_turns: int = MAX_HISTORY_TURNS) -> List[Any]:
+    """
+    Keep only the last `max_turns` user messages and everything after them.
+    Prevents unbounded context growth in long conversations.
+    Works on both List[ChatMessage] and List[Dict] (role/content dicts).
+    """
+    def _role(m: Any) -> str:
+        return m.role if hasattr(m, "role") else m.get("role", "")
+
+    user_indices = [i for i, m in enumerate(messages) if _role(m) == "user"]
+    if len(user_indices) <= max_turns:
+        return messages
+    cut_at = user_indices[-max_turns]
+    _dbg("History truncated: kept last %d user turns (dropped first %d messages)", max_turns, cut_at)
+    return messages[cut_at:]
+
+
 # --- OpenAI-compatible adapter (used by _claude_chat) ---
 class OpenAICompatibleMessage:
     def __init__(self, content, tool_calls=None):
@@ -4298,22 +4318,43 @@ def _claude_chat(
 
     system_text = "\n\n".join(system_parts) if system_parts else None
 
-    # 3. Build API call kwargs
+    # 3. Build API call kwargs with prompt caching
+    # The system prompt (~4 600 tokens) and 31-tool TOOLS_SPEC are large static payloads
+    # that are identical across every request — perfect candidates for ephemeral caching.
+    # Cache hits cost ~10% of normal input tokens and return ~2× faster.
     kwargs: Dict[str, Any] = {
         "model": model_name,
         "max_tokens": 8192,
         "messages": claude_messages,
     }
+
+    # System: pass as a list of content blocks so we can attach cache_control.
+    # Minimum cacheable size for Sonnet is 1024 tokens; our prompt is ~4 600 ✓
     if system_text:
-        kwargs["system"] = system_text
+        kwargs["system"] = [
+            {"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}
+        ]
+
     if claude_tools:
-        kwargs["tools"] = claude_tools
+        # Cache breakpoint on the last tool — caches the entire tools list as a prefix.
+        cached_tools = [t.copy() for t in claude_tools]
+        cached_tools[-1] = {**cached_tools[-1], "cache_control": {"type": "ephemeral"}}
+        kwargs["tools"] = cached_tools
         kwargs["tool_choice"] = {"type": "any"} if tool_choice == "required" else {"type": "auto"}
 
     # 4. Call Claude API
     try:
         aclient = _anthropic_sdk.Anthropic(api_key=api_key)
         response = aclient.messages.create(**kwargs)
+        # Log cache efficiency stats
+        if DEBUG and hasattr(response, "usage"):
+            u = response.usage
+            cached_read  = getattr(u, "cache_read_input_tokens",    0) or 0
+            cached_write = getattr(u, "cache_creation_input_tokens", 0) or 0
+            _dbg(
+                "Token usage → input:%d cache_write:%d cache_read:%d output:%d",
+                u.input_tokens, cached_write, cached_read, u.output_tokens,
+            )
     except Exception as e:
         import traceback
         _dbg("Claude API Error: %s\n%s", e, traceback.format_exc())
@@ -6411,7 +6452,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             )
         })
 
-    for m in payload.messages:
+    for m in _truncate_history(payload.messages):
         msgs.append({"role": m.role, "content": m.content})
 
     # Inicializar last_table desde el payload si está disponible
