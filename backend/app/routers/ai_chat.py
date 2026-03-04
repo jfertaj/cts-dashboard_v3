@@ -7827,6 +7827,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     out["last_filters"] = last_explorer_filters
                 return out
 
+    # 2) Respuesta de texto puro (sin tool calls) — Claude respondió con lenguaje natural
+    #    p.ej. follow-ups conversacionales: "how many is that?", "double that number", etc.
+    if not assistant_msg.tool_calls:
+        raw_text = (assistant_msg.content or "").strip()
+        if raw_text:
+            out: Dict[str, Any] = {"answer": raw_text}
+            if last_explorer_filters:
+                out["last_filters"] = last_explorer_filters
+            return out
+
     # Fallback: si agotamos rondas pero sí hay datos, devolvemos algo útil
     if last_table:
         rows = last_table.get("rows", [])
