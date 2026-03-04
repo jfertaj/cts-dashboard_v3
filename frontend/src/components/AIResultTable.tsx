@@ -5,9 +5,10 @@ type Props = {
   columns: { key: string; label?: string }[];
   rows: Array<Record<string, any>>;
   onPersist?: (columns: Props["columns"], rows: Props["rows"]) => void;
+  onRowClick?: (row: Record<string, any>) => void;
 };
 
-export default function AIResultTable({ columns, rows }: Props) {
+export default function AIResultTable({ columns, rows, onRowClick }: Props) {
   useEffect(() => {
     // notifica al parent para que pueda persistir/derivar account_ids
     if (typeof window !== "undefined" && rows?.length && columns?.length) {
@@ -29,7 +30,11 @@ export default function AIResultTable({ columns, rows }: Props) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className={i % 2 ? "bg-white" : "bg-gray-50/50"}>
+            <tr
+              key={i}
+              className={`${i % 2 ? "bg-white" : "bg-gray-50/50"} ${onRowClick ? "cursor-pointer hover:bg-blue-50" : ""}`}
+              onClick={() => onRowClick?.(r)}
+            >
               {columns.map((c) => (
                 <td key={c.key} className="px-3 py-2 whitespace-nowrap">
                   {String(r[c.key] ?? "")}

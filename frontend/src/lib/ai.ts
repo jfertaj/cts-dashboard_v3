@@ -24,10 +24,13 @@ export type ChatResponse = {
 export async function askAI(
   prompt: string,
   lastTable?: TablePayload | null,
-  lastFilters?: Record<string, any> | null
+  lastFilters?: Record<string, any> | null,
+  history?: Array<{role: "user" | "assistant"; content: string}>,
 ): Promise<ChatResponse> {
   const payload: any = {
-    messages: [{ role: "user", content: prompt }],
+    messages: history && history.length > 0
+      ? history
+      : [{ role: "user", content: prompt }],
   };
 
   // Incluir last_table si está disponible para follow-ups eficientes
@@ -61,8 +64,13 @@ export async function askAIStream(
   lastTable?: TablePayload | null,
   lastFilters?: Record<string, any> | null,
   onToken?: (text: string) => void,
+  history?: Array<{role: "user" | "assistant"; content: string}>,
 ): Promise<ChatResponse> {
-  const payload: any = { messages: [{ role: "user", content: prompt }] };
+  const payload: any = {
+    messages: history && history.length > 0
+      ? history
+      : [{ role: "user", content: prompt }],
+  };
   if (lastTable && lastTable.rows && lastTable.rows.length > 0)
     payload.last_table = lastTable;
   if (lastFilters && Array.isArray(lastFilters.rules) && lastFilters.rules.length > 0)

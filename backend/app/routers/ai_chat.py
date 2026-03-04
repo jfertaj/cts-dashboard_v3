@@ -811,10 +811,12 @@ def _validate_soql(soql: str, sf=None):
         if table_name == "Opportunity":
             # Allow Account.* when querying Opportunity
             if base.startswith("Account."):
-                # dynamic describe for Account
+                # dynamic describe for Account; fall back to static allowlist when describe fails
+                static_acc = {f for f in SF_ALLOWED_FIELDS if f.startswith('Account.')}
                 if sf is not None:
                     acc_fields = _describe_fields(sf, 'Account')
-                    if base not in {f'Account.{x}' for x in acc_fields} | SF_ALLOWED_DYNAMIC:
+                    dynamic_acc = {f'Account.{x}' for x in acc_fields} if acc_fields else set()
+                    if base not in (dynamic_acc | static_acc | SF_ALLOWED_DYNAMIC):
                         bad.append(base)
                 else:
                     if base not in (SF_ALLOWED_FIELDS | SF_ALLOWED_DYNAMIC):
@@ -2923,6 +2925,7 @@ def tool_study_coordinators_with_activities(
     inactive_clause = "(Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)"
     acc_ids: List[str] = []
     acc_info: Dict[str, Dict[str, Any]] = {}
+    parent_ids: set = set()
     if account_ids and len(account_ids):
         acc_ids = list({a for a in account_ids if a})
         if acc_ids:
@@ -2938,14 +2941,30 @@ def tool_study_coordinators_with_activities(
             esc = ", ".join(san_countries)
             if esc:
                 where.append(f"ShippingCountry IN ({esc})")
-        soql_acc = "SELECT Id, Name, ShippingCity, ShippingCountry FROM Account WHERE " + " AND ".join(where) + " LIMIT 2000"
+        soql_acc = "SELECT Id, Name, ShippingCity, ShippingCountry, ParentId FROM Account WHERE " + " AND ".join(where) + " LIMIT 2000"
         recs = sf.query_all(soql_acc).get("records", [])
         for r in recs:
             aid = r.get("Id"); acc_ids.append(aid)
             acc_info[aid] = {"name": r.get("Name"), "city": r.get("ShippingCity"), "country": r.get("ShippingCountry")}
+            if r.get("ParentId"):
+                parent_ids.add(r.get("ParentId"))
+        # Also fetch parent account info so coordinator rows can display site name/country
+        if parent_ids:
+            try:
+                parent_clause = ", ".join([f"'{p}'" for p in parent_ids])
+                soql_par = f"SELECT Id, Name, ShippingCity, ShippingCountry FROM Account WHERE Id IN ({parent_clause})"
+                par_recs = sf.query_all(soql_par).get("records", [])
+                for r in par_recs:
+                    pid = r.get("Id")
+                    if pid and pid not in acc_info:
+                        acc_info[pid] = {"name": r.get("Name"), "city": r.get("ShippingCity"), "country": r.get("ShippingCountry")}
+            except Exception:
+                pass
     if not acc_ids:
         return {"columns": [], "rows": []}
-    ids_clause = ", ".join([f"'{i}'" for i in acc_ids])
+    # Build search IDs: SubAccounts + their parent Accounts (contacts may be linked to either)
+    _all_search_ids = list(acc_ids) + [p for p in parent_ids if p not in set(acc_ids)]
+    ids_clause = ", ".join([f"'{i}'" for i in _all_search_ids])
     # 2) Study Coordinators via ACR and Contact.Title
     roles_env = [s.strip() for s in (os.environ.get("SF_CONTACT_ROLES", "").split(",")) if s.strip()]
     role_list = roles if roles and len(roles) else roles_env
@@ -2954,6 +2973,16 @@ def tool_study_coordinators_with_activities(
         te = title_contains.replace("'", "\\'")
         where_title = f" OR Contact.Title LIKE '%{te}%' {where_title}"
     sc_rows: List[Dict[str, Any]] = []
+    # Coordinator patterns (multilingual)
+    patterns = [
+        "Coordinat",       # Coordinator, Coordinating, Co-ordinator
+        "Coördinat",      # Dutch with diaeresis
+        "Coordinador",    # ES
+        "Coordinateur",   # FR
+        "Koordinator",    # DE
+    ]
+    acr_title_cond = " OR ".join([f"Contact.Title LIKE '%{p}%'" for p in patterns])
+    # ACR path 1: by explicit role list
     if role_list:
         role_vals = ", ".join([f"'{r}'" for r in role_list])
         soql = (
@@ -2962,15 +2991,24 @@ def tool_study_coordinators_with_activities(
             f"WHERE AccountId IN ({ids_clause}) AND Role__c IN ({role_vals})"
         )
         sc_rows += sf.query_all(soql).get("records", [])
-    # Fallback: Contact by Title (strict coordinator patterns)
-    # Coordinator patterns (multilingual) and strict title filtering
-    patterns = [
-        "Coordinat",       # Coordinator, Coordinating, Co-ordinator
-        "Coördinat",      # Dutch with diaeresis
-        "Coordinador",    # ES
-        "Coordinateur",   # FR
-        "Koordinator",    # DE
-    ]
+    # ACR path 2: by coordinator title via AccountContactRelation (catches contacts linked via ACR, not just primary AccountId)
+    try:
+        soql_acr_title = (
+            "SELECT AccountId, ContactId, Role__c, Contact.Name, Contact.Email, Contact.Phone, Contact.Title "
+            "FROM AccountContactRelation "
+            f"WHERE AccountId IN ({ids_clause}) AND ({acr_title_cond})"
+        )
+        acr_title_recs = sf.query_all(soql_acr_title).get("records", [])
+        # Deduplicate against existing sc_rows by ContactId+AccountId
+        existing_keys = {(r.get("AccountId"), r.get("ContactId")) for r in sc_rows}
+        for r in acr_title_recs:
+            k = (r.get("AccountId"), r.get("ContactId"))
+            if k not in existing_keys:
+                existing_keys.add(k)
+                sc_rows.append(r)
+    except Exception as _e_acr:
+        _dbg("WARN: ACR title query failed: %s", _e_acr)
+    # Fallback: Contact by Title (direct AccountId match)
     title_cond = " OR ".join([f"Title LIKE '%{p}%'" for p in patterns])
     soql_c = (
         "SELECT Id, AccountId, Name, Email, Phone, Title FROM Contact "
@@ -2995,22 +3033,58 @@ def tool_study_coordinators_with_activities(
         if any(p in r for p in positives):
             return True
         return any(p in t for p in positives)
-    # Build per-account coordinators list (with source)
+    # Build per-account coordinators list (with source); deduplicate by contact_id
     sc_by_acc: Dict[str, List[Dict[str, Any]]] = {}
+    _seen_cids: set = set()  # (account_id, contact_id) dedup
     for r in sc_rows:
         aid = r.get("AccountId"); c = r.get("Contact") or {}
+        cid = r.get("ContactId")
         if _is_sc(r.get("Role__c"), (c or {}).get("Title")):
-            sc_by_acc.setdefault(aid, []).append({
-                "name": c.get("Name"), "email": c.get("Email"), "phone": c.get("Phone"), "title": c.get("Title"),
-                "sc_source": "acr_role", "sc_role": r.get("Role__c"), "contact_id": r.get("ContactId"),
-            })
+            key = (aid, cid)
+            if key not in _seen_cids:
+                _seen_cids.add(key)
+                sc_by_acc.setdefault(aid, []).append({
+                    "name": c.get("Name"), "email": c.get("Email"), "phone": c.get("Phone"), "title": c.get("Title"),
+                    "sc_source": "acr_role", "sc_role": r.get("Role__c"), "contact_id": cid,
+                })
     for r in sc_contacts:
         aid = r.get("AccountId")
+        cid = r.get("Id")
         if _is_sc(None, r.get("Title")):
-            sc_by_acc.setdefault(aid, []).append({
-                "name": r.get("Name"), "email": r.get("Email"), "phone": r.get("Phone"), "title": r.get("Title"),
-                "sc_source": "contact_title", "sc_role": None, "contact_id": r.get("Id"),
-            })
+            key = (aid, cid)
+            if key not in _seen_cids:
+                _seen_cids.add(key)
+                sc_by_acc.setdefault(aid, []).append({
+                    "name": r.get("Name"), "email": r.get("Email"), "phone": r.get("Phone"), "title": r.get("Title"),
+                    "sc_source": "contact_title", "sc_role": None, "contact_id": cid,
+                })
+    # Path 3: Lead SC from Opportunity.C_Lead_Study_Coordinator_SC__c (INNODIA-specific field)
+    try:
+        soql_opp_sc = (
+            "SELECT AccountId, C_Lead_Study_Coordinator_SC__c, "
+            "C_Lead_Study_Coordinator_SC__r.Name, C_Lead_Study_Coordinator_SC__r.Email, "
+            "C_Lead_Study_Coordinator_SC__r.Phone, C_Lead_Study_Coordinator_SC__r.Title "
+            f"FROM Opportunity WHERE AccountId IN ({ids_clause}) "
+            "AND C_Lead_Study_Coordinator_SC__c != null "
+            "LIMIT 2000"
+        )
+        opp_sc_recs = sf.query_all(soql_opp_sc).get("records", [])
+        for r in opp_sc_recs:
+            aid = r.get("AccountId")
+            sc_contact = r.get("C_Lead_Study_Coordinator_SC__r") or {}
+            cid = r.get("C_Lead_Study_Coordinator_SC__c")
+            if not cid or not aid:
+                continue
+            key = (aid, cid)
+            if key not in _seen_cids:
+                _seen_cids.add(key)
+                sc_by_acc.setdefault(aid, []).append({
+                    "name": sc_contact.get("Name"), "email": sc_contact.get("Email"),
+                    "phone": sc_contact.get("Phone"), "title": sc_contact.get("Title"),
+                    "sc_source": "opp_lead_sc", "sc_role": "Lead SC", "contact_id": cid,
+                })
+    except Exception as _e_opp:
+        _dbg("WARN: Opp lead SC query failed: %s", _e_opp)
     # 3) Activities by Account (names only). Accept RecordType OR Type = 'Activity'
     rt_cfg = os.environ.get("SF_RT_ACTIVITY", "Activity,RT_Activity").strip()
     rt_list = [s.strip() for s in rt_cfg.split(",") if s.strip()] or ["Activity"]

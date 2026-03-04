@@ -4,6 +4,7 @@ import { askAI, askAIStream, ChatResponse, getFieldsIndex } from "../lib/ai";
 import ChartModal from "../components/ChartModal";
 import Moby from "../assets/Moby.png";
 import AIResultTable from "../components/AIResultTable";
+import SiteDetailsModal from "../components/SiteDetailsModal";
 import { findMatchingAliases, AliasEntry } from "../alias/qualificationAliasPack";
 
 type Msg = { role: "user" | "assistant"; content: React.ReactNode };
@@ -27,6 +28,7 @@ export default function ChatView() {
   const INPUT_KEY = "moby_chat_input_v1";
   const TABLE_KEY   = "moby_last_table_v1";
   const FILTERS_KEY = "moby_last_filters_v1";
+  const HISTORY_KEY = "moby_chat_history_v1";
 
   const [messages, setMessages] = useState<Msg[]>([
     {
@@ -45,6 +47,18 @@ export default function ChatView() {
       ),
     },
   ]);
+
+  const [chatHistory, setChatHistory] = useState<Array<{role: "user" | "assistant"; content: string}>>(() => {
+    try {
+      const raw = sessionStorage.getItem(HISTORY_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
+
+  // Site details modal state
+  const [detailAccountId, setDetailAccountId] = useState<string | null>(null);
+  const [detailAccountName, setDetailAccountName] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -342,9 +356,18 @@ export default function ChatView() {
       } catch {}
     };
 
+    const handleRowClick = (row: Record<string, any>) => {
+      const aid = row["sf.Account.Id"] || row["sf.AccountId"] || row["Account.Id"] || row["account_id"] || null;
+      const name = row["account_name"] || row["sf.Account.Name"] || null;
+      if (!aid) return;
+      setDetailAccountId(aid);
+      setDetailAccountName(name);
+      setDetailOpen(true);
+    };
+
     return (
       <div className="space-y-2">
-        <AIResultTable columns={columns as any} rows={rows} />
+        <AIResultTable columns={columns as any} rows={rows} onRowClick={handleRowClick} />
         <div className="flex flex-wrap items-center gap-2">
           <button
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
@@ -602,6 +625,10 @@ export default function ChatView() {
     // so it doesn't get restored again if the new query returns the same data.
     restoredTableRef.current = true;
     try { sessionStorage.removeItem(TABLE_KEY); } catch {}
+    const newHistory = [...chatHistory, { role: "user" as const, content: text }];
+    setChatHistory(newHistory);
+    try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory)); } catch {}
+
     setMessages((m) => [...m, { role: "user", content: text }]);
     setLastUserQ(text);
     setInput("");
@@ -617,9 +644,17 @@ export default function ChatView() {
       setStreamText("");
       const resp = await askAIStream(text, lastTableForAI, lastFiltersForAI, (chunk) => {
         setStreamText((prev) => prev + chunk);
-      });
+      }, newHistory);
       setStreamText("");
       handleArtifacts(resp);
+      // Append assistant reply to history
+      if (resp.answer) {
+        setChatHistory((prev) => {
+          const next = [...prev, { role: "assistant" as const, content: resp.answer! }];
+          try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
     } catch (e: any) {
       setMessages((m) => [
         ...m,
@@ -976,9 +1011,11 @@ export default function ChatView() {
       },
     ]);
     setLastTableForAI(null);
+    setChatHistory([]);
     try {
       sessionStorage.removeItem(MSGS_KEY);
       sessionStorage.removeItem(INPUT_KEY);
+      sessionStorage.removeItem(HISTORY_KEY);
       // sessionStorage.removeItem(TABLE_KEY); // opcional
     } catch {}
   };
@@ -1104,6 +1141,14 @@ export default function ChatView() {
         onChangeType={(t) => setChartType(t as ChartType)}
         onChangeXKey={() => {}}
         onToggleYKey={() => {}}
+      />
+
+      {/* Site details modal — opens when user clicks a row in a Moby table */}
+      <SiteDetailsModal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        accountId={detailAccountId}
+        accountName={detailAccountName}
       />
     </div>
   );
