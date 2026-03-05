@@ -370,6 +370,7 @@ export default function ChatView() {
         <AIResultTable columns={columns as any} rows={rows} onRowClick={handleRowClick} />
         <div className="flex flex-wrap items-center gap-2">
           <button
+            data-testid="chat-btn-export-csv"
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
             onClick={exportCSV}
             title="Export to CSV"
@@ -380,6 +381,7 @@ export default function ChatView() {
           {accIds.length > 0 && (
             <>
               <button
+                data-testid="chat-btn-highlight"
                 className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
                 onClick={handleHighlight}
                 title="Highlight these sites in the Explorer map/table"
@@ -388,6 +390,7 @@ export default function ChatView() {
                 🔦 <span>Highlight in Explorer</span>
               </button>
               <button
+                data-testid="chat-btn-open-explorer"
                 className="inline-flex items-center gap-1.5 rounded-md border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
                 onClick={handleOpenFiltered}
                 title="Open Explorer filtered to these sites"
@@ -399,6 +402,7 @@ export default function ChatView() {
           )}
           {hasKnownCols && (
             <button
+              data-testid="chat-btn-add-columns"
               className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
               onClick={handleAddColumns}
               title="Add these columns to the Explorer table"
@@ -1062,6 +1066,7 @@ export default function ChatView() {
           </p>
         </div>
         <button
+          data-testid="chat-clear"
           className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
           onClick={clearConversation}
           disabled={busy}
@@ -1071,12 +1076,13 @@ export default function ChatView() {
         </button>
       </div>
 
-      <div className="grid grid-rows-[1fr_auto] h-[72vh] rounded-xl border bg-white shadow-sm overflow-hidden">
+      <div data-testid="chat-container" className="grid grid-rows-[1fr_auto] h-[72vh] rounded-xl border bg-white shadow-sm overflow-hidden">
         {/* Messages */}
-        <div ref={scrollRef} className="overflow-auto p-4 space-y-3">
+        <div data-testid="chat-messages" ref={scrollRef} className="overflow-auto p-4 space-y-3">
           {messages.map((m, i) => (
             <div
               key={i}
+              data-testid={m.role === "user" ? "chat-message-user" : "chat-message-assistant"}
               className={`max-w-[70ch] ${m.role === "user" ? "ml-auto text-right" : ""}`}
             >
               <div
@@ -1099,13 +1105,14 @@ export default function ChatView() {
               />
             </div>
           )}
-          {busy && !streamText && <div className="text-sm text-gray-500">Moby is thinking…</div>}
+          {busy && !streamText && <div data-testid="chat-thinking" className="text-sm text-gray-500">Moby is thinking…</div>}
         </div>
 
         {/* Input area */}
         <div className="border-t bg-gray-50 p-3">
           <div className="flex items-center gap-2">
             <input
+              data-testid="chat-input"
               className="flex-1 rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-[#0072CE] bg-white"
               placeholder="Ask Moby…"
               value={input}
@@ -1115,6 +1122,7 @@ export default function ChatView() {
               aria-label="Ask Moby"
             />
             <button
+              data-testid="chat-send"
               className="rounded-lg bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60"
               onClick={send}
               disabled={busy || input.trim().length === 0}

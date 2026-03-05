@@ -414,7 +414,7 @@ export default function MapView({
   const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
   if (!apiKey || apiKey.trim() === "") {
     return (
-      <div className="p-3 border rounded bg-amber-50 text-amber-900">
+      <div data-testid="map-container" className="p-3 border rounded bg-amber-50 text-amber-900">
         Missing <code>VITE_GOOGLE_MAPS_API_KEY</code>. Map is disabled, but the table works.
       </div>
     );
@@ -723,14 +723,15 @@ export default function MapView({
 
   if (loadError) {
     return (
-      <div className="p-3 border rounded bg-rose-50 text-rose-900">
+      <div data-testid="map-container" className="p-3 border rounded bg-rose-50 text-rose-900">
         Error loading Google Maps. Check the API key. The table is still working.
       </div>
     );
   }
-  if (!isLoaded) return <div className="p-3">Loading map…</div>;
+  if (!isLoaded) return <div data-testid="map-container" className="p-3">Loading map…</div>;
 
   return (
+    <div data-testid="map-container">
     <GoogleMap
       mapContainerStyle={containerStyle}
       defaultCenter={initialCenterRef.current!}
@@ -981,5 +982,6 @@ export default function MapView({
           />
         ))}
     </GoogleMap>
+    </div>
   );
 }

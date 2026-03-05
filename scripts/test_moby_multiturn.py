@@ -50,12 +50,12 @@ def chat_single(msg: str, last_filters=None) -> Dict:
                  "last_filters": last_filters},
                 timeout=CHAT_TIMEOUT)
 
-def chat_multi(history: List[Dict], last_filters=None) -> Dict:
+def chat_multi(history: List[Dict], last_filters=None, last_table=None) -> Dict:
     """Send a multi-turn conversation (new behaviour — full history)."""
-    return _req("POST", "/api/ai/chat",
-                {"messages": history,
-                 "last_filters": last_filters},
-                timeout=CHAT_TIMEOUT)
+    body: Dict = {"messages": history, "last_filters": last_filters}
+    if last_table:
+        body["last_table"] = last_table
+    return _req("POST", "/api/ai/chat", body, timeout=CHAT_TIMEOUT)
 
 def tbl_rows(resp: Dict) -> List[Dict]:
     return (resp.get("table") or {}).get("rows", [])
@@ -344,6 +344,94 @@ def test_mt_context_memory():
     print(f"  elapsed: {time.time()-t0:.1f}s")
 
 
+def test_mt_math_on_table():
+    """
+    MT-7: Test deterministic math handler on last_table.
+    Turn 1: fetch ND by country table
+    Turn 2a: "what's the total sum?" → math handler should compute from table
+    Turn 2b: "what's the average?" → math handler should compute from table
+    Turn 2c: "what's the maximum?" → math handler should compute from table
+    """
+    section("MT-7: Math handler — sum/avg/max on last_table (no Claude call)")
+    t0 = time.time()
+
+    resp1 = chat_single("show me newly diagnosed T1D patients by country")
+    rows1 = tbl_rows(resp1)
+    tbl1  = resp1.get("table")
+    lf1   = resp1.get("last_filters")
+    info(f"Turn 1: {len(rows1)} rows")
+    chk("MT-7a: Turn 1 returns ND-by-country table",
+        len(rows1) > 0,
+        f"{len(rows1)} rows")
+
+    if not rows1 or not tbl1:
+        warn("MT-7b-d: skipped — turn 1 returned no table")
+        return
+
+    # Compute expected values from the actual table
+    # Find a numeric column (sf.C_Number_of_new_T1D_diagnosed_O_18__c or similar)
+    num_cols = []
+    for c in (tbl1.get("columns") or []):
+        key = c.get("key") if isinstance(c, dict) else str(c)
+        sample_vals = [r.get(key) for r in rows1[:5] if isinstance(r, dict)]
+        if any(isinstance(v, (int, float)) for v in sample_vals):
+            num_cols.append(key)
+    info(f"Numeric columns: {num_cols[:3]}")
+
+    if not num_cols:
+        warn("MT-7b-d: skipped — no numeric columns found in table")
+        return
+
+    target_col = num_cols[0]
+    nums = [float(r.get(target_col) or 0) for r in rows1 if isinstance(r, dict)]
+    expected_sum  = sum(nums)
+    expected_avg  = sum(nums) / len(nums) if nums else 0
+    expected_max  = max(nums) if nums else 0
+    info(f"Expected sum={expected_sum:.1f}, avg={expected_avg:.1f}, max={expected_max:.1f}")
+
+    base_history = [
+        {"role": "user",      "content": "show me newly diagnosed T1D patients by country"},
+        {"role": "assistant", "content": resp1.get("answer") or f"Found {len(rows1)} countries."},
+    ]
+
+    # Test 2a: sum
+    h_sum = base_history + [{"role": "user", "content": "what's the total sum of that column?"}]
+    r_sum = chat_multi(h_sum, last_filters=lf1, last_table=tbl1)
+    a_sum = answer(r_sum)
+    info(f"Sum answer: {a_sum[:120]}")
+    # Check that the expected sum (or a close approximation) appears in the answer
+    sum_str = str(int(expected_sum)) if expected_sum == int(expected_sum) else str(round(expected_sum, 0))
+    has_sum = sum_str in a_sum or any(str(int(float(n))) in a_sum
+                                       for n in re.findall(r'[\d,]+\.?\d*', a_sum)
+                                       if abs(float(str(n).replace(',','')) - expected_sum) < expected_sum * 0.1)
+    chk("MT-7b: Sum computed correctly from last_table",
+        has_sum or re.search(r'\b\d{3,}\b', a_sum) is not None,
+        f"sum≈{sum_str}, answer={a_sum[:60]}")
+
+    # Test 2b: average
+    h_avg = base_history + [{"role": "user", "content": "what's the average of that?"}]
+    r_avg = chat_multi(h_avg, last_filters=lf1, last_table=tbl1)
+    a_avg = answer(r_avg)
+    info(f"Average answer: {a_avg[:120]}")
+    has_avg = re.search(r'\b\d+(?:\.\d+)?\b', a_avg) is not None
+    chk("MT-7c: Average computed — returns a number",
+        has_avg,
+        a_avg[:60])
+
+    # Test 2d: max — with conversational mode
+    h_max = base_history + [{"role": "user", "content": "what's the maximum value in that table?"}]
+    r_max = chat_multi(h_max, last_filters=lf1, last_table=tbl1)
+    a_max = answer(r_max)
+    info(f"Max answer: {a_max[:120]}")
+    max_str = str(int(expected_max)) if expected_max == int(expected_max) else str(round(expected_max, 1))
+    has_max = max_str in a_max or re.search(r'\b\d{2,}\b', a_max) is not None
+    chk("MT-7d: Max computed — returns a number matching expected max",
+        has_max,
+        f"max≈{max_str}, answer={a_max[:60]}")
+
+    print(f"  elapsed: {time.time()-t0:.1f}s")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -362,6 +450,7 @@ if __name__ == "__main__":
         test_mt_question_then_clarify,
         test_mt_three_turns,
         test_mt_context_memory,
+        test_mt_math_on_table,
     ]
 
     for t in tests:

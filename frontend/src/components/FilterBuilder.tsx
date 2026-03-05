@@ -552,5 +552,5 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [pickerOpenFor]);
 
-  return <div>{renderGroup(value)}</div>;
+  return <div data-testid="filter-builder">{renderGroup(value)}</div>;
 }

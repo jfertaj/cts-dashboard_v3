@@ -79,6 +79,7 @@ export default function Header({ active, onTab }: Props) {
           <div className="font-extrabold text-2xl tracking-tight">CTS Dashboard</div>
           <nav className="flex items-center gap-1 rounded-full bg-white/10 p-1">
             <button
+              data-testid="tab-upload"
               className={`px-3 py-1.5 rounded-full text-sm transition ${
                 active === "upload" ? "bg-white text-[#003f7d] shadow" : "hover:bg-white/20"
               }`}
@@ -87,6 +88,7 @@ export default function Header({ active, onTab }: Props) {
               Upload & Link
             </button>
             <button
+              data-testid="tab-explorer"
               className={`px-3 py-1.5 rounded-full text-sm transition ${
                 active === "explorer" ? "bg-white text-[#003f7d] shadow" : "hover:bg-white/20"
               }`}
@@ -96,6 +98,7 @@ export default function Header({ active, onTab }: Props) {
             </button>
             {/* Moby */}
             <button
+              data-testid="tab-chat"
               className={`px-3 py-1.5 rounded-full text-sm transition ${
                 active === "chat" ? "bg-white text-[#003f7d] shadow" : "hover:bg-white/20"
               }`}
@@ -121,6 +124,7 @@ export default function Header({ active, onTab }: Props) {
                 Connected to <strong>{connectedHost}</strong>
               </span>
               <button
+                data-testid="btn-logout"
                 onClick={onLogout}
                 disabled={busy}
                 className="px-3 py-1.5 rounded-md bg-white/95 text-[#003f7d] hover:bg-white disabled:opacity-60"
@@ -132,6 +136,7 @@ export default function Header({ active, onTab }: Props) {
             <>
               <span className="text-sm opacity-90 hidden md:inline">Not connected</span>
               <button
+                data-testid="btn-login"
                 onClick={onLogin}
                 className="px-3 py-1.5 rounded-md bg-white/95 text-[#003f7d] hover:bg-white shadow"
                 title="Login a Salesforce"

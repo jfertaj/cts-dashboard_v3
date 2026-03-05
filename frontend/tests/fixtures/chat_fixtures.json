@@ -1,0 +1,132 @@
+{
+  "prompts": [
+    {
+      "id": "sites-italy",
+      "prompt": "Show me all sites in Italy",
+      "expectedAnswer": "<p>Here are the INNODIA sites in Italy.</p>",
+      "expectedTable": {
+        "columns": [
+          { "key": "account_name", "label": "Site Name" },
+          { "key": "country",      "label": "Country"   },
+          { "key": "city",         "label": "City"      }
+        ],
+        "rows": [
+          { "account_name": "Milano Diabetes Center",  "country": "IT", "city": "Milan" },
+          { "account_name": "Roma Clinical Research",  "country": "IT", "city": "Rome"  }
+        ]
+      }
+    },
+    {
+      "id": "stage2-count",
+      "prompt": "How many sites have Stage 2 > 5?",
+      "expectedAnswer": "<p>There are 3 sites with more than 5 Stage 2 individuals followed.</p>",
+      "expectedTable": null
+    },
+    {
+      "id": "nd-top10",
+      "prompt": "Show top 10 sites by newly diagnosed T1D adults",
+      "expectedAnswer": "<p>Here are the top sites by newly diagnosed T1D adults (≥18).</p>",
+      "expectedTable": {
+        "columns": [
+          { "key": "account_name", "label": "Site Name" },
+          { "key": "country",      "label": "Country"   },
+          { "key": "nd_o18",       "label": "ND ≥18"    }
+        ],
+        "rows": [
+          { "account_name": "Berlin Charité T1D Unit",        "country": "DE", "nd_o18": 120 },
+          { "account_name": "London King's College Diabetes",  "country": "GB", "nd_o18": 110 },
+          { "account_name": "Milano Diabetes Center",          "country": "IT", "nd_o18": 95  },
+          { "account_name": "Madrid Hospital Universitario",   "country": "ES", "nd_o18": 70  },
+          { "account_name": "Roma Clinical Research",          "country": "IT", "nd_o18": 60  }
+        ]
+      }
+    },
+    {
+      "id": "stage1-spain",
+      "prompt": "List Stage 1 sites in Spain",
+      "expectedAnswer": "<p>Here are INNODIA sites in Spain following Stage 1 individuals.</p>",
+      "expectedTable": {
+        "columns": [
+          { "key": "account_name", "label": "Site Name" },
+          { "key": "country",      "label": "Country"   },
+          { "key": "stage1",       "label": "Stage 1"   }
+        ],
+        "rows": [
+          { "account_name": "Madrid Hospital Universitario", "country": "ES", "stage1": 9 },
+          { "account_name": "Barcelona Endocrinology Unit",  "country": "ES", "stage1": 3 }
+        ]
+      }
+    },
+    {
+      "id": "opportunities-germany",
+      "prompt": "Which sites have an active opportunity in Germany?",
+      "expectedAnswer": "<p>The following German sites have active opportunities.</p>",
+      "expectedTable": {
+        "columns": [
+          { "key": "account_name",      "label": "Site Name"   },
+          { "key": "country",           "label": "Country"     },
+          { "key": "opportunity_name",  "label": "Opportunity" }
+        ],
+        "rows": [
+          { "account_name": "Berlin Charité T1D Unit", "country": "DE", "opportunity_name": "Berlin Profiling 2024" }
+        ]
+      }
+    },
+    {
+      "id": "qual-sites",
+      "prompt": "Which sites have qualification visit data?",
+      "expectedAnswer": "<p>There is 1 site with qualification visit data in the system.</p>",
+      "expectedTable": {
+        "columns": [
+          { "key": "account_name",  "label": "Site Name"   },
+          { "key": "country",       "label": "Country"     },
+          { "key": "visit_count",   "label": "Visits"      }
+        ],
+        "rows": [
+          { "account_name": "Milano Diabetes Center", "country": "IT", "visit_count": 1 }
+        ]
+      }
+    },
+    {
+      "id": "stage3-france",
+      "prompt": "Which sites in France can recruit Stage III?",
+      "expectedAnswer": "<p>No matching sites found for that criteria.</p>",
+      "expectedTable": null
+    },
+    {
+      "id": "no-results",
+      "prompt": "Show sites in Antarctica",
+      "expectedAnswer": "<p>No matching sites found for that criteria.</p>",
+      "expectedTable": null
+    },
+    {
+      "id": "follow-up-country",
+      "prompt": "Show me sites in Spain",
+      "expectedAnswer": "<p>Here are the INNODIA sites in Spain.</p>",
+      "expectedTable": {
+        "columns": [
+          { "key": "account_name", "label": "Site Name" },
+          { "key": "country",      "label": "Country"   }
+        ],
+        "rows": [
+          { "account_name": "Madrid Hospital Universitario", "country": "ES" },
+          { "account_name": "Barcelona Endocrinology Unit",  "country": "ES" }
+        ]
+      },
+      "followUp": {
+        "prompt": "Now only those with Stage 2 > 3",
+        "expectedAnswer": "<p>Among Spanish sites, 1 has Stage 2 > 3.</p>",
+        "expectedTable": {
+          "columns": [
+            { "key": "account_name", "label": "Site Name" },
+            { "key": "country",      "label": "Country"   },
+            { "key": "stage2",       "label": "Stage 2"   }
+          ],
+          "rows": [
+            { "account_name": "Madrid Hospital Universitario", "country": "ES", "stage2": 6 }
+          ]
+        }
+      }
+    }
+  ]
+}

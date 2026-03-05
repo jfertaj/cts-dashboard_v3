@@ -112,6 +112,7 @@ export default function SiteDetailsModal({
 
   return (
     <div
+      data-testid="site-details-modal"
       className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
@@ -122,12 +123,12 @@ export default function SiteDetailsModal({
         {/* Header sticky para que el botón Close siempre sea accesible */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
           <div className="min-w-0">
-            <div id="details-modal-title" className="text-sm text-gray-600">Details</div>
+            <div id="details-modal-title" data-testid="site-details-title" className="text-sm text-gray-600">Details</div>
             <div className="font-semibold truncate" title={accountName || accountId}>
               {accountName || "—"}
             </div>
           </div>
-          <button className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50" onClick={onClose}>
+          <button data-testid="site-details-close" className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50" onClick={onClose}>
             Close
           </button>
         </div>
@@ -136,9 +137,9 @@ export default function SiteDetailsModal({
         <div className="p-5 space-y-3 overflow-y-auto flex-1 min-h-0">
           {line("Account Id", accountId)}
           <hr className="my-2" />
-          {loading && <div className="text-sm text-gray-600">Loading extra info…</div>}
+          {loading && <div data-testid="site-details-loading" className="text-sm text-gray-600">Loading extra info…</div>}
           {error && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900 text-sm">
+            <div data-testid="site-details-error" className="rounded-md border border-amber-300 bg-amber-50 p-2 text-amber-900 text-sm">
               ⚠️ Could not load some details — {error}
             </div>
           )}

@@ -2473,7 +2473,7 @@ export default function ExplorerView() {
       )}
 
       {/* Header filtros */}
-      <div className="rounded-xl border bg-white shadow-sm">
+      <div data-testid="explorer-filter-panel" className="rounded-xl border bg-white shadow-sm">
         <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2">
             Filters (nested AND/OR)
@@ -2592,6 +2592,7 @@ export default function ExplorerView() {
           )}
           <div className="flex flex-wrap gap-2 items-center">
             <button
+              data-testid="explorer-search-btn"
               onClick={onSearch}
               className="mt-3 inline-flex items-center gap-2 rounded-md bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-60"
               disabled={busy || bootLoading}
@@ -2746,7 +2747,7 @@ showPresets={false}
 
       {/* Barra superior tabla */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mt-2">
-        <div className="text-sm text-gray-600">
+        <div data-testid="explorer-results-count" className="text-sm text-gray-600">
           {table.getFilteredRowModel().rows.length.toLocaleString()} result
           {table.getFilteredRowModel().rows.length === 1 ? "" : "s"}
           {sorting[0] ? (
@@ -2756,6 +2757,7 @@ showPresets={false}
         </div>
         <div className="flex items-center gap-2">
           <input
+            data-testid="explorer-global-search"
             className="border rounded-md px-3 py-1.5 text-sm w-64"
             placeholder="Search in all columns…"
             value={globalFilter ?? ""}
@@ -2763,6 +2765,7 @@ showPresets={false}
           />
           <label className="text-sm text-gray-600">Rows per page</label>
           <select
+            data-testid="explorer-page-size"
             className="border rounded-md px-2 py-1 text-sm"
             value={pageSize}
             onChange={(e) => { setPageSize(Number(e.target.value)); setPageIndex(0); }}
@@ -2771,6 +2774,7 @@ showPresets={false}
           </select>
 
           <button
+            data-testid="explorer-btn-export-tsv"
             className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
             onClick={downloadFilteredTSV}
             disabled={table.getFilteredRowModel().rows.length === 0}
@@ -2781,6 +2785,7 @@ showPresets={false}
           {/* Chart button — updates live as filters are applied */}
           <div className="relative">
             <button
+              data-testid="explorer-btn-chart"
               className="ml-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-40"
               onClick={openChartWizard}
               disabled={(nearbyActive ? fullNearbyRows : fullRows).length === 0}
@@ -2809,7 +2814,7 @@ showPresets={false}
       </div>
 
       {/* Tabla */}
-      <div ref={tableContainerRef} className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div ref={tableContainerRef} data-testid="explorer-results-table" className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50">
             {table.getHeaderGroups().map((hg) => (
@@ -2820,6 +2825,7 @@ showPresets={false}
                   return (
                     <th
                       key={header.id}
+                      data-testid="explorer-table-header"
                       draggable
                       onDragStart={(e) => {
                         e.dataTransfer.setData("text/plain", header.column.id);
@@ -2879,6 +2885,8 @@ showPresets={false}
               table.getRowModel().rows.map((row) => (
                 <tr
                   key={row.id}
+                  data-testid="explorer-table-row"
+                  data-account-id={(row.original as ExplorerRow).account_id}
                   className={[
                     "border-t hover:bg-gray-50",
                     selectedAccountId && (row.original as ExplorerRow).account_id === selectedAccountId ? "bg-blue-50/40" : "",
@@ -2890,7 +2898,7 @@ showPresets={false}
                   onClick={() => setSelectedAccountId((row.original as ExplorerRow).account_id)}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2 whitespace-nowrap">
+                    <td key={cell.id} data-testid="explorer-table-cell" className="px-3 py-2 whitespace-nowrap">
                       {flexRender(
                         cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
                         cell.getContext()
@@ -2905,8 +2913,8 @@ showPresets={false}
       </div>
 
       {/* Paginación */}
-      <div className="flex items-center justify-between mt-3">
-        <div className="text-sm text-gray-600">
+      <div data-testid="explorer-pagination" className="flex items-center justify-between mt-3">
+        <div data-testid="explorer-page-info" className="text-sm text-gray-600">
           Showing{" "}
           <strong>
             {table.getRowModel().rows.length === 0
@@ -2923,16 +2931,16 @@ showPresets={false}
           of <strong>{table.getFilteredRowModel().rows.length}</strong>
         </div>
         <div className="flex items-center gap-2">
-          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+          <button data-testid="explorer-page-first" className="px-3 py-1.5 border rounded-md disabled:opacity-50"
             onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}>« First</button>
-          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+          <button data-testid="explorer-page-prev" className="px-3 py-1.5 border rounded-md disabled:opacity-50"
             onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>‹ Prev</button>
           <span className="text-sm text-gray-700">
             Page <strong>{table.getState().pagination.pageIndex + 1}</strong> / {table.getPageCount()}
           </span>
-          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+          <button data-testid="explorer-page-next" className="px-3 py-1.5 border rounded-md disabled:opacity-50"
             onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next ›</button>
-          <button className="px-3 py-1.5 border rounded-md disabled:opacity-50"
+          <button data-testid="explorer-page-last" className="px-3 py-1.5 border rounded-md disabled:opacity-50"
             onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()}>Last »</button>
         </div>
       </div>

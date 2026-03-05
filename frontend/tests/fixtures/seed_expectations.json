@@ -1,0 +1,114 @@
+{
+  "_comment": "Deterministic seed dataset — 8 EU sites. Update if seed data changes.",
+  "sites": [
+    { "account_id": "SITE001", "account_name": "Milano Diabetes Center",       "country": "IT", "city": "Milan",     "lat": 45.464, "lng": 9.190,  "stage1": 12, "stage2": 8,  "nd_o18": 95,  "nd_u18": 40, "has_qual": true  },
+    { "account_id": "SITE002", "account_name": "Roma Clinical Research",        "country": "IT", "city": "Rome",     "lat": 41.902, "lng": 12.496, "stage1": 5,  "stage2": 3,  "nd_o18": 60,  "nd_u18": 22, "has_qual": false },
+    { "account_id": "SITE003", "account_name": "Madrid Hospital Universitario", "country": "ES", "city": "Madrid",   "lat": 40.416, "lng": -3.703, "stage1": 9,  "stage2": 6,  "nd_o18": 70,  "nd_u18": 30, "has_qual": false },
+    { "account_id": "SITE004", "account_name": "Barcelona Endocrinology Unit",  "country": "ES", "city": "Barcelona","lat": 41.385, "lng": 2.173,  "stage1": 3,  "stage2": 2,  "nd_o18": 35,  "nd_u18": 15, "has_qual": false },
+    { "account_id": "SITE005", "account_name": "Berlin Charité T1D Unit",       "country": "DE", "city": "Berlin",   "lat": 52.520, "lng": 13.405, "stage1": 18, "stage2": 11, "nd_o18": 120, "nd_u18": 55, "has_qual": false },
+    { "account_id": "SITE006", "account_name": "Amsterdam LUMC Diabetes",       "country": "NL", "city": "Amsterdam","lat": 52.379, "lng": 4.900,  "stage1": 7,  "stage2": 4,  "nd_o18": 50,  "nd_u18": 18, "has_qual": false },
+    { "account_id": "SITE007", "account_name": "Paris Hôpital Necker",          "country": "FR", "city": "Paris",    "lat": 48.856, "lng": 2.352,  "stage1": 0,  "stage2": 0,  "nd_o18": 25,  "nd_u18": 10, "has_qual": false },
+    { "account_id": "SITE008", "account_name": "London King's College Diabetes", "country": "GB", "city": "London",  "lat": 51.507, "lng": -0.127, "stage1": 14, "stage2": 9,  "nd_o18": 110, "nd_u18": 48, "has_qual": false }
+  ],
+
+  "contacts": [
+    { "contact_id": "C001", "account_id": "SITE001", "name": "Dr. Anna Rossi",    "role": "PI",               "email": "a.rossi@milano.test" },
+    { "contact_id": "C002", "account_id": "SITE001", "name": "Marco Ferrari",      "role": "Study Coordinator","email": "m.ferrari@milano.test" },
+    { "contact_id": "C003", "account_id": "SITE001", "name": "Marco Ferrari",      "role": "Study Coordinator","email": "m.ferrari2@milano.test",
+      "_note": "intentional duplicate name, different email — edge case" },
+    { "contact_id": "C004", "account_id": "SITE005", "name": "Dr. Klaus Müller",   "role": "PI",               "email": "k.muller@charite.test" },
+    { "contact_id": "C005", "account_id": "SITE008", "name": "Dr. Sarah Thompson", "role": "PI",               "email": "s.thompson@kings.test" }
+  ],
+
+  "opportunities": [
+    { "opportunity_id": "OPP001", "account_id": "SITE001", "name": "Milano Profiling 2024", "status": "active",   "stage": "Qualification" },
+    { "opportunity_id": "OPP002", "account_id": "SITE005", "name": "Berlin Profiling 2024",  "status": "active",   "stage": "Qualification" },
+    { "opportunity_id": "OPP003", "account_id": "SITE008", "name": "London Profiling 2023",  "status": "closed",   "stage": "Closed Won" },
+    { "opportunity_id": "OPP004", "account_id": "SITE003", "name": "Madrid Profiling 2024",  "status": "active",   "stage": "Profiling" }
+  ],
+
+  "assignments": [
+    { "assignment_id": "ASS001", "opportunity_id": "OPP001", "contact_id": "C001", "type": "PI",    "stage": "Stage 1", "mca_status": "Signed" },
+    { "assignment_id": "ASS002", "opportunity_id": "OPP001", "contact_id": "C002", "type": "SC",    "stage": "Stage 1", "mca_status": "Signed" },
+    { "assignment_id": "ASS003", "opportunity_id": "OPP002", "contact_id": "C004", "type": "PI",    "stage": "Stage 2", "mca_status": "Pending" }
+  ],
+
+  "qualification": {
+    "_note": "ONLY 1 qualification visit record in PostgreSQL — by design (schema supports more)",
+    "visit_count": 1,
+    "visits": [
+      {
+        "site_id": "SITE001",
+        "account_id": "SITE001",
+        "site_name": "Milano Diabetes Center",
+        "visit_date": "2024-11-15",
+        "data": {
+          "3.5.2__overnight_stay": "Yes",
+          "3.6__is_your_pharmacy_on_site_or_off_campus": "On-site",
+          "3.1__count_ongoing_clinical_trials": "4",
+          "qual.onsite_pharmacy": true,
+          "qual.overnight_stay": true,
+          "qual.examination_rooms": "3"
+        }
+      }
+    ]
+  },
+
+  "expectedFilterResults": {
+    "all_sites": {
+      "count": 8,
+      "countries": ["IT", "ES", "DE", "NL", "FR", "GB"]
+    },
+    "filter_country_italy": {
+      "filter": { "field": "site.country", "operator": "equals", "value": "Italy" },
+      "expected_site_ids": ["SITE001", "SITE002"],
+      "count": 2
+    },
+    "filter_stage2_gt_5": {
+      "filter": { "field": "sf.C_Number_of_Stage2_Individuals_followed__c", "operator": ">", "value": 5 },
+      "expected_site_ids": ["SITE001", "SITE005", "SITE008"],
+      "count": 3
+    },
+    "filter_country_spain_and_stage1_gt_0": {
+      "logic": "AND",
+      "filters": [
+        { "field": "site.country", "operator": "equals", "value": "Spain" },
+        { "field": "sf.C_Number_of_Stage1_Individuals_followed__c", "operator": ">", "value": 0 }
+      ],
+      "expected_site_ids": ["SITE003", "SITE004"],
+      "count": 2
+    },
+    "filter_qual_has_pharmacy": {
+      "filter": { "field": "qual.onsite_pharmacy", "operator": "equals", "value": true },
+      "expected_site_ids": ["SITE001"],
+      "count": 1
+    }
+  },
+
+  "expectedChatAnswers": {
+    "qual-sites": {
+      "must_contain": ["1 site", "Milano"],
+      "must_not_contain": ["2 sites", "Roma", "Madrid"]
+    },
+    "stage3-france": {
+      "must_contain": ["No matching", "No sites"],
+      "must_not_contain": ["found", "Paris"]
+    },
+    "stage2-count": {
+      "must_contain": ["3"],
+      "note": "Berlin(11), Milano(8), London(9) — all > 5"
+    }
+  },
+
+  "explorerBootstrap": {
+    "minSites": 8,
+    "maxSites": 8,
+    "requiredColumns": ["account_name", "country", "city"],
+    "knownCountries": ["IT", "ES", "DE", "NL", "FR", "GB"]
+  },
+
+  "chatHealthCheck": {
+    "minResponseTimeMs": 100,
+    "maxResponseTimeMs": 60000
+  }
+}

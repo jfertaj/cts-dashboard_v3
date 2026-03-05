@@ -17,7 +17,7 @@ export default function AIResultTable({ columns, rows, onRowClick }: Props) {
   }, [columns, rows]);
 
   return (
-    <div className="overflow-auto border rounded-lg">
+    <div data-testid="ai-result-table" className="overflow-auto border rounded-lg">
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50">
           <tr>
@@ -32,11 +32,12 @@ export default function AIResultTable({ columns, rows, onRowClick }: Props) {
           {rows.map((r, i) => (
             <tr
               key={i}
+              data-testid="ai-result-row"
               className={`${i % 2 ? "bg-white" : "bg-gray-50/50"} ${onRowClick ? "cursor-pointer hover:bg-blue-50" : ""}`}
               onClick={() => onRowClick?.(r)}
             >
               {columns.map((c) => (
-                <td key={c.key} className="px-3 py-2 whitespace-nowrap">
+                <td key={c.key} data-testid="ai-result-cell" className="px-3 py-2 whitespace-nowrap">
                   {String(r[c.key] ?? "")}
                 </td>
               ))}

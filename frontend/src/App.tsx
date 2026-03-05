@@ -85,7 +85,7 @@ export default function App() {
 
       {/* Main content (dimmed visually by overlay above) */}
       <Header active={tab} onTab={goTab} />
-      <main className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6" aria-hidden={sessionExpired}>
+      <main data-testid="app-main" className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6" aria-hidden={sessionExpired}>
         {authed === false && (
           <div className="p-3 rounded bg-amber-50 border border-amber-200 text-sm">
             You are not connected to Salesforce. Some views may show limited data.

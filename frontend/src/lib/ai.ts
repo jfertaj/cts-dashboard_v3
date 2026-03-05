@@ -89,7 +89,7 @@ export async function askAIStream(
   let buffer = "";
   let finalResult: ChatResponse = {};
 
-  while (true) {
+  streaming: while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
@@ -107,6 +107,11 @@ export async function askAIStream(
       } else if (data.type === "done") {
         const { type: _t, ...rest } = data;
         finalResult = rest as ChatResponse;
+        // Don't wait for the SSE connection to close — we have the complete response.
+        // The backend closes after sending done, but proactively breaking avoids
+        // hangs in test environments where the SSE connection may stay open.
+        reader.cancel().catch(() => {});
+        break streaming;
       } else if (data.type === "error") {
         throw new Error(data.message ?? "Stream error");
       }
