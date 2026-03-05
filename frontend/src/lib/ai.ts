@@ -65,6 +65,7 @@ export async function askAIStream(
   lastFilters?: Record<string, any> | null,
   onToken?: (text: string) => void,
   history?: Array<{role: "user" | "assistant"; content: string}>,
+  signal?: AbortSignal,
 ): Promise<ChatResponse> {
   const payload: any = {
     messages: history && history.length > 0
@@ -81,6 +82,7 @@ export async function askAIStream(
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify(payload),
+    signal,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 

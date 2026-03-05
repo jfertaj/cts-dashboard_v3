@@ -2,11 +2,16 @@
  * tests/e2e/performance.spec.ts
  * Measures and enforces response-time budgets for the main UI flows.
  *
- * Thresholds (all times in ms):
- *   FILTER_RENDER_BUDGET:  2000  — from clicking Search to results-count visible
- *   CHAT_FIRST_TOKEN:      3000  — from clicking Send to first streaming token / Moby-thinking indicator
- *   CHAT_FULL_RESPONSE:   15000  — from clicking Send to permanent assistant message
- *   PAGE_LOAD_BUDGET:      3000  — from navigation start to DOMContentLoaded
+ * Budget targets (all times in ms):
+ *   PAGE_LOAD_BUDGET:       3000  — navigation start → header visible (real network)
+ *   FILTER_RENDER_BUDGET:   2000  — Search click → results-count visible (real /search endpoint)
+ *   CHAT_FIRST_TOKEN:       3000  — Send click → first streaming token OR "thinking" indicator
+ *   CHAT_FULL_RESPONSE:    15000  — Send click → permanent assistant message
+ *
+ * NOTE on PERF-4/5/6: these use a MOCKED backend stream (not real Claude).
+ * They measure FRONTEND rendering latency (React reconciliation, SSE parsing, DOM updates),
+ * not end-to-end Moby response time. Real Moby latency is measured by SMOKE-PERF in
+ * chat-live.smoke.spec.ts (opt-in, requires PLAYWRIGHT_SMOKE=1).
  */
 import { test, expect } from "@playwright/test";
 import { S } from "../utils/selectors";

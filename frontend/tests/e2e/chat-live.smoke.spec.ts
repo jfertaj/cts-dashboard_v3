@@ -94,6 +94,28 @@ test.describe("Chat — live smoke @smoke", () => {
     expect(rowCount).toBeGreaterThan(0);
   });
 
+  test("SMOKE-PERF: real Moby response arrives within 90s", async () => {
+    const page = await context.newPage();
+    await lockAuthCheck(page);
+    await page.goto("/chat");
+
+    const beforeCount = await page.locator(S.CHAT_MESSAGE_ASSISTANT).count();
+    await page.locator(S.CHAT_INPUT).fill("How many sites are there in Italy?");
+    const start = Date.now();
+    await page.locator(S.CHAT_SEND).click();
+
+    // Wait for the real Claude response
+    await waitForNewAssistantMsg(page, beforeCount, 90000);
+    const elapsed = Date.now() - start;
+    console.log(`[SMOKE-PERF] Real Moby response: ${elapsed}ms`);
+
+    // Soft assertion — log but don't fail hard (network variance)
+    if (elapsed > 60000) {
+      console.warn(`[SMOKE-PERF] Response took ${elapsed}ms — over 60s target`);
+    }
+    expect(elapsed).toBeLessThan(90000);
+  });
+
   test("SMOKE-3: follow-up country filter narrows results", async () => {
     const page = await context.newPage();
 

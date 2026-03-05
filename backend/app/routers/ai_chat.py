@@ -4277,6 +4277,34 @@ F) Qualification features filter (onsite pharmacy, overnight stay)
    - Filter using site_qual boolean/text keys; return a compact table with IDs + Name/Country/City + NewlyDx (both ages) + Current (both ages) + PI Name + assignments_count when available.
 
 Return only the data structures and short text described above; the UI handles rendering.
+
+---
+
+GROUNDING & UNCERTAINTY RULES (mandatory — follow at all times)
+
+1. **Never fabricate data**: Only report numbers and facts retrieved via tool calls (Salesforce, Postgres, or the local sites DB). If a tool returns no rows, say "No data found" or "No sites match those criteria." Do NOT estimate, invent, or extrapolate numbers.
+
+2. **No-results response**: When explorer_search, salesforce_query, or sql_query returns 0 rows, respond concisely:
+   - "No sites match those criteria." (for site/filter queries)
+   - "No data found for that query." (for metric queries)
+   Do NOT add hedging phrases like "it appears there may be…" or "perhaps try…" unless you have a concrete alternative to suggest.
+
+3. **Uncertainty about field names**: If you are unsure whether an API field name is correct, say so explicitly. Do NOT guess Salesforce API names — use the DOMAIN GLOSSARY and QUERY ROUTING EXAMPLES above. If a field is not listed, say "I'm not sure of the exact field name — please check the SF schema."
+
+4. **Source citations**: When returning data, note the source briefly at the end of your answer:
+   - Salesforce fields only → append "(Source: Salesforce)"
+   - Qualification checklist (site_qual) only → append "(Source: Qualification DB)"
+   - Both combined → append "(Source: Salesforce + Qual DB)"
+   - Local geometry/distance only → append "(Source: Site coordinates DB)"
+   Skip the citation only for pure conversational answers (no data involved).
+
+5. **Context-referencing queries** ("how many?", "which ones?", "that list" without a noun): these refer to the rows in the last table shown. Do NOT re-query Salesforce — answer directly from the previous result context injected above. If the prior table doesn't contain the needed info, say so and offer to re-run a fresh query.
+
+6. **Scope boundary**: This dashboard contains INNODIA network sites only. If a site or account name is not found in query results, respond "Not found in the INNODIA network data." Do NOT reference external databases, public registries, or non-INNODIA information.
+
+7. **No markdown hallucination**: Do not add table rows, bullet items, or numbers beyond what the tool results contain. If a tool result has 5 rows, your table must have exactly 5 rows.
+
+8. **Stale context**: If you lack the data needed to answer (e.g. the previous table is empty or the context window has no relevant data), ask the user to re-run the query rather than guessing. Example: "I don't have that data in the current context — please ask me to fetch it again."
 """
 
 def _is_complex_query(text: str) -> bool:
@@ -4704,7 +4732,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if re.search(r"\b(pa?ediatric)\b", s):
             _dbg("Skipping clarification: 'paediatric' detected")
             return None
-        specified_type = re.search(r"\b(new|newly|diagnos(ed)?|dx|actual(es)?|actualmente|current(ly)?|seguimiento|followed|follow.up)\b", s) is not None
+        specified_type = re.search(r"\b(new|newly|diagnos(ed)?|dx|nd\b|actual(es)?|actualmente|current(ly)?|seguimiento|followed|follow.up)\b", s) is not None
         specified_stage = re.search(r"\bstage\s*[12]\b", s) is not None
         specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older"
                                    r"|\badulto?s?\b|\badults?\b|\bpediatri[ck]|paediatri[ck]|\bni[ñn]os?\b)\b", s) is not None
@@ -4769,6 +4797,75 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if not user_text:
             return None
         s = user_text.lower()
+
+        # MATH OPERATIONS on last_table (sum, average, min, max, double) — no Claude/SF call needed
+        try:
+            _math_intent = re.search(
+                r"\b(sum|total|average|avg|mean|min(?:imum)?|max(?:imum)?|double|triple|half)\b", s
+            )
+            _has_new_data = re.search(
+                r"\b(site[s]?|center[s]?|countr|cit[yi]|patient|stage|nd\b|t1d|hla|pharmac|"
+                r"find|show|list|search|per\s+country|per\s+city"
+                r"|in\s+(?!that\b|those\b|this\b|the\b|them\b|it\b|which\b)[a-z]{3,})\b", s
+            )
+            if _math_intent and not _has_new_data and has_table and last_table_from_payload:
+                _m_rows = last_table_from_payload.get("rows") or []
+                _m_cols = [c.get("key") if isinstance(c, dict) else str(c)
+                           for c in (last_table_from_payload.get("columns") or [])]
+                if _m_rows and _m_cols:
+                    # Find numeric columns
+                    _num_cols = [
+                        _k for _k in _m_cols
+                        if any(isinstance(r.get(_k), (int, float)) for r in _m_rows[:5]
+                               if isinstance(r, dict))
+                    ]
+                    # Pick best column: prefer one whose name overlaps query words
+                    _target_col = None
+                    _query_words = set(re.findall(r"[a-z]{3,}", s))
+                    for _nc in _num_cols:
+                        _nc_words = set(re.findall(r"[a-z]{3,}", _nc.lower().replace("_", " ")))
+                        if _nc_words & _query_words:
+                            _target_col = _nc
+                            break
+                    if not _target_col and _num_cols:
+                        _target_col = _num_cols[0]
+                    if _target_col:
+                        _nums = [float(r.get(_target_col) or 0)
+                                 for r in _m_rows if isinstance(r, dict)]
+                        _col_lbl = _pretty_label(_target_col)
+                        _op = _math_intent.group(1).lower()
+                        def _fmt(v: float) -> str:
+                            return str(int(v)) if isinstance(v, float) and v.is_integer() else str(round(v, 2))
+                        if _op in ("sum", "total"):
+                            _r = sum(_nums)
+                            return {"answer": f"<p>The total <strong>{_col_lbl}</strong> across {len(_nums)} rows is <strong>{_fmt(_r)}</strong>.</p>"}
+                        elif _op in ("average", "avg", "mean"):
+                            _r = sum(_nums) / len(_nums) if _nums else 0.0
+                            return {"answer": f"<p>The average <strong>{_col_lbl}</strong> across {len(_nums)} rows is <strong>{_fmt(_r)}</strong>.</p>"}
+                        elif _op in ("min", "minimum"):
+                            _r = min(_nums) if _nums else 0.0
+                            return {"answer": f"<p>The minimum <strong>{_col_lbl}</strong> is <strong>{_fmt(_r)}</strong>.</p>"}
+                        elif _op in ("max", "maximum"):
+                            _r = max(_nums) if _nums else 0.0
+                            return {"answer": f"<p>The maximum <strong>{_col_lbl}</strong> is <strong>{_fmt(_r)}</strong>.</p>"}
+                        elif _op == "double":
+                            _total = sum(_nums)
+                            if len(_nums) == 1:
+                                _r = _nums[0] * 2
+                                return {"answer": f"<p>Double of <strong>{_col_lbl}</strong> ({_fmt(_nums[0])}) = <strong>{_fmt(_r)}</strong>.</p>"}
+                            else:
+                                _r = _total * 2
+                                return {"answer": f"<p>Sum of <strong>{_col_lbl}</strong> ({_fmt(_total)}) × 2 = <strong>{_fmt(_r)}</strong>.</p>"}
+                        elif _op == "triple":
+                            _total = sum(_nums)
+                            _r = _total * 3
+                            return {"answer": f"<p>Sum of <strong>{_col_lbl}</strong> ({_fmt(_total)}) × 3 = <strong>{_fmt(_r)}</strong>.</p>"}
+                        elif _op == "half":
+                            _total = sum(_nums)
+                            _r = _total / 2
+                            return {"answer": f"<p>Half of the total <strong>{_col_lbl}</strong> ({_fmt(_total)}) = <strong>{_fmt(_r)}</strong>.</p>"}
+        except Exception as _me:
+            _dbg("WARN: planner math handler failed: %s", _me)
 
         # INTENCIÓN DIRECTA: "show on map / ver en el mapa" → direct to 🎯 Explorer button
         try:
@@ -5783,8 +5880,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         "last_filters": _country_lf,
                     }
                 if _matched_country and _matched_sf_name and sf:
-                    # NOTE: SF ShippingCountry stores the full English name (e.g. "Spain"),
-                    # not ISO codes. Fetch all clinical accounts and filter in Python.
+                    # Use WHERE clause directly in SOQL (faster than fetching 2000+ records + Python filter)
+                    _esc_country_sf = _sf_escape_value(_matched_sf_name)
                     soql_country = (
                         "SELECT Account.Id, Account.Name, Account.ShippingCity, Account.ShippingCountry, "
                         "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
@@ -5793,8 +5890,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         "FROM Opportunity "
                         "WHERE Account.RecordType.DeveloperName='SubAccount' "
                         "AND Account.C_Type__c='Clinical' "
+                        f"AND Account.ShippingCountry = '{_esc_country_sf}' "
                         "ORDER BY Account.Name ASC "
-                        "LIMIT 2000"
+                        "LIMIT 300"
                     )
                     raw_country = tool_salesforce_query(sf, soql_country)
                     recs_country = raw_country.get("records", []) if isinstance(raw_country, dict) else []
@@ -5804,10 +5902,6 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         acc = r.get("Account") or {}
                         aid = acc.get("Id") or r.get("AccountId", "")
                         if not aid or aid in seen_cids:
-                            continue
-                        # Filter by full country name as stored in SF ShippingCountry
-                        country_val = (acc.get("ShippingCountry") or "").lower()
-                        if country_val != _matched_sf_name.lower():
                             continue
                         seen_cids.add(aid)
                         rows_country.append({
@@ -5838,9 +5932,24 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         "logic": "AND",
                         "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
                     }
+                    # Build a richer answer: top cities + key metrics summary
+                    _city_counts: Dict[str, int] = {}
+                    _s1_total = _s2_total = 0
+                    for _r in rows_country:
+                        _c = _r.get("city") or ""
+                        if _c:
+                            _city_counts[_c] = _city_counts.get(_c, 0) + 1
+                        _s1_total += float(_r.get("sf.C_Number_of_Stage1_Individuals_followed__c") or 0)
+                        _s2_total += float(_r.get("sf.C_Number_of_Stage2_Individuals_followed__c") or 0)
+                    _top_cities = sorted(_city_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                    _city_txt = ", ".join(f"{c} ({n})" for c, n in _top_cities) if _top_cities else ""
+                    _ans_parts = [f"Found <strong>{len(rows_country)}</strong> clinical site(s) in <strong>{_matched_sf_name}</strong>."]
+                    if _city_txt:
+                        _ans_parts.append(f"Top cities: {_city_txt}.")
+                    if _s1_total > 0 or _s2_total > 0:
+                        _ans_parts.append(f"Stage 1: {int(_s1_total)}, Stage 2: {int(_s2_total)} individuals followed across all sites.")
                     return {
-                        "answer": f"<p>Found <strong>{len(rows_country)}</strong> clinical site(s) in "
-                                  f"<strong>{_matched_sf_name}</strong>.</p>",
+                        "answer": "<p>" + " ".join(_ans_parts) + "</p>",
                         "table": tbl_country,
                         "last_filters": _country_sf_lf,
                     }
@@ -6671,6 +6780,27 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             )
         })
 
+    # Inject a compact summary of the previous table so Claude can answer numeric follow-ups
+    # (e.g. "what's the average?", "which has the highest?", "compare X vs Y") without re-fetching data.
+    # Strategy: inject ALL rows for small tables (≤50 rows) so comparisons work correctly;
+    # for large tables inject a 10-row sample plus column summary.
+    if last_table_from_payload and isinstance(last_table_from_payload.get("rows"), list):
+        _ctx_rows = last_table_from_payload.get("rows", [])
+        if _ctx_rows:
+            _ctx_cols = [c.get("key") if isinstance(c, dict) else str(c)
+                         for c in (last_table_from_payload.get("columns") or [])]
+            _ctx_sample = _ctx_rows if len(_ctx_rows) <= 50 else _ctx_rows[:10]
+            _ctx_label = "Full data" if len(_ctx_rows) <= 50 else f"Sample (first 10 of {len(_ctx_rows)} rows)"
+            msgs.append({
+                "role": "system",
+                "content": (
+                    f"PREVIOUS TABLE CONTEXT ({len(_ctx_rows)} total rows):\n"
+                    f"Columns: {', '.join(_ctx_cols)}\n"
+                    f"{_ctx_label}:\n"
+                    + json.dumps(_ctx_sample, default=str)
+                )
+            })
+
     for m in _truncate_history(payload.messages):
         msgs.append({"role": m.role, "content": m.content})
 
@@ -7074,6 +7204,34 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                )
             })
     
+    # Pure conversational follow-up: no tools needed — answer from conversation history + table context.
+    # Detects short queries that reference prior results without requesting new data.
+    _is_pure_context = (
+        len(user_utterance.split()) <= 14 and
+        not re.search(
+            r"\b(site[s]?|center[s]?|countr|cit[yi]|patient|stage|nd\b|t1d|hla|pharmac|"
+            r"find|show|list|search|activit|assignment|nearest|closest)\b",
+            user_utterance.lower()
+        ) and
+        (has_prior_assistant_response or has_prior_table) and
+        re.search(
+            r"\b(that|those|they|it|this|the\s+result|you\s+just|that\s+number|those\s+sites"
+            r"|the\s+table|last|previous|above|of\s+that|of\s+those|from\s+that|of\s+them"
+            r"|odd|even|prime|double|triple|half|percent|ratio)\b",
+            user_utterance.lower()
+        )
+    )
+    if _is_pure_context:
+        _dbg("Pure conversational follow-up detected → force_no_tools=True")
+        try:
+            _ctx_resp = _claude_chat(msgs, force_no_tools=True)
+            _ctx_text = (_ctx_resp.choices[0].message.content or "").strip()
+            if _ctx_text:
+                return _extract_structured(_ctx_text)
+        except Exception as _ctx_e:
+            _dbg("WARN: force_no_tools conversational call failed: %s", _ctx_e)
+            # Fall through to normal tool-based flow
+
     # Si hay intención de datos → obligamos tool-calls
     tool_mode = "required" if data_intent else "auto"
     reinforced_once = False

@@ -37,7 +37,6 @@ export default function SiteDetailsModal({
   const [loading, setLoading] = React.useState(false);
   const [extras, setExtras] = React.useState<AccountExtras | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [raw, setRaw] = React.useState<any>(null); // debug: payload crudo
 
   React.useEffect(() => {
     let alive = true;
@@ -56,7 +55,6 @@ export default function SiteDetailsModal({
           json = { _parse_error: String(e), _body: txt };
         }
         if (alive) {
-          setRaw(json);
           // normaliza a objeto con las claves esperadas
           const normalized: AccountExtras = {
             account_id: json?.account_id ?? accountId,
@@ -69,16 +67,13 @@ export default function SiteDetailsModal({
             assignments: Array.isArray(json?.assignments) ? json.assignments : [],
           };
           setExtras(normalized);
-          console.debug("[SiteDetailsModal] extras payload:", normalized, "(raw:", json, ")");
           if (json?.error) {
             setError(String(json.error));
           }
         }
       } catch (e: any) {
         if (alive) {
-          console.warn("[SiteDetailsModal] fetch error:", e);
           setError(e?.message || "Failed to load details");
-          setRaw({ _fetch_error: String(e) });
         }
       } finally {
         if (alive) setLoading(false);
@@ -182,15 +177,6 @@ export default function SiteDetailsModal({
           ) : (
             <div className="text-sm text-gray-600">—</div>
           )}
-          {/* DEBUG: muestra el JSON crudo cuando haya algo raro */}
-          {raw ? (
-            <details className="mt-3">
-              <summary className="text-xs text-gray-500 cursor-pointer">Debug payload</summary>
-              <pre className="mt-2 text-[11px] text-gray-700 bg-gray-50 rounded-md p-2 overflow-auto max-h-64">
-                {JSON.stringify(raw, null, 2)}
-              </pre>
-            </details>
-          ) : null}
         </div>
       </div>
     </div>

@@ -50,7 +50,7 @@ export default function ChatView() {
 
   const [chatHistory, setChatHistory] = useState<Array<{role: "user" | "assistant"; content: string}>>(() => {
     try {
-      const raw = sessionStorage.getItem(HISTORY_KEY);
+      const raw = localStorage.getItem(HISTORY_KEY);
       return raw ? JSON.parse(raw) : [];
     } catch { return []; }
   });
@@ -68,6 +68,8 @@ export default function ChatView() {
   const [lastTableForAI, setLastTableForAI] = useState<{columns: any[], rows: any[]} | null>(null);
   const [lastFiltersForAI, setLastFiltersForAI] = useState<Record<string,any> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // AbortController for the active stream — lets the Stop button cancel mid-response
+  const abortRef = useRef<AbortController | null>(null);
 
   // Chart state (reuse your ChartModal)
   type ChartType = "bar" | "line" | "pie";
@@ -150,10 +152,10 @@ export default function ChatView() {
     });
   }, [messages, busy]);
 
-  // --- restore from sessionStorage on mount (only text messages to avoid serializing React nodes) ---
+  // --- restore from localStorage on mount (only text messages to avoid serializing React nodes) ---
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(MSGS_KEY);
+      const raw = localStorage.getItem(MSGS_KEY);
       if (raw) {
         const saved: Array<{ role: "user" | "assistant"; content: string | null }> =
           JSON.parse(raw);
@@ -210,7 +212,7 @@ export default function ChatView() {
         role: m.role,
         content: typeof m.content === "string" ? (m.content as string) : null,
       }));
-      sessionStorage.setItem(MSGS_KEY, JSON.stringify(serializable));
+      localStorage.setItem(MSGS_KEY, JSON.stringify(serializable));
     } catch {}
   }, [messages]);
 
@@ -631,12 +633,14 @@ export default function ChatView() {
     try { sessionStorage.removeItem(TABLE_KEY); } catch {}
     const newHistory = [...chatHistory, { role: "user" as const, content: text }];
     setChatHistory(newHistory);
-    try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory)); } catch {}
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(newHistory)); } catch {}
 
     setMessages((m) => [...m, { role: "user", content: text }]);
     setLastUserQ(text);
     setInput("");
     setBusy(true);
+    const abort = new AbortController();
+    abortRef.current = abort;
     try {
       // FOLLOW-UP RESOLVER (antes de ir al LLM)
       const handled = await tryFollowUp(text);
@@ -648,18 +652,23 @@ export default function ChatView() {
       setStreamText("");
       const resp = await askAIStream(text, lastTableForAI, lastFiltersForAI, (chunk) => {
         setStreamText((prev) => prev + chunk);
-      }, newHistory);
+      }, newHistory, abort.signal);
       setStreamText("");
       handleArtifacts(resp);
       // Append assistant reply to history
       if (resp.answer) {
         setChatHistory((prev) => {
           const next = [...prev, { role: "assistant" as const, content: resp.answer! }];
-          try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
           return next;
         });
       }
     } catch (e: any) {
+      // AbortError = user clicked Stop — reset silently without showing an error
+      if (e?.name === "AbortError") {
+        setStreamText("");
+        return;
+      }
       setMessages((m) => [
         ...m,
         {
@@ -668,8 +677,13 @@ export default function ChatView() {
         },
       ]);
     } finally {
+      abortRef.current = null;
       setBusy(false);
     }
+  };
+
+  const stopGeneration = () => {
+    abortRef.current?.abort();
   };
 
   // ---------- Follow-up resolver ----------
@@ -1017,9 +1031,9 @@ export default function ChatView() {
     setLastTableForAI(null);
     setChatHistory([]);
     try {
-      sessionStorage.removeItem(MSGS_KEY);
+      localStorage.removeItem(MSGS_KEY);
       sessionStorage.removeItem(INPUT_KEY);
-      sessionStorage.removeItem(HISTORY_KEY);
+      localStorage.removeItem(HISTORY_KEY);
       // sessionStorage.removeItem(TABLE_KEY); // opcional
     } catch {}
   };
@@ -1121,14 +1135,25 @@ export default function ChatView() {
               disabled={busy}
               aria-label="Ask Moby"
             />
-            <button
-              data-testid="chat-send"
-              className="rounded-lg bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60"
-              onClick={send}
-              disabled={busy || input.trim().length === 0}
-            >
-              Send
-            </button>
+            {busy ? (
+              <button
+                data-testid="chat-stop"
+                className="rounded-lg bg-red-500 text-white px-4 py-2 text-sm font-medium hover:bg-red-600"
+                onClick={stopGeneration}
+                title="Stop generation"
+              >
+                ⏹ Stop
+              </button>
+            ) : (
+              <button
+                data-testid="chat-send"
+                className="rounded-lg bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-60"
+                onClick={send}
+                disabled={input.trim().length === 0}
+              >
+                Send
+              </button>
+            )}
           </div>
         </div>
       </div>
