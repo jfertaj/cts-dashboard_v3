@@ -71,4 +71,23 @@ export const S = {
 
   // ── Map ───────────────────────────────────────────────────────────────
   MAP_CONTAINER: '[data-testid="map-container"]',
+
+  // ── Members (MembersView) ─────────────────────────────────────────────
+  TAB_MEMBERS:                   '[data-testid="tab-members"]',
+  MEMBERS_VIEW:                  '[data-testid="members-view"]',
+  MEMBERS_FILTER_PANEL:          '[data-testid="members-filter-panel"]',
+  MEMBERS_FILTER_NAME:           '[data-testid="members-filter-name"]',
+  MEMBERS_FILTER_COUNTRY:        '[data-testid="members-filter-country"]',
+  MEMBERS_FILTER_LEVEL:          '[data-testid="members-filter-level"]',
+  MEMBERS_SEARCH_BTN:            '[data-testid="members-search-btn"]',
+  MEMBERS_CLEAR_BTN:             '[data-testid="members-clear-btn"]',
+  MEMBERS_RESULTS_COUNT:         '[data-testid="members-results-count"]',
+  MEMBERS_MAP_TOGGLE:            '[data-testid="members-map-toggle"]',
+  MEMBERS_MAP:                   '[data-testid="members-map"]',
+  MEMBERS_TABLE:                 '[data-testid="members-table"]',
+  MEMBERS_TABLE_ROW:             '[data-testid="members-table-row"]',
+
+  // ── Member Details Modal ──────────────────────────────────────────────
+  MEMBER_DETAILS_MODAL:          '[data-testid="member-details-modal"]',
+  MEMBER_DETAILS_CLOSE:          '[data-testid="member-details-close"]',
 } as const;

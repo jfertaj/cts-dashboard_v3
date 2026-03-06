@@ -356,15 +356,16 @@ export default function MembersView() {
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex gap-4 items-start">
+    <div data-testid="members-view" className="flex gap-4 items-start">
       {/* ── Filter panel ────────────────────────────────────────────────── */}
-      <aside className="w-64 flex-shrink-0 bg-white rounded-xl border shadow-sm p-4 space-y-4">
+      <aside data-testid="members-filter-panel" className="w-64 flex-shrink-0 bg-white rounded-xl border shadow-sm p-4 space-y-4">
         <div className="text-sm font-semibold text-gray-700">Filters</div>
 
         {/* Institution name */}
         <div>
           <label className="text-xs text-gray-500 block mb-1">Institution name</label>
           <input
+            data-testid="members-filter-name"
             type="text"
             value={filterName}
             onChange={(e) => setFilterName(e.target.value)}
@@ -378,6 +379,7 @@ export default function MembersView() {
         <div>
           <label className="text-xs text-gray-500 block mb-1">Country</label>
           <select
+            data-testid="members-filter-country"
             value={filterCountry}
             onChange={(e) => setFilterCountry(e.target.value)}
             className="w-full text-sm border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
@@ -393,6 +395,7 @@ export default function MembersView() {
         <div>
           <label className="text-xs text-gray-500 block mb-1">Membership level</label>
           <select
+            data-testid="members-filter-level"
             value={filterLevel}
             onChange={(e) => setFilterLevel(e.target.value)}
             className="w-full text-sm border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
@@ -411,6 +414,7 @@ export default function MembersView() {
             {PROPOSED_ROLES.map((r) => (
               <label key={r.key} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input
+                  data-testid={`members-filter-proposed-${r.label}`}
                   type="checkbox"
                   className="rounded text-blue-600"
                   checked={filterProposed.includes(r.key)}
@@ -429,6 +433,7 @@ export default function MembersView() {
             {VALIDATED_ROLES.map((r) => (
               <label key={r.key} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input
+                  data-testid={`members-filter-validated-${r.label}`}
                   type="checkbox"
                   className="rounded text-blue-600"
                   checked={filterValidated.includes(r.key)}
@@ -443,6 +448,7 @@ export default function MembersView() {
         {/* Buttons */}
         <div className="flex gap-2 pt-1">
           <button
+            data-testid="members-search-btn"
             onClick={handleSearch}
             disabled={searching || loading}
             className="flex-1 rounded-md bg-[#0072CE] text-white text-sm px-3 py-1.5 hover:bg-[#005fa3] disabled:opacity-50 transition"
@@ -450,6 +456,7 @@ export default function MembersView() {
             {searching ? "Searching…" : "Search"}
           </button>
           <button
+            data-testid="members-clear-btn"
             onClick={handleClear}
             disabled={searching || loading}
             className="rounded-md border text-sm px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50 transition"
@@ -465,13 +472,14 @@ export default function MembersView() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-gray-900">INNODIA Member Institutions</h1>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p data-testid="members-results-count" className="text-xs text-gray-500 mt-0.5">
               {loading
                 ? "Loading…"
                 : `${viewRows.length.toLocaleString()} institution${viewRows.length !== 1 ? "s" : ""}${viewRows.length !== allRows.length ? ` (of ${allRows.length})` : ""}`}
             </p>
           </div>
           <button
+            data-testid="members-map-toggle"
             onClick={() => setShowMap((v) => !v)}
             className={`px-3 py-1.5 rounded-md border text-sm transition ${
               showMap
@@ -485,6 +493,7 @@ export default function MembersView() {
 
         {/* Map */}
         {showMap && (
+          <div data-testid="members-map">
           <MemberMapView
             rows={viewRows}
             onOpenDetail={(id, name) => {
@@ -493,6 +502,7 @@ export default function MembersView() {
               setDetailOpen(true);
             }}
           />
+          </div>
         )}
 
         {/* Error */}
@@ -510,7 +520,7 @@ export default function MembersView() {
             <div className="py-16 text-center text-sm text-gray-500">No members found matching the selected filters.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table data-testid="members-table" className="w-full text-sm">
                 <thead>
                   {table.getHeaderGroups().map((hg) => (
                     <tr key={hg.id} className="border-b bg-gray-50">
@@ -535,6 +545,7 @@ export default function MembersView() {
                   {rows.map((row, i) => (
                     <tr
                       key={row.id}
+                      data-testid="members-table-row"
                       className={`border-b last:border-0 hover:bg-blue-50/30 transition-colors ${i % 2 === 0 ? "" : "bg-gray-50/50"}`}
                     >
                       {row.getVisibleCells().map((cell) => (
