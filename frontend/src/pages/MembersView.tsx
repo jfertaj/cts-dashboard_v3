@@ -11,6 +11,7 @@ import {
 } from "@tanstack/react-table";
 import { displayCountry, ISO2_COUNTRY } from "../lib/countryUtils";
 import MemberDetailsModal from "../components/MemberDetailsModal";
+import MemberMapView from "../components/MemberMapView";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ type MemberRow = {
   account_name: string;
   country: string;  // ISO2
   city: string;
+  lat?: number | null;
+  lng?: number | null;
   data: Record<string, any>;
 };
 
@@ -108,6 +111,9 @@ export default function MembersView() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [pageIndex, setPageIndex] = useState(0);
   const PAGE_SIZE = 25;
+
+  // Map toggle
+  const [showMap, setShowMap] = useState(false);
 
   // Detail modal state
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -465,7 +471,29 @@ export default function MembersView() {
                 : `${viewRows.length.toLocaleString()} institution${viewRows.length !== 1 ? "s" : ""}${viewRows.length !== allRows.length ? ` (of ${allRows.length})` : ""}`}
             </p>
           </div>
+          <button
+            onClick={() => setShowMap((v) => !v)}
+            className={`px-3 py-1.5 rounded-md border text-sm transition ${
+              showMap
+                ? "bg-[#0072CE] text-white border-[#0072CE]"
+                : "bg-white text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {showMap ? "Hide Map" : "Show Map"}
+          </button>
         </div>
+
+        {/* Map */}
+        {showMap && (
+          <MemberMapView
+            rows={viewRows}
+            onOpenDetail={(id, name) => {
+              setDetailId(id);
+              setDetailName(name);
+              setDetailOpen(true);
+            }}
+          />
+        )}
 
         {/* Error */}
         {loadError && (
