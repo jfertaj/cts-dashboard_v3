@@ -300,10 +300,11 @@ test.describe("MEMBERS-LOAD — bootstrap and table rendering", () => {
   });
 
   test("MEMBERS-LOAD-7: country ISO2 is rendered as full name", async ({ page }) => {
-    // DE → Germany, IT → Italy, ES → Spain
-    await expect(page.getByText("Germany")).toBeVisible();
-    await expect(page.getByText("Italy")).toBeVisible();
-    await expect(page.getByText("Spain")).toBeVisible();
+    // DE → Germany, IT → Italy, ES → Spain (scoped to table to avoid select option matches)
+    const table = page.locator(S.MEMBERS_TABLE);
+    await expect(table.getByText("Germany", { exact: true })).toBeVisible();
+    await expect(table.getByText("Italy", { exact: true })).toBeVisible();
+    await expect(table.getByText("Spain", { exact: true })).toBeVisible();
   });
 
   test("MEMBERS-LOAD-8: results count shows correct number", async ({ page }) => {
@@ -316,7 +317,7 @@ test.describe("MEMBERS-LOAD — bootstrap and table rendering", () => {
     // München has cs=true → should show a CS badge in the table
     const rows = page.locator(S.MEMBERS_TABLE_ROW);
     const munichRow = rows.filter({ hasText: "Universität München" });
-    await expect(munichRow.getByText("CS")).toBeVisible();
+    await expect(munichRow.getByText("CS", { exact: true })).toBeVisible();
   });
 
   test("MEMBERS-LOAD-10: Validated Roles badges rendered for München (Val. CTS)", async ({ page }) => {
@@ -592,7 +593,7 @@ test.describe("MEMBERS-MODAL — detail modal", () => {
   test("MEMBERS-MODAL-11: subaccount CTS badge is rendered", async ({ page }) => {
     await page.getByRole("button", { name: "Universität München" }).click();
     await expect(page.locator(S.MEMBER_DETAILS_MODAL)).toBeVisible({ timeout: 5000 });
-    await expect(page.locator(S.MEMBER_DETAILS_MODAL).getByText("CTS")).toBeVisible();
+    await expect(page.locator(S.MEMBER_DETAILS_MODAL).getByText("CTS", { exact: true })).toBeVisible();
   });
 
   test("MEMBERS-MODAL-12: proposed role pills reflect mock data (CS ✓, DxLab —)", async ({ page }) => {
