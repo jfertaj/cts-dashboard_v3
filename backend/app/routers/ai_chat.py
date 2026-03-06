@@ -1005,6 +1005,79 @@ def tool_explorer_within_drive_km(
         cols = [{"key": k, "label": k} for k in keys]
     return {"columns": cols, "rows": rows, "meta": data.get("meta"), "base": data.get("base")}
 
+def tool_members_search(
+    request: Request,
+    filters: Dict[str, Any],
+    include_detail: bool = False,
+) -> Dict[str, Any]:
+    """Proxy interno al endpoint /api/members/search."""
+    url = "http://127.0.0.1:8000/api/members/search"
+    payload: Dict[str, Any] = {
+        "filters": filters or {"logic": "AND", "rules": []},
+    }
+    headers: Dict[str, str] = {}
+    if request:
+        ck = request.headers.get("cookie")
+        if ck:
+            headers["cookie"] = ck
+    with httpx.Client(timeout=60.0) as cli:
+        resp = cli.post(url, json=payload, headers=headers)
+    if resp.status_code >= 400:
+        raise HTTPException(resp.status_code, f"members_search failed: {resp.text[:300]}")
+    data = resp.json()
+    rows = data.get("rows") or []
+    # Build flat rows for table display
+    flat_rows = []
+    for r in rows:
+        flat: Dict[str, Any] = {
+            "account_id": r.get("account_id", ""),
+            "account_name": r.get("account_name", ""),
+            "country": r.get("country", ""),
+            "city": r.get("city", ""),
+        }
+        d = r.get("data") or {}
+        flat["Level of Membership"] = d.get("sf.C_Level_of_Membership__c") or ""
+        flat["Status"] = d.get("sf.Account_Status__c") or ""
+        flat["Representative"] = d.get("sf.C_Member_Representative__r.Name") or ""
+        flat["# Sites"] = d.get("extra.SubAccountsCount", 0)
+        flat["# Contacts"] = d.get("extra.ContactsCount", 0)
+        # Proposed roles as compact string
+        proposed = []
+        if d.get("sf.Clinical_Site_CS__c"):            proposed.append("CS")
+        if d.get("sf.C_Deliver_Clinical_Grade_Services__c"): proposed.append("DxLab")
+        if d.get("sf.C_Perform_Cutting_Edge__c"):      proposed.append("LAB")
+        if d.get("sf.C_Contribute_as_a_Patient_Organization__c"): proposed.append("PatOrg")
+        flat["Proposed Roles"] = ", ".join(proposed) if proposed else "—"
+        # Validated roles as compact string
+        validated = []
+        if d.get("sf.Clinical_Site_CS_validated__c"):            validated.append("CS")
+        if d.get("sf.Clinical_Trial_Site_CTS_validated__c"):     validated.append("CTS")
+        if d.get("sf.Diagnostic_Lab_DxLab_validated__c"):        validated.append("DxLab")
+        if d.get("sf.Research_Mechanistic_Lab_LAB_validated__c"):validated.append("LAB")
+        if d.get("sf.Patient_Organization_validated__c"):        validated.append("PatOrg")
+        flat["Validated Roles"] = ", ".join(validated) if validated else "—"
+        flat_rows.append(flat)
+
+    # Column definitions
+    cols = [
+        {"key": "account_name",        "label": "Institution"},
+        {"key": "country",             "label": "Country"},
+        {"key": "city",                "label": "City"},
+        {"key": "Level of Membership", "label": "Level of Membership"},
+        {"key": "Status",              "label": "Status"},
+        {"key": "Representative",      "label": "Representative"},
+        {"key": "# Sites",             "label": "# Sites"},
+        {"key": "# Contacts",          "label": "# Contacts"},
+        {"key": "Proposed Roles",      "label": "Proposed Roles"},
+        {"key": "Validated Roles",     "label": "Validated Roles"},
+    ]
+    return {
+        "columns": cols,
+        "rows": flat_rows[:500],
+        "meta": {"total": len(rows)},
+    }
+
+
 def tool_explorer_search(
     request: Request,
     filters: Dict[str, Any],
@@ -3859,6 +3932,47 @@ TOOLS_SPEC = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "members_search",
+            "description": (
+                "Search INNODIA Member institutions (RecordType = 'Member') and their network roles, contacts, "
+                "and linked SubAccount clinical sites. Use for ANY question about: "
+                "member institutions, membership levels, proposed/validated network roles "
+                "(CS/DxLab/LAB/CTS/Patient Organization), country leads, board members, "
+                "institutional contacts, or sub-accounts linked to a member. "
+                "Examples: "
+                "'how many member institutions?' → filters={logic:'AND',rules:[]}. "
+                "'members in Italy' → filters={logic:'AND',rules:[{field:'site.country',operator:'equals',value:'Italy'}]}. "
+                "'members with validated CTS role' → filters={logic:'AND',rules:[{field:'sf.Clinical_Trial_Site_CTS_validated__c',operator:'equals',value:true}]}. "
+                "'members with proposed CS' → filters={logic:'AND',rules:[{field:'sf.Clinical_Site_CS__c',operator:'equals',value:true}]}. "
+                "Filterable fields: site.country, site.city, sf.C_Level_of_Membership__c, sf.Account_Status__c, "
+                "sf.Clinical_Site_CS__c, sf.C_Deliver_Clinical_Grade_Services__c, sf.C_Perform_Cutting_Edge__c, "
+                "sf.C_Contribute_as_a_Patient_Organization__c, sf.Clinical_Site_CS_validated__c, "
+                "sf.Clinical_Trial_Site_CTS_validated__c, sf.Diagnostic_Lab_DxLab_validated__c, "
+                "sf.Research_Mechanistic_Lab_LAB_validated__c, sf.Patient_Organization_validated__c, "
+                "extra.SubAccountsCount, extra.ContactsCount."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filters": {
+                        "type": "object",
+                        "description": (
+                            "FilterGroup: {logic:'AND'|'OR', rules:[{field, operator, value},...]}. "
+                            "Pass {logic:'AND',rules:[]} to return all members."
+                        )
+                    },
+                    "include_detail": {
+                        "type": "boolean",
+                        "description": "If true, also fetches contacts and SubAccounts for each matched member (slower)."
+                    }
+                },
+                "required": ["filters"]
+            }
+        }
+    },
 ]
 
 # ====== System prompt ======
@@ -4305,6 +4419,44 @@ GROUNDING & UNCERTAINTY RULES (mandatory — follow at all times)
 7. **No markdown hallucination**: Do not add table rows, bullet items, or numbers beyond what the tool results contain. If a tool result has 5 rows, your table must have exactly 5 rows.
 
 8. **Stale context**: If you lack the data needed to answer (e.g. the previous table is empty or the context window has no relevant data), ask the user to re-run the query rather than guessing. Example: "I don't have that data in the current context — please ask me to fetch it again."
+
+---
+
+MEMBER ACCOUNTS (use members_search tool for all queries about these)
+
+Member = an institution/university/hospital that is an INNODIA network member.
+RecordType.DeveloperName = 'Member' on Account.
+Key fields:
+  C_Level_of_Membership__c — membership level (e.g. Full Member, Associate Member)
+  Account_Status__c — account status
+  C_Member_Representative__c → Contact (main institutional representative)
+  SubAccounts linked via: WHERE C_Member__c = '<member_id>' AND RecordType.DeveloperName = 'SubAccount'
+
+PROPOSED ROLES to play in the Network (boolean checkboxes on Member Account):
+  Clinical Site (CS):              Clinical_Site_CS__c
+  Diagnostic Lab (DxLab):          C_Deliver_Clinical_Grade_Services__c
+  Research & Mechanistic Lab (LAB):C_Perform_Cutting_Edge__c
+  Patient Organization:            C_Contribute_as_a_Patient_Organization__c
+
+VALIDATED ROLES to play in the Network (boolean checkboxes on Member Account):
+  Validated Clinical Site (CS):    Clinical_Site_CS_validated__c
+  Validated Clinical Trial Site:   Clinical_Trial_Site_CTS_validated__c
+  Validated Diagnostic Lab (DxLab):Diagnostic_Lab_DxLab_validated__c
+  Validated Res & Mech Lab (LAB):  Research_Mechanistic_Lab_LAB_validated__c
+  Validated Patient Organization:  Patient_Organization_validated__c
+
+Key contact flags (on Contact objects linked to Member):
+  C_Board_Member__c, C_Country_Lead__c, C_Voting_Rights__c
+
+QUERY ROUTING for members:
+- "how many member institutions" → members_search with empty rules → count rows
+- "members in [country]" → members_search filter site.country
+- "members with validated CTS" → members_search filter sf.Clinical_Trial_Site_CTS_validated__c = true
+- "members with proposed DxLab role" → members_search filter sf.C_Deliver_Clinical_Grade_Services__c = true
+- "members with both proposed CS and validated CTS" → members_search AND filter both boolean fields
+- "contacts at [institution]" → members_search with name filter + include_detail=true
+- "board members / country leads" → members_search + include_detail=true; filter by contact flag
+- "how many sites does [member] have" → members_search + check extra.SubAccountsCount
 """
 
 def _is_complex_query(text: str) -> bool:
@@ -7919,6 +8071,17 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
                     except Exception as ee:
                         msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
+
+            elif name == "members_search":
+                    try:
+                        _mf = args.get("filters") or {"logic": "AND", "rules": []}
+                        _include_detail = bool(args.get("include_detail", False))
+                        out = tool_members_search(request, filters=_mf, include_detail=_include_detail)
+                        last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
+                        last_table = _normalize_table_for_ui(last_table)
+                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
+                    except Exception as ee:
+                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
 
             else:
                 msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": f"Unknown tool {name}"})})

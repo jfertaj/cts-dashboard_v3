@@ -54,6 +54,9 @@ from app.routers.salesforce_explorer import (
 # --- Extras (Member + PI + debug) ---
 from app.routers import salesforce_extras
 
+# --- Members view
+from app.routers import members_explorer
+
 # --- OpenAI
 from app.routers import ai_chat, explorer_bridge
 
@@ -163,6 +166,9 @@ app.include_router(explorer_router)     # /api/explorer/...  (explorer)
 
 # 👉 extras: member + PI + debug (Do NOT include router_explorer if it doesn't exist)
 app.include_router(salesforce_extras.router)  # /api/salesforce/...
+
+# Members view
+app.include_router(members_explorer.router)  # /api/members/...
 
 # OpenAI
 app.include_router(ai_chat.router)

@@ -12,4 +12,4 @@ export interface ResponseRecord {
   country?: string;
 }
 
-export type Tab = "upload" | "explorer" | "chat";
+export type Tab = "upload" | "explorer" | "members" | "chat";
