@@ -3937,7 +3937,7 @@ TOOLS_SPEC = [
         "function": {
             "name": "members_search",
             "description": (
-                "Search INNODIA Member institutions (RecordType = 'Member') and their network roles, contacts, "
+                "Search INNODIA Member institutions (RecordType.DeveloperName = 'RT_Member') and their network roles, contacts, "
                 "and linked SubAccount clinical sites. Use for ANY question about: "
                 "member institutions, membership levels, proposed/validated network roles "
                 "(CS/DxLab/LAB/CTS/Patient Organization), country leads, board members, "
@@ -4425,7 +4425,7 @@ GROUNDING & UNCERTAINTY RULES (mandatory — follow at all times)
 MEMBER ACCOUNTS (use members_search tool for all queries about these)
 
 Member = an institution/university/hospital that is an INNODIA network member.
-RecordType.DeveloperName = 'Member' on Account.
+RecordType.DeveloperName = 'RT_Member' on Account.
 Key fields:
   C_Level_of_Membership__c — membership level (e.g. Full Member, Associate Member)
   Account_Status__c — account status
