@@ -125,7 +125,7 @@ _MEMBER_FIELDS = [
 _MEMBER_SOQL = (
     "SELECT " + ", ".join(_MEMBER_FIELDS) + " "
     "FROM Account "
-    "WHERE RecordType.DeveloperName = 'Member' "
+    "WHERE RecordType.DeveloperName = 'RT_Member' "
     "  AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
     "ORDER BY Name "
     "LIMIT 2000"
