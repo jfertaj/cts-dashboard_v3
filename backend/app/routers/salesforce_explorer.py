@@ -2578,6 +2578,13 @@ async def explorer_search(
             if nf.startswith("Account."):
                 account_rules.append(Rule(field=nf[8:], operator=op, value=val))
                 need_account_extras = True
+            elif nf.startswith("Assignment."):
+                # Assignment__c fields are not queryable in Opportunity SOQL.
+                # sf.Assignment.Name → Python-side check against extra.AssignmentsNames
+                if nf == "Assignment.Name":
+                    _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
+                    extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                # Other sf.Assignment.* fields (Type, Stage, MCA, Payment) silently skipped
             else:
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
         elif f.startswith("Account."):
@@ -4169,6 +4176,12 @@ async def explorer_search_within_drive_km(
                 account_rules.append(Rule(field=fld, operator=op, value=val))
                 need_account_fields = True
                 account_fields_needed.add(fld)
+            elif nf.startswith("Assignment."):
+                # Assignment__c fields are not queryable in Opportunity SOQL.
+                if nf == "Assignment.Name":
+                    _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
+                    extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                    need_batch_extras = True
             else:
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
         elif f.startswith("Account."):

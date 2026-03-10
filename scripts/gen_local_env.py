@@ -36,6 +36,9 @@ merged.update({
     "FRONTEND_BASE":        "http://localhost:5173",
     "COOKIE_SECRET":        "dev-secret-change-me",  # matches production default in salesforce_oauth.py
     "ENABLE_SECURE_COOKIES": "false",
+    # SF OAuth callback for local dev — must be registered in SF Connected App
+    # (one-time setup: Setup → App Manager → CTS Dashboard → Edit → Callback URLs)
+    "SF_REDIRECT_URI":      "http://localhost:8000/api/salesforce/oauth/callback",
 })
 
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
