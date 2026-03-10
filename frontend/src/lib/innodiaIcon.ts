@@ -25,8 +25,8 @@ const _pinSvg = (color: string, size: [number, number]): string => {
     ` fill="${color}"/>` +
     // White circle in the head
     `<circle cx="12" cy="12" r="10" fill="white"/>` +
-    // Crystal clipped to circle
-    `<image x="2" y="2" width="20" height="20" clip-path="url(#cc)" href="${INNODIA_CRYSTAL_URL}"/>` +
+    // Crystal zoomed in to fill the circle (negative offset scales up PNG so crystal fills clip area)
+    `<image x="-3" y="-3" width="30" height="30" clip-path="url(#cc)" href="${INNODIA_CRYSTAL_URL}"/>` +
     `</svg>`
   );
 };
