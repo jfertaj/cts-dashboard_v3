@@ -6683,6 +6683,136 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             logic = "AND"
         return {"logic": logic, "rules": rules}
 
+    # ===== Determinista: within X km OF [Assignment/Study Name] SITES =====
+    # e.g. "sites within 100 km of Beta Preserve sites"
+    # Detects the "[Name] sites" pattern (assignment name, not a city) and builds
+    # a per-reference-site table showing nearby INNODIA sites.
+    try:
+        qtxt = (payload.messages[-1].content or "") if payload.messages else ""
+        # Match "within N km ... of [Name] sites" (Name = multi-word entity like "Beta Preserve")
+        m_assign_km = re.search(
+            r"within\s*(\d{2,4})\s*km\b.{0,80}\bof\s+([\w\s'\-]{2,40?}?)\s+(?:study\s+|trial\s+|clinical\s+)?sites?\b",
+            qtxt, re.IGNORECASE,
+        )
+        if m_assign_km and sf and db is not None:
+            _km_limit = float(m_assign_km.group(1))
+            _assign_name = m_assign_km.group(2).strip().strip("the ").strip()
+
+            # Step 1 — find reference sites via explorer search (Assignment.Name filter)
+            _assign_filter = {
+                "logic": "AND",
+                "rules": [{"field": "sf.Assignment.Name", "operator": "contains", "value": _assign_name}],
+            }
+            _req_headers: Dict[str, str] = {}
+            if request:
+                _ck = request.headers.get("cookie")
+                if _ck: _req_headers["cookie"] = _ck
+            with httpx.Client(timeout=90.0) as _cli:
+                _ref_resp = _cli.post(
+                    f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}",
+                    json={"filters": _assign_filter},
+                    headers=_req_headers,
+                )
+            if _ref_resp.status_code >= 400:
+                raise Exception(f"explorer_search failed: {_ref_resp.status_code}")
+            _ref_json  = _ref_resp.json()
+            _ref_rows  = _ref_json.get("rows") or []
+            _ref_pts: Dict[str, tuple] = {
+                p["account_id"]: (float(p["lat"]), float(p["lng"]))
+                for p in (_ref_json.get("points") or [])
+                if p.get("account_id") and p.get("lat") and p.get("lng")
+            }
+
+            # Only proceed if we actually found sites with that assignment
+            if _ref_rows:
+                # Step 2 — load all clinical site coordinates from local DB
+                from app.models.site import Site as _SiteM  # noqa
+                _all_sites = db.query(
+                    _SiteM.salesforce_account_id,
+                    _SiteM.name,
+                    _SiteM.city,
+                    _SiteM.country,
+                    _SiteM.latitude,
+                    _SiteM.longitude,
+                ).filter(_SiteM.salesforce_account_id.isnot(None)).all()
+
+                def _hav2(la1, lo1, la2, lo2):
+                    R = 6371.0
+                    dlat = math.radians(la2 - la1)
+                    dlon = math.radians(lo2 - lo1)
+                    a = (math.sin(dlat/2)**2
+                         + math.cos(math.radians(la1)) * math.cos(math.radians(la2))
+                         * math.sin(dlon/2)**2)
+                    return round(R * 2 * math.asin(math.sqrt(max(0.0, a))), 1)
+
+                # Step 3 — for each reference site find nearby sites (flat table)
+                _flat_rows: list = []
+                _ref_ids = {str(r.get("account_id", "")) for r in _ref_rows}
+                for _ref in _ref_rows:
+                    _rid    = str(_ref.get("account_id", ""))
+                    _rname  = _ref.get("account_name", "")
+                    _rcountry = _ref.get("country", "")
+                    _rcity  = _ref.get("city", "")
+                    # Resolve reference coordinates (points > local DB)
+                    _rcoords = _ref_pts.get(_rid)
+                    if not _rcoords:
+                        _rs = next((x for x in _all_sites if str(x.salesforce_account_id) == _rid), None)
+                        if _rs and _rs.latitude and _rs.longitude:
+                            _rcoords = (_rs.latitude, _rs.longitude)
+                    if not _rcoords:
+                        _flat_rows.append({
+                            "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
+                            "nearby_site": "⚠ No coordinates", "distance_km": "—",
+                        })
+                        continue
+                    _rlat, _rlng = _rcoords
+                    # Collect nearby sites (exclude self and other reference sites)
+                    _nearby: list = []
+                    for _ns in _all_sites:
+                        _nsid = str(_ns.salesforce_account_id)
+                        if _nsid in _ref_ids:
+                            continue  # skip other Beta Preserve sites
+                        if not _ns.latitude or not _ns.longitude:
+                            continue
+                        _d = _hav2(_rlat, _rlng, float(_ns.latitude), float(_ns.longitude))
+                        if _d <= _km_limit:
+                            _nearby.append((_d, _ns.name or "", _ns.city or "", _ns.country or ""))
+                    _nearby.sort(key=lambda x: x[0])
+                    if _nearby:
+                        for _d, _n, _nc, _nco in _nearby[:15]:
+                            _flat_rows.append({
+                                "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
+                                "nearby_site": _n, "nearby_city": _nc, "nearby_country": _nco,
+                                "distance_km": _d,
+                            })
+                    else:
+                        _flat_rows.append({
+                            "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
+                            "nearby_site": f"— None within {int(_km_limit)} km —",
+                            "nearby_city": "", "nearby_country": "", "distance_km": "—",
+                        })
+
+                _cols = [
+                    {"key": "ref_site",       "label": f"{_assign_name} Site"},
+                    {"key": "ref_country",    "label": "Country"},
+                    {"key": "ref_city",       "label": "City"},
+                    {"key": "nearby_site",    "label": "Nearby INNODIA Site"},
+                    {"key": "nearby_city",    "label": "Nearby City"},
+                    {"key": "nearby_country", "label": "Nearby Country"},
+                    {"key": "distance_km",    "label": "Distance (km)"},
+                ]
+                _n_with = len({r["ref_site"] for r in _flat_rows if r["nearby_site"] and "None" not in r["nearby_site"] and "⚠" not in r["nearby_site"]})
+                _ans = (
+                    f"<p>Found <strong>{len(_ref_rows)}</strong> sites with assignment "
+                    f"<strong>{_assign_name}</strong>. "
+                    f"<strong>{_n_with}</strong> of them have other INNODIA sites within "
+                    f"{int(_km_limit)} km.</p>"
+                )
+                return {"answer": _ans, "table": {"columns": _cols, "rows": _flat_rows}}
+            # _ref_rows empty → fall through to city-based handler
+    except Exception as _e_assign_km:
+        _dbg("WARN: within-km-of-assignment handler: %s", _e_assign_km)
+
     try:
         qtxt = (payload.messages[-1].content or "") if payload.messages else ""
         s = qtxt.lower()
