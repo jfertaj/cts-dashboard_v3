@@ -6745,15 +6745,64 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                          * math.sin(dlon/2)**2)
                     return round(R * 2 * math.asin(math.sqrt(max(0.0, a))), 1)
 
+                # Google Distance Matrix — sync version (reuses explorer cache)
+                import hashlib as _hashlib
+                _gkey = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+                try:
+                    from app.routers.salesforce_explorer import _cache_get as _dmcache_get, _cache_set as _dmcache_set
+                except Exception:
+                    _dmcache_get = lambda k: None  # type: ignore
+                    _dmcache_set = lambda k, v, ttl=3600: None  # type: ignore
+
+                def _drive_matrix_sync(origin_ll: tuple, dests_ll: list) -> list:
+                    """Sync Distance Matrix: returns list of Optional[float] km (driving).
+                    Batches 25 destinations per request; results are cached 1 h."""
+                    if not _gkey or not dests_ll:
+                        return [None] * len(dests_ll)
+                    o_str = f"{origin_ll[0]},{origin_ll[1]}"
+                    out: list = [None] * len(dests_ll)
+                    with httpx.Client(timeout=30.0) as _dm_cli:
+                        for _bi in range(0, len(dests_ll), 25):
+                            _chunk = dests_ll[_bi:_bi + 25]
+                            _d_str = "|".join(f"{la},{lo}" for la, lo in _chunk)
+                            _ck = f"dm_km:{o_str}->{_hashlib.md5(_d_str.encode()).hexdigest()}"
+                            _mx = _dmcache_get(_ck)
+                            if _mx is None:
+                                try:
+                                    _r = _dm_cli.get(
+                                        "https://maps.googleapis.com/maps/api/distancematrix/json",
+                                        params={"origins": o_str, "destinations": _d_str,
+                                                "mode": "driving", "key": _gkey},
+                                    )
+                                    _r.raise_for_status()
+                                    _mx = _r.json()
+                                    _dmcache_set(_ck, _mx, ttl=3600)
+                                except Exception as _dme:
+                                    _dbg("DistanceMatrix batch error: %s", _dme)
+                                    continue
+                            if (_mx or {}).get("status") != "OK":
+                                _dbg("DistanceMatrix status=%s", (_mx or {}).get("status"))
+                                continue
+                            _elems = ((_mx.get("rows") or [{}])[0].get("elements") or [])
+                            for _j in range(len(_chunk)):
+                                _e = _elems[_j] if _j < len(_elems) else {}
+                                if (_e or {}).get("status") == "OK":
+                                    _dm = (_e.get("distance") or {}).get("value")
+                                    if _dm is not None:
+                                        out[_bi + _j] = round(float(_dm) / 1000.0, 1)
+                    return out
+
+                _use_drive = bool(_gkey)
+
                 # Step 3 — for each reference site find nearby sites (flat table)
                 _flat_rows: list = []
                 _ref_ids = {str(r.get("account_id", "")) for r in _ref_rows}
                 for _ref in _ref_rows:
-                    _rid    = str(_ref.get("account_id", ""))
-                    _rname  = _ref.get("account_name", "")
+                    _rid      = str(_ref.get("account_id", ""))
+                    _rname    = _ref.get("account_name", "")
                     _rcountry = _ref.get("country", "")
-                    _rcity  = _ref.get("city", "")
-                    # Resolve reference coordinates (points > local DB)
+                    _rcity    = _ref.get("city", "")
+                    # Resolve reference coordinates (points from explorer > local DB)
                     _rcoords = _ref_pts.get(_rid)
                     if not _rcoords:
                         _rs = next((x for x in _all_sites if str(x.salesforce_account_id) == _rid), None)
@@ -6762,21 +6811,38 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     if not _rcoords:
                         _flat_rows.append({
                             "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
-                            "nearby_site": "⚠ No coordinates", "distance_km": "—",
+                            "nearby_site": "⚠ No coordinates", "nearby_city": "", "nearby_country": "",
+                            "distance_km": "—",
                         })
                         continue
                     _rlat, _rlng = _rcoords
-                    # Collect nearby sites (exclude self and other reference sites)
-                    _nearby: list = []
-                    for _ns in _all_sites:
-                        _nsid = str(_ns.salesforce_account_id)
-                        if _nsid in _ref_ids:
-                            continue  # skip other Beta Preserve sites
-                        if not _ns.latitude or not _ns.longitude:
-                            continue
-                        _d = _hav2(_rlat, _rlng, float(_ns.latitude), float(_ns.longitude))
-                        if _d <= _km_limit:
-                            _nearby.append((_d, _ns.name or "", _ns.city or "", _ns.country or ""))
+
+                    # Haversine pre-filter: 2× limit (road distance > straight-line)
+                    _candidates = [
+                        _ns for _ns in _all_sites
+                        if str(_ns.salesforce_account_id) not in _ref_ids
+                        and _ns.latitude and _ns.longitude
+                        and _hav2(_rlat, _rlng, float(_ns.latitude), float(_ns.longitude)) <= _km_limit * 2.0
+                    ]
+
+                    if _use_drive and _candidates:
+                        # Google Distance Matrix for actual driving distances
+                        _dest_ll = [(float(_ns.latitude), float(_ns.longitude)) for _ns in _candidates]
+                        _drive_dists = _drive_matrix_sync((_rlat, _rlng), _dest_ll)
+                        _nearby = [
+                            (_drive_dists[_i], _candidates[_i].name or "", _candidates[_i].city or "", _candidates[_i].country or "")
+                            for _i in range(len(_candidates))
+                            if _drive_dists[_i] is not None and _drive_dists[_i] <= _km_limit
+                        ]
+                    else:
+                        # Haversine fallback (no API key or no candidates)
+                        _nearby = [
+                            (_hav2(_rlat, _rlng, float(_ns.latitude), float(_ns.longitude)),
+                             _ns.name or "", _ns.city or "", _ns.country or "")
+                            for _ns in _candidates
+                        ]
+                        _nearby = [x for x in _nearby if x[0] <= _km_limit]
+
                     _nearby.sort(key=lambda x: x[0])
                     if _nearby:
                         for _d, _n, _nc, _nco in _nearby[:15]:
@@ -6792,6 +6858,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             "nearby_city": "", "nearby_country": "", "distance_km": "—",
                         })
 
+                _dist_label = "Driving Distance (km)" if _use_drive else "Distance (km, straight-line)"
                 _cols = [
                     {"key": "ref_site",       "label": f"{_assign_name} Site"},
                     {"key": "ref_country",    "label": "Country"},
@@ -6799,14 +6866,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     {"key": "nearby_site",    "label": "Nearby INNODIA Site"},
                     {"key": "nearby_city",    "label": "Nearby City"},
                     {"key": "nearby_country", "label": "Nearby Country"},
-                    {"key": "distance_km",    "label": "Distance (km)"},
+                    {"key": "distance_km",    "label": _dist_label},
                 ]
-                _n_with = len({r["ref_site"] for r in _flat_rows if r["nearby_site"] and "None" not in r["nearby_site"] and "⚠" not in r["nearby_site"]})
+                _n_with = len({r["ref_site"] for r in _flat_rows
+                               if r["nearby_site"] and "None" not in r["nearby_site"] and "⚠" not in r["nearby_site"]})
+                _dist_type = "driving distance" if _use_drive else "straight-line distance"
                 _ans = (
                     f"<p>Found <strong>{len(_ref_rows)}</strong> sites with assignment "
                     f"<strong>{_assign_name}</strong>. "
                     f"<strong>{_n_with}</strong> of them have other INNODIA sites within "
-                    f"{int(_km_limit)} km.</p>"
+                    f"{int(_km_limit)} km ({_dist_type}).</p>"
                 )
                 return {"answer": _ans, "table": {"columns": _cols, "rows": _flat_rows}}
             # _ref_rows empty → fall through to city-based handler
