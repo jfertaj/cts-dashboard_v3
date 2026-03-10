@@ -44,13 +44,6 @@ const VALIDATED_ROLES = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const MEMBERSHIP_LEVELS = [
-  "Full Member",
-  "Associate Member",
-  "Observer",
-  "Industry Partner",
-];
-
 function buildFilterGroup(
   filterName: string,
   filterCountry: string,
@@ -152,6 +145,15 @@ export default function MembersView() {
     for (const r of allRows) if (r.country) seen.add(r.country);
     return Array.from(seen)
       .sort((a, b) => displayCountry(a).localeCompare(displayCountry(b)));
+  }, [allRows]);
+
+  const levelOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of allRows) {
+      const lvl = r.data["sf.C_Level_of_Membership__c"];
+      if (lvl) seen.add(String(lvl));
+    }
+    return Array.from(seen).sort();
   }, [allRows]);
 
   // ── Search / filter ──────────────────────────────────────────────────────
@@ -401,7 +403,7 @@ export default function MembersView() {
             className="w-full text-sm border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
           >
             <option value="">All levels</option>
-            {MEMBERSHIP_LEVELS.map((l) => (
+            {levelOptions.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
           </select>
