@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 """
-populate_member_geocoords.py
-────────────────────────────
-Geocode INNODIA RT_Member accounts that are missing ShippingLatitude/Longitude.
+populate_site_geocoords.py
+──────────────────────────
+Geocode INNODIA Clinical SubAccount sites that are missing ShippingLatitude/Longitude.
+
+These are the accounts shown on the clinical sites map (MapView):
+  RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical'
 
 Strategy (in order of preference):
-  1. ShippingCity + ShippingCountry  (already on Shipping address)
-  2. BillingCity  + BillingCountry   (many institutions fill Billing only)
-  3. Institution name + country       (last resort — less accurate)
+  1. Institution name + ShippingCity + ShippingCountry  (best precision)
+  2. Institution name + BillingCity  + BillingCountry   (fallback)
+  3. Institution name + ShippingCountry                 (last resort)
+  4. Institution name only                              (worst)
 
 Modes:
-  --dry-run (default) → writes proposed_geocoords_<timestamp>.csv, NO SF writes
+  --dry-run (default) → writes proposed_site_geocoords_<timestamp>.csv, NO SF writes
   --apply             → reads the CSV and writes lat/lng back to Salesforce
 
 Usage:
   # Step 1: generate the CSV for review
-  SF_SESSION_COOKIE="<value>" python3 scripts/populate_member_geocoords.py --dry-run
+  SF_SESSION_COOKIE="<value>" python3 scripts/populate_site_geocoords.py --dry-run
 
-  # Step 2: review proposed_geocoords_*.csv, delete rows you don't want, then:
-  SF_SESSION_COOKIE="<value>" python3 scripts/populate_member_geocoords.py --apply
+  # Step 2: review proposed_site_geocoords_*.csv, then:
+  SF_SESSION_COOKIE="<value>" python3 scripts/populate_site_geocoords.py --apply
 
   # (optional) specify a specific CSV file
-  SF_SESSION_COOKIE="<value>" python3 scripts/populate_member_geocoords.py --apply --file proposed_geocoords_20260310_123456.csv
+  SF_SESSION_COOKIE="<value>" python3 scripts/populate_site_geocoords.py --apply --file proposed_site_geocoords_20260310_123456.csv
 """
 from __future__ import annotations
 import argparse, csv, json, os, sys, time, pathlib, datetime
@@ -46,37 +50,28 @@ DB_URL      = os.environ.get("DATABASE_URL", "")
 COOKIE_NAME = "sf_session"
 
 if not GOOGLE_KEY:
-    print("ERROR: GOOGLE_API_KEY (or GOOGLE_MAPS_API_KEY) not set (checked env + backend/.env)")
+    print("ERROR: GOOGLE_MAPS_API_KEY (or GOOGLE_API_KEY) not set (checked env + backend/.env)")
     sys.exit(1)
+
 
 # ── SF authentication via PostgreSQL sf_sessions table ───────────────────────
 
 def _get_sf_token() -> tuple[str, str]:
-    """
-    Resolve SF access_token + instance_url from:
-      1. PostgreSQL sf_sessions table (using SESSION_COOKIE → session_id)
-      2. direct simple_salesforce username/password (fallback, rarely works)
-    Returns (access_token, instance_url).
-    """
     if not COOKIE:
         print("ERROR: SF_SESSION_COOKIE not set")
         sys.exit(1)
 
-    # ---- unsign the cookie (itsdangerous TimestampSigner) ----
     cookie_secret = os.environ.get("COOKIE_SECRET", "dev-secret-change-me")
     try:
-        from itsdangerous import TimestampSigner, BadSignature
+        from itsdangerous import TimestampSigner
         signer = TimestampSigner(cookie_secret)
         session_id = signer.unsign(COOKIE).decode()
-    except Exception as e:
-        # Try treating it as unsigned (local dev)
+    except Exception:
         session_id = COOKIE.split(".")[0]
 
-    # ---- read from PostgreSQL ----
     if DB_URL:
         try:
             import psycopg
-            # psycopg3: strip the sqlalchemy prefix if present
             pg_url = DB_URL
             for prefix in ("postgresql+psycopg://", "postgresql+psycopg2://"):
                 if pg_url.startswith(prefix):
@@ -95,15 +90,12 @@ def _get_sf_token() -> tuple[str, str]:
         except Exception as e:
             print(f"WARN: DB read failed ({e}) — trying fallback")
 
-    # ---- fallback: token IS the session_id for simple_salesforce ----
-    # simple_salesforce uses access_token as session_id in its API calls
     instance = "https://innodiaivzw.my.salesforce.com"
-    print(f"⚠  Using session_id as access_token directly (fallback)")
+    print("⚠  Using session_id as access_token directly (fallback)")
     return session_id, instance
 
 
 def _sf_query(token: str, instance: str, soql: str) -> list[dict]:
-    """Execute a SOQL query against SF REST API."""
     url = f"{instance}/services/data/v59.0/query"
     headers = {"Authorization": f"Bearer {token}"}
     r = requests.get(url, params={"q": soql}, headers=headers, verify=False, timeout=60)
@@ -111,7 +103,6 @@ def _sf_query(token: str, instance: str, soql: str) -> list[dict]:
         raise RuntimeError(f"SF query failed {r.status_code}: {r.text[:300]}")
     data = r.json()
     records = data.get("records", [])
-    # Handle paginated results
     next_url = data.get("nextRecordsUrl")
     while next_url:
         r2 = requests.get(f"{instance}{next_url}", headers=headers, verify=False, timeout=60)
@@ -122,11 +113,6 @@ def _sf_query(token: str, instance: str, soql: str) -> list[dict]:
 
 
 def _sf_composite_update(token: str, instance: str, updates: list[dict]) -> tuple[int, int]:
-    """
-    Batch PATCH to SF using composite/sobjects endpoint.
-    updates = [{"Id": "...", "ShippingLatitude": ..., "ShippingLongitude": ...}, ...]
-    Returns (ok_count, err_count).
-    """
     import warnings; warnings.filterwarnings("ignore")
     url = f"{instance}/services/data/v59.0/composite/sobjects"
     headers = {
@@ -161,7 +147,6 @@ def _sf_composite_update(token: str, instance: str, updates: list[dict]) -> tupl
 _GEO_CACHE: dict[str, dict | None] = {}
 
 def geocode(query: str) -> dict | None:
-    """Geocode a free-text query. Returns {lat, lng, formatted_address} or None."""
     if query in _GEO_CACHE:
         return _GEO_CACHE[query]
     r = requests.get(
@@ -180,17 +165,17 @@ def geocode(query: str) -> dict | None:
         "formatted_address": results[0].get("formatted_address", ""),
     }
     _GEO_CACHE[query] = result
-    time.sleep(0.05)  # gentle rate limit (~20 req/s)
+    time.sleep(0.05)
     return result
 
 
-def best_query(row: dict, billing: dict) -> tuple[str, str]:
+def best_query(row: dict) -> tuple[str, str]:
     """Build geocode query; return (query, source_label)."""
-    name         = row.get("Name") or row.get("account_name") or ""
+    name         = row.get("Name") or ""
     ship_city    = row.get("ShippingCity") or ""
     ship_country = row.get("ShippingCountry") or ""
-    bill_city    = billing.get("BillingCity") or ""
-    bill_country = billing.get("BillingCountry") or ""
+    bill_city    = row.get("BillingCity") or ""
+    bill_country = row.get("BillingCountry") or ""
 
     if ship_city and ship_country:
         return f"{name}, {ship_city}, {ship_country}", "shipping"
@@ -206,44 +191,49 @@ def best_query(row: dict, billing: dict) -> tuple[str, str]:
 # ── Dry run ───────────────────────────────────────────────────────────────────
 
 def run_dry_run(token: str, instance: str) -> str:
-    # 1. Fetch all RT_Member accounts with address fields
-    print("\n── Fetching member accounts from Salesforce ─────────────────────────")
+    import warnings; warnings.filterwarnings("ignore")
+
+    print("\n── Fetching clinical site accounts from Salesforce ──────────────────")
+    # Exact filter used by map_bootstrap in salesforce_explorer.py
     soql = (
         "SELECT Id, Name, "
         "ShippingCity, ShippingCountry, ShippingPostalCode, "
         "ShippingLatitude, ShippingLongitude, "
-        "BillingCity, BillingCountry, BillingPostalCode "
+        "BillingCity, BillingCountry, BillingPostalCode, "
+        "C_Type__c "
         "FROM Account "
-        "WHERE RecordType.DeveloperName = 'RT_Member' "
+        "WHERE RecordType.DeveloperName = 'SubAccount' "
+        "  AND C_Type__c = 'Clinical' "
         "  AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
+        "  AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null) "
         "ORDER BY Name"
     )
     records = _sf_query(token, instance, soql)
-    print(f"  {len(records)} Member accounts fetched")
+    print(f"  {len(records)} Clinical SubAccount sites fetched")
 
-    # 2. Split: missing lat/lng vs already have
     missing = [r for r in records if not r.get("ShippingLatitude") or not r.get("ShippingLongitude")]
     already = len(records) - len(missing)
     print(f"  {already} already have lat/lng — will skip")
     print(f"  {len(missing)} need geocoding")
 
     if not missing:
-        print("  ✅ Nothing to do — all members already have coordinates!")
+        print("  ✅ Nothing to do — all sites already have coordinates!")
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        return str(_HERE / f"proposed_geocoords_{ts}.csv")
+        return str(_HERE / f"proposed_site_geocoords_{ts}.csv")
 
-    # 3. Geocode
-    print(f"\n── Geocoding {len(missing)} members ─────────────────────────────────")
-    proposals  = []
-    failed     = []
+    print(f"\n── Geocoding {len(missing)} sites ──────────────────────────────────────")
+    proposals = []
+    failed    = []
 
     for i, row in enumerate(missing):
-        query, source = best_query(row, row)  # billing fields are in same row
+        query, source = best_query(row)
         result = geocode(query)
 
-        confidence = {"shipping": "high", "billing": "high",
-                      "billing_city_only": "medium", "country_only": "low",
-                      "name_only": "low"}.get(source, "low")
+        confidence = {
+            "shipping": "high", "billing": "high",
+            "billing_city_only": "medium", "country_only": "low",
+            "name_only": "low",
+        }.get(source, "low")
 
         marker = "✓" if "high" in confidence else ("~" if "medium" in confidence else "?")
 
@@ -268,9 +258,8 @@ def run_dry_run(token: str, instance: str) -> str:
             failed.append(row)
             print(f"  [{i+1:3}/{len(missing)}] ✗ {row['Name'][:52]:52s}  NO RESULT")
 
-    # 4. Write CSV
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    outfile = str(_HERE / f"proposed_geocoords_{ts}.csv")
+    outfile = str(_HERE / f"proposed_site_geocoords_{ts}.csv")
     fields = ["account_id", "account_name", "shipping_city", "shipping_country",
               "billing_city", "billing_country", "query_used", "source",
               "confidence", "lat", "lng", "formatted_address"]
@@ -286,7 +275,7 @@ def run_dry_run(token: str, instance: str) -> str:
             print(f"     - {r['Name']}")
     print(f"\n  ✅ CSV written: {outfile}")
     print(f"     Review it, delete rows you don't want, then run:")
-    print(f"     SF_SESSION_COOKIE=\"...\" python3 scripts/populate_member_geocoords.py --apply --file {pathlib.Path(outfile).name}")
+    print(f"     SF_SESSION_COOKIE=\"...\" python3 scripts/populate_site_geocoords.py --apply --file {pathlib.Path(outfile).name}")
     return outfile
 
 
@@ -319,8 +308,8 @@ def run_apply(token: str, instance: str, csvfile: str) -> None:
     ok, err = _sf_composite_update(token, instance, updates)
     print(f"\n  ✅ Done — Updated: {ok}  |  Errors: {err}")
     if ok > 0:
-        print("  The members_bootstrap cache will refresh automatically (5-min TTL).")
-        print("  Or restart the backend to force immediate refresh.")
+        print("  The map will reflect the new coordinates on the next page load.")
+        print("  (The backend geocode cache will continue to work as secondary fallback.)")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -328,7 +317,7 @@ def run_apply(token: str, instance: str, csvfile: str) -> None:
 def main():
     import warnings; warnings.filterwarnings("ignore")
 
-    parser = argparse.ArgumentParser(description="Geocode INNODIA Member lat/lng in Salesforce")
+    parser = argparse.ArgumentParser(description="Geocode INNODIA Clinical Site lat/lng in Salesforce")
     parser.add_argument("--apply",   action="store_true", help="Apply CSV to Salesforce (writes data!)")
     parser.add_argument("--dry-run", action="store_true", help="Geocode only, write CSV (default)")
     parser.add_argument("--file",    default=None,        help="CSV file to use with --apply")
@@ -338,13 +327,12 @@ def main():
     print(f"  SF instance: {instance}")
 
     if args.apply:
-        # Find CSV
         if args.file:
             csvfile = args.file
         else:
-            csvs = sorted(_HERE.glob("proposed_geocoords_*.csv"), reverse=True)
+            csvs = sorted(_HERE.glob("proposed_site_geocoords_*.csv"), reverse=True)
             if not csvs:
-                print("ERROR: no proposed_geocoords_*.csv found. Run --dry-run first.")
+                print("ERROR: no proposed_site_geocoords_*.csv found. Run --dry-run first.")
                 sys.exit(1)
             csvfile = str(csvs[0])
             print(f"  Using most recent CSV: {pathlib.Path(csvfile).name}")
