@@ -763,6 +763,73 @@ def test_15_spanish_queries():
         info(f"ES-2 answer: {resp2.get('answer','')[:150]}")
 
 
+def test_16_assignments():
+    """Assignment.Name filter (no HTTP 400) + within-km-of-assignment Moby handler."""
+
+    section("ASSIGN-1 — Explorer: sf.Assignment.Name filter (no HTTP 400)")
+    # Search for sites with any assignment containing "Beta Preserve" or "INNODIA"
+    assign_ok = False
+    for _aname in ["Beta Preserve", "INNODIA", "preserve"]:
+        try:
+            rows = explorer(
+                {"logic": "AND", "rules": [
+                    {"field": "sf.Assignment.Name", "operator": "contains", "value": _aname},
+                ]},
+                ["extra.AssignmentsNames", "site.country"],
+            )
+            chk(f"ASSIGN-1: sf.Assignment.Name contains '{_aname}' — no HTTP 400 (got {len(rows)} rows)", True)
+            assign_ok = True
+            info(f"Assignment filter '{_aname}': {len(rows)} sites")
+            if rows:
+                sample_assign = rows[0].get("data", {}).get("extra.AssignmentsNames", "")
+                info(f"  Sample AssignmentsNames: {str(sample_assign)[:100]}")
+            break
+        except Exception as _e:
+            if "400" in str(_e):
+                chk(f"ASSIGN-1: sf.Assignment.Name '{_aname}' — no HTTP 400", False, str(_e)[:120])
+                assign_ok = False
+                break
+
+    section("ASSIGN-2 — Explorer: sf.Assignment.Name equals (coerced to contains)")
+    try:
+        eq_rows = explorer(
+            {"logic": "AND", "rules": [
+                {"field": "sf.Assignment.Name", "operator": "equals", "value": "Beta Preserve"},
+            ]},
+            ["extra.AssignmentsNames"],
+        )
+        chk("ASSIGN-2: equals operator — no HTTP 400", True)
+        info(f"  equals 'Beta Preserve': {len(eq_rows)} rows")
+    except Exception as _e2:
+        chk("ASSIGN-2: equals operator — no HTTP 400", False, str(_e2)[:120])
+
+    if SKIP_SLOW:
+        skip("ASSIGN-3: Moby within-km-of-assignment query"); return
+
+    section("ASSIGN-3 — Moby: 'sites within 100 km of Beta Preserve sites'")
+    resp = moby("Get a list of sites within 100 km of Beta Preserve sites.", section_name="ASSIGN-3")
+    if resp:
+        rows = tbl_rows(resp)
+        ans  = resp.get("answer", "")
+        chk("ASSIGN-3: has answer", bool(ans))
+        chk("ASSIGN-3: has table", len(rows) >= 1, f"{len(rows)} rows")
+        ck = col_keys(resp)
+        tbl_cols_list = (resp.get("table") or {}).get("columns", [])
+        chk("ASSIGN-3: table has ref_site column",    "ref_site" in ck,    str(ck))
+        chk("ASSIGN-3: table has nearby_site column", "nearby_site" in ck, str(ck))
+        chk("ASSIGN-3: table has distance_km column", "distance_km" in ck, str(ck))
+        # Should not contain generic error messages
+        chk("ASSIGN-3: answer doesn't mention geocode error",
+            "could not geocode" not in ans.lower() and "no nearby sites" not in ans.lower(),
+            ans[:200])
+        # Distance label should say "Driving" (Google Distance Matrix active)
+        dist_col = next((c for c in tbl_cols_list if c.get("key") == "distance_km"), {})
+        chk("ASSIGN-3: distance column uses driving distance",
+            "driving" in dist_col.get("label", "").lower(),
+            f"label='{dist_col.get('label','')}'")
+        info(f"  {len(rows)} rows, answer: {ans[:150]}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -807,6 +874,7 @@ def run():
         ("Multi-turn follow-up",      test_13_multiturn),
         ("Site-activity enrollment",  test_14_enrollment),
         ("Spanish-language queries",  test_15_spanish_queries),
+        ("Assignment filters + Moby", test_16_assignments),
     ]
 
     for name, fn in tests:

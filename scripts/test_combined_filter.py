@@ -320,6 +320,58 @@ def run():
               len(wrong_em) == 0, f"{len(wrong_em)} non-empty")
         print(f"  {INFO}  {ne_count} sites have {q_key} filled, {em_count} have it empty")
 
+    # ── Test H: sf.Assignment.Name filter (was HTTP 400 bug) ─────────────
+    print("\n── Test H: sf.Assignment.Name filter (no HTTP 400) ─────────────")
+    # Any assignment name that exists in the org
+    ASSIGNMENT_NAMES = ["Beta Preserve", "INNODIA", "preserve", "study"]
+    assign_rows = None
+    used_name = None
+    for _aname in ASSIGNMENT_NAMES:
+        try:
+            _r = search(
+                {"logic": "AND", "rules": [
+                    {"field": "sf.Assignment.Name", "operator": "contains", "value": _aname},
+                ]},
+                ["sf.Assignment.Name", "extra.AssignmentsNames", "site.country"],
+            )
+            # Accept even 0 rows — the key check is no HTTP 400
+            assign_rows = _r
+            used_name = _aname
+            break
+        except Exception as _e:
+            # If this specific name returns 0 results try next, but HTTP 400 means test fails
+            if "400" in str(_e) or "400" in str(getattr(_e, "code", "")):
+                check(f"sf.Assignment.Name filter: no HTTP 400 for '{_aname}'", False,
+                      f"Got: {_e}")
+                used_name = _aname
+                break
+
+    if used_name and assign_rows is not None:
+        check(f"sf.Assignment.Name contains '{used_name}': no HTTP 400 (got {len(assign_rows)} rows)",
+              True)
+        # Verify rows that have assignment data actually contain the name
+        rows_with_assign = [r for r in assign_rows
+                            if used_name.lower() in str(r.get("data", {}).get("extra.AssignmentsNames", "")).lower()]
+        if assign_rows:
+            check(f"  All returned rows contain '{used_name}' in AssignmentsNames",
+                  len(rows_with_assign) == len(assign_rows),
+                  f"{len(rows_with_assign)}/{len(assign_rows)} match")
+        print(f"  {INFO}  Assignment filter '{used_name}': {len(assign_rows)} sites")
+
+    # ── Test I: sf.Assignment.Name equals operator (converts to contains) ─
+    print("\n── Test I: sf.Assignment.Name with 'equals' operator ───────────")
+    try:
+        eq_rows = search(
+            {"logic": "AND", "rules": [
+                {"field": "sf.Assignment.Name", "operator": "equals", "value": "Beta Preserve"},
+            ]},
+            ["extra.AssignmentsNames", "site.country"],
+        )
+        check("sf.Assignment.Name equals 'Beta Preserve': no HTTP 400", True)
+        print(f"  {INFO}  Assignment equals filter: {len(eq_rows)} sites")
+    except Exception as _e2:
+        check("sf.Assignment.Name equals 'Beta Preserve': no HTTP 400", False, str(_e2)[:120])
+
     # ─── Summary ─────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
     if errors:
