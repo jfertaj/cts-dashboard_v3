@@ -27,20 +27,9 @@ const mapOptions: any = {
   clickableIcons: false,
 };
 
-// Purple marker for Member institutions
-function pinSvg(fill: string, size = 28) {
-  const r = Math.max(10, Math.floor(size * 0.36));
-  const c = Math.floor(size / 2);
-  const svg = encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      <circle cx="${c}" cy="${c}" r="${r}" fill="${fill}" stroke="white" stroke-width="1.5"/>
-    </svg>`
-  );
-  return `data:image/svg+xml;charset=UTF-8,${svg}`;
-}
-
-const MEMBER_ICON = { url: pinSvg("#7c3aed") };       // purple
-const SELECTED_ICON = { url: pinSvg("#059669", 34) };  // green, bigger when selected
+// INNODIA crystal marker icon — normal size
+const CRYSTAL_SIZE   = 34;
+const CRYSTAL_SIZE_SEL = 46;
 
 // Country centroid fallback — used when ShippingLatitude is null in SF
 const COUNTRY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
@@ -97,6 +86,27 @@ export default function MemberMapView({
 
   const [map, setMap] = useState<any>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Build Google Maps icon objects — requires Maps API to be loaded
+  const memberIcon = useMemo(() => {
+    if (!isLoaded) return undefined;
+    const g = (window as any).google.maps;
+    return {
+      url: "/innodia_cristal.png",
+      scaledSize: new g.Size(CRYSTAL_SIZE, CRYSTAL_SIZE),
+      anchor: new g.Point(CRYSTAL_SIZE / 2, CRYSTAL_SIZE / 2),
+    };
+  }, [isLoaded]);
+
+  const selectedIcon = useMemo(() => {
+    if (!isLoaded) return undefined;
+    const g = (window as any).google.maps;
+    return {
+      url: "/innodia_cristal.png",
+      scaledSize: new g.Size(CRYSTAL_SIZE_SEL, CRYSTAL_SIZE_SEL),
+      anchor: new g.Point(CRYSTAL_SIZE_SEL / 2, CRYSTAL_SIZE_SEL / 2),
+    };
+  }, [isLoaded]);
 
   // Resolve coordinates for each row (SF lat/lng or country centroid + jitter)
   const mappable = useMemo(
@@ -172,7 +182,7 @@ export default function MemberMapView({
           <MarkerF
             key={r.account_id}
             position={{ lat: r._lat, lng: r._lng }}
-            icon={selectedId === r.account_id ? SELECTED_ICON : MEMBER_ICON}
+            icon={selectedId === r.account_id ? selectedIcon : memberIcon}
             title={r.account_name}
             onClick={() => setSelectedId(r.account_id === selectedId ? null : r.account_id)}
           />
