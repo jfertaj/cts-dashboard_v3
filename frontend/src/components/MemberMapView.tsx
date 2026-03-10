@@ -7,6 +7,7 @@ import {
   useJsApiLoader,
 } from "@react-google-maps/api";
 import { displayCountry } from "../lib/countryUtils";
+import { INNODIA_CRYSTAL_URL } from "../lib/innodiaIcon";
 
 type MemberRow = {
   account_id: string;
@@ -92,7 +93,7 @@ export default function MemberMapView({
     if (!isLoaded) return undefined;
     const g = (window as any).google.maps;
     return {
-      url: "/innodia_cristal.png",
+      url: INNODIA_CRYSTAL_URL,
       scaledSize: new g.Size(CRYSTAL_SIZE, CRYSTAL_SIZE),
       anchor: new g.Point(CRYSTAL_SIZE / 2, CRYSTAL_SIZE / 2),
     };
@@ -102,7 +103,7 @@ export default function MemberMapView({
     if (!isLoaded) return undefined;
     const g = (window as any).google.maps;
     return {
-      url: "/innodia_cristal.png",
+      url: INNODIA_CRYSTAL_URL,
       scaledSize: new g.Size(CRYSTAL_SIZE_SEL, CRYSTAL_SIZE_SEL),
       anchor: new g.Point(CRYSTAL_SIZE_SEL / 2, CRYSTAL_SIZE_SEL / 2),
     };
