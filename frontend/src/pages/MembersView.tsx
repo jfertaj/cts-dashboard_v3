@@ -60,7 +60,14 @@ function buildFilterGroup(
     rules.push({ field: "site.country", operator: "equals", value: filterCountry });
   }
   if (filterLevel) {
-    rules.push({ field: "sf.C_Level_of_Membership__c", operator: "equals", value: filterLevel });
+    // Match against whichever level field has data
+    rules.push({
+      logic: "OR",
+      rules: [
+        { field: "sf.C_Level_of_Membership__c", operator: "equals", value: filterLevel },
+        { field: "sf.C_Membership__c", operator: "equals", value: filterLevel },
+      ],
+    });
   }
   for (const key of filterProposed) {
     rules.push({ field: key, operator: "equals", value: true });
@@ -106,7 +113,7 @@ export default function MembersView() {
   const PAGE_SIZE = 25;
 
   // Map toggle
-  const [showMap, setShowMap] = useState(false);
+  const [showMap, setShowMap] = useState(true);
 
   // Detail modal state
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -150,7 +157,8 @@ export default function MembersView() {
   const levelOptions = useMemo(() => {
     const seen = new Set<string>();
     for (const r of allRows) {
-      const lvl = r.data["sf.C_Level_of_Membership__c"];
+      // Try both membership level fields — one of them may be populated
+      const lvl = r.data["sf.C_Level_of_Membership__c"] || r.data["sf.C_Membership__c"];
       if (lvl) seen.add(String(lvl));
     }
     return Array.from(seen).sort();
@@ -263,7 +271,7 @@ export default function MembersView() {
     {
       id: "level",
       header: "Level",
-      accessorFn: (r) => r.data["sf.C_Level_of_Membership__c"] || "",
+      accessorFn: (r) => r.data["sf.C_Level_of_Membership__c"] || r.data["sf.C_Membership__c"] || "",
       cell: ({ getValue }) => <span className="text-sm text-gray-700">{(getValue() as string) || "—"}</span>,
       size: 130,
     },

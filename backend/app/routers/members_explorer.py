@@ -104,7 +104,7 @@ _MEMBER_FIELDS = [
     "Id", "Name",
     "ShippingCountry", "ShippingCity",
     "ShippingLatitude", "ShippingLongitude",
-    "C_Level_of_Membership__c", "Account_Status__c",
+    "C_Level_of_Membership__c", "C_Membership__c", "Account_Status__c",
     "Account_Inactive__c", "Phone", "Website",
     "C_Member_Representative__c",
     "C_Member_Representative__r.Name",
@@ -199,6 +199,7 @@ def _build_member_rows(sf) -> List[Dict]:
             "lng": r.get("ShippingLongitude"),
             "data": {
                 "sf.C_Level_of_Membership__c": r.get("C_Level_of_Membership__c"),
+                "sf.C_Membership__c": r.get("C_Membership__c"),
                 "sf.Account_Status__c": r.get("Account_Status__c"),
                 "sf.Phone": r.get("Phone"),
                 "sf.Website": r.get("Website"),
