@@ -3045,6 +3045,7 @@ async def explorer_search(
         if not account_rules:
             return True
         vals = dict(account_extras_by_acc.get(str(aid), {}))
+        vals.setdefault("Id", str(aid))  # sf.Account.Id filter — always available
         if need_member:
             vals["MemberName"] = member_by_acc.get(str(aid))
         glue_and = (filters.get("logic") or "AND") == "AND"
@@ -4585,6 +4586,7 @@ async def explorer_search_within_drive_km(
         if not account_rules:
             return True
         vals = dict(account_extras_by_acc.get(str(aid), {}))
+        vals.setdefault("Id", str(aid))  # sf.Account.Id filter — always available
         if need_member: vals["MemberName"] = member_by_acc.get(str(aid))
         # HasPI support removed — don't attempt to compute or include it here.
         # (keep values derived from account_extras and member_by_acc only)
