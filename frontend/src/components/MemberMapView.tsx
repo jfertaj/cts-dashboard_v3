@@ -7,7 +7,7 @@ import {
   useJsApiLoader,
 } from "@react-google-maps/api";
 import { displayCountry } from "../lib/countryUtils";
-import { INNODIA_CRYSTAL_URL } from "../lib/innodiaIcon";
+import { INNODIA_PIN_URL, INNODIA_PIN_URL_SEL, PIN_NORMAL, PIN_SELECTED } from "../lib/innodiaIcon";
 
 type MemberRow = {
   account_id: string;
@@ -28,9 +28,7 @@ const mapOptions: any = {
   clickableIcons: false,
 };
 
-// INNODIA crystal marker icon — normal size
-const CRYSTAL_SIZE   = 34;
-const CRYSTAL_SIZE_SEL = 46;
+// Pin sizes are defined in innodiaIcon.ts (PIN_NORMAL / PIN_SELECTED)
 
 // Country centroid fallback — used when ShippingLatitude is null in SF
 const COUNTRY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
@@ -88,14 +86,14 @@ export default function MemberMapView({
   const [map, setMap] = useState<any>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Build Google Maps icon objects — requires Maps API to be loaded
+  // Build Google Maps icon objects — teardrop pin, anchor at bottom tip
   const memberIcon = useMemo(() => {
     if (!isLoaded) return undefined;
     const g = (window as any).google.maps;
     return {
-      url: INNODIA_CRYSTAL_URL,
-      scaledSize: new g.Size(CRYSTAL_SIZE, CRYSTAL_SIZE),
-      anchor: new g.Point(CRYSTAL_SIZE / 2, CRYSTAL_SIZE / 2),
+      url: INNODIA_PIN_URL,
+      scaledSize: new g.Size(PIN_NORMAL.w, PIN_NORMAL.h),
+      anchor: new g.Point(PIN_NORMAL.ax, PIN_NORMAL.ay),
     };
   }, [isLoaded]);
 
@@ -103,9 +101,9 @@ export default function MemberMapView({
     if (!isLoaded) return undefined;
     const g = (window as any).google.maps;
     return {
-      url: INNODIA_CRYSTAL_URL,
-      scaledSize: new g.Size(CRYSTAL_SIZE_SEL, CRYSTAL_SIZE_SEL),
-      anchor: new g.Point(CRYSTAL_SIZE_SEL / 2, CRYSTAL_SIZE_SEL / 2),
+      url: INNODIA_PIN_URL_SEL,
+      scaledSize: new g.Size(PIN_SELECTED.w, PIN_SELECTED.h),
+      anchor: new g.Point(PIN_SELECTED.ax, PIN_SELECTED.ay),
     };
   }, [isLoaded]);
 
