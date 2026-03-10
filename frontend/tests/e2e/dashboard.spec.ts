@@ -67,6 +67,13 @@ test.describe("Dashboard navigation", () => {
   });
 
   test("URL updates when switching tabs", async ({ page }) => {
+    // Mock explorer APIs so the Explorer view doesn't block with a loading state
+    await page.route("**/api/explorer/bootstrap", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ points: [], rows: [], fields: [] }) })
+    );
+    await page.route("**/api/explorer/fields", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) })
+    );
     await page.goto("/");
     await page.locator(S.TAB_EXPLORER).click();
     await expect(page).toHaveURL(/\/explorer/);

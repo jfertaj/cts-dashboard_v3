@@ -646,30 +646,29 @@ test.describe("MEMBERS-MAP — map toggle", () => {
     await expect(page.locator(S.MEMBERS_MAP_TOGGLE)).toBeVisible();
   });
 
-  test("MEMBERS-MAP-2: map toggle initially shows 'Show Map'", async ({ page }) => {
-    await expect(page.locator(S.MEMBERS_MAP_TOGGLE)).toContainText("Show Map");
-  });
-
-  test("MEMBERS-MAP-3: clicking Show Map renders map container", async ({ page }) => {
-    await page.locator(S.MEMBERS_MAP_TOGGLE).click();
-    await expect(page.locator(S.MEMBERS_MAP)).toBeVisible({ timeout: 5000 });
-  });
-
-  test("MEMBERS-MAP-4: after clicking Show Map, button label changes to Hide Map", async ({ page }) => {
-    await page.locator(S.MEMBERS_MAP_TOGGLE).click();
+  test("MEMBERS-MAP-2: map toggle initially shows 'Hide Map' (map on by default)", async ({ page }) => {
     await expect(page.locator(S.MEMBERS_MAP_TOGGLE)).toContainText("Hide Map");
   });
 
-  test("MEMBERS-MAP-5: clicking Hide Map hides map container", async ({ page }) => {
-    await page.locator(S.MEMBERS_MAP_TOGGLE).click();
+  test("MEMBERS-MAP-3: map container is visible by default", async ({ page }) => {
     await expect(page.locator(S.MEMBERS_MAP)).toBeVisible({ timeout: 3000 });
+  });
+
+  test("MEMBERS-MAP-4: clicking Hide Map hides the map container", async ({ page }) => {
     await page.locator(S.MEMBERS_MAP_TOGGLE).click();
     await expect(page.locator(S.MEMBERS_MAP)).not.toBeVisible();
   });
 
-  test("MEMBERS-MAP-6: toggle button label reverts to 'Show Map' after hiding", async ({ page }) => {
-    await page.locator(S.MEMBERS_MAP_TOGGLE).click();
+  test("MEMBERS-MAP-5: after clicking Hide Map, button label changes to Show Map", async ({ page }) => {
     await page.locator(S.MEMBERS_MAP_TOGGLE).click();
     await expect(page.locator(S.MEMBERS_MAP_TOGGLE)).toContainText("Show Map");
+  });
+
+  test("MEMBERS-MAP-6: clicking Show Map reveals map and reverts button label to Hide Map", async ({ page }) => {
+    await page.locator(S.MEMBERS_MAP_TOGGLE).click();
+    await expect(page.locator(S.MEMBERS_MAP)).not.toBeVisible();
+    await page.locator(S.MEMBERS_MAP_TOGGLE).click();
+    await expect(page.locator(S.MEMBERS_MAP)).toBeVisible({ timeout: 3000 });
+    await expect(page.locator(S.MEMBERS_MAP_TOGGLE)).toContainText("Hide Map");
   });
 });
