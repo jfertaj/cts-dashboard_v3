@@ -6,10 +6,11 @@ import { test, expect, BrowserContext } from "@playwright/test";
 import { S } from "../utils/selectors";
 import { setAuthCookie } from "../utils/auth";
 
-const SMOKE = !!process.env.PLAYWRIGHT_SMOKE;
+// Both PLAYWRIGHT_SMOKE=1 AND a valid SF_SESSION_COOKIE are required
+const SMOKE = !!process.env.PLAYWRIGHT_SMOKE && !!process.env.SF_SESSION_COOKIE;
 
-// Skip entire suite if not opted in
-test.skip(!SMOKE, "Smoke tests disabled — set PLAYWRIGHT_SMOKE=1 to enable");
+// Skip entire suite if not opted in or no session cookie
+test.skip(!SMOKE, "Smoke tests disabled — set PLAYWRIGHT_SMOKE=1 SF_SESSION_COOKIE=<value> to enable");
 
 /**
  * Wait for a NEW permanent assistant message (count must increase AND no ▋ cursor).

@@ -262,11 +262,21 @@ def _eval_filter(rule: Dict, row: Dict) -> bool:
 
     val_s = str(value).strip().lower() if value is not None else ""
 
-    # Country: match ISO2 or display name
-    if field == "site.country" and value:
-        norm_filter = _country_norm(str(value)) or str(value).upper()
+    # Country: match ISO2 or display name (supports equals and in operators)
+    if field == "site.country" and value is not None:
         norm_cell = _country_norm(str(cell)) or str(cell).upper()
-        # Also support display name comparison
+        # 'in' operator with list of values (multi-select)
+        if op in ("in",) and isinstance(value, list):
+            for v in value:
+                norm_v = _country_norm(str(v)) or str(v).upper()
+                display_v = _ISO2_TO_DISPLAY.get(str(v).upper(), str(v))
+                if (norm_cell == norm_v or
+                        str(cell).lower() == display_v.lower() or
+                        str(cell).upper() == str(v).upper()):
+                    return True
+            return False
+        # 'equals' operator (single value)
+        norm_filter = _country_norm(str(value)) or str(value).upper()
         display_filter = _ISO2_TO_DISPLAY.get(str(value).upper(), str(value))
         return (norm_cell == norm_filter or
                 str(cell).lower() == display_filter.lower() or

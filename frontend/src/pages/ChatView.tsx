@@ -205,6 +205,30 @@ export default function ChatView() {
     } catch {}
   }, [explorerFields, explorerKeySet, prettyLabel]);
 
+  // --- Explorer → Chat context injection via "Ask Moby" button ---
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { table, filters: f, rowCount } = (e as CustomEvent).detail || {};
+      if (table) setLastTableForAI(table);
+      if (f) setLastFiltersForAI(f);
+      const filterCount = (f?.rules || []).filter((r: any) => r?.field || r?.rules).length;
+      setMessages(prev => [...prev, {
+        role: "assistant" as const,
+        content: (
+          <div className="text-sm text-indigo-800 bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+            <img src={Moby} width={16} height={16} alt="" className="inline-block align-middle mr-1" />
+            <strong>Explorer context loaded:</strong>{" "}
+            {rowCount} site{rowCount !== 1 ? "s" : ""}
+            {filterCount > 0 ? ` with ${filterCount} active filter${filterCount !== 1 ? "s" : ""}` : ""}.
+            {" "}What would you like to know?
+          </div>
+        ),
+      }]);
+    };
+    window.addEventListener("cts:explorer:ask-ai", handler as EventListener);
+    return () => window.removeEventListener("cts:explorer:ask-ai", handler as EventListener);
+  }, []);
+
   // --- persist on change ---
   useEffect(() => {
     try {

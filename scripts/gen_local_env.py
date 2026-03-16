@@ -32,8 +32,8 @@ merged.update({
     "AI_CHAT_DEBUG":        "1",
     "GOOGLE_REGION_BIAS":   "es",
     "SF_SCOPES":            "refresh_token api id web",
-    "FRONTEND_ORIGINS":     "http://localhost:5173,http://localhost:3000",
-    "FRONTEND_BASE":        "http://localhost:5173",
+    "FRONTEND_ORIGINS":     "http://localhost:8080,http://localhost:3000",
+    "FRONTEND_BASE":        "http://localhost:8080",
     "COOKIE_SECRET":        "dev-secret-change-me",  # matches production default in salesforce_oauth.py
     "ENABLE_SECURE_COOKIES": "false",
     # SF OAuth callback for local dev — must be registered in SF Connected App
@@ -46,7 +46,9 @@ env_path  = os.path.join(repo_root, "backend", ".env")
 
 with open(env_path, "w") as f:
     for k, v in sorted(merged.items()):
-        f.write(f"{k}={v}\n")
+        # Single-quote all values so bash never interprets spaces as commands
+        v_escaped = str(v).replace("'", "'\\''")
+        f.write(f"{k}='{v_escaped}'\n")
 
 print(f"✅  Written {env_path}")
 print(f"    Keys: {', '.join(sorted(merged.keys()))}")

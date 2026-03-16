@@ -11,12 +11,12 @@ test.describe("Explorer — filter panel", () => {
         body: JSON.stringify({ authenticated: true }),
       });
     });
-    // Mock the bootstrap endpoint so the page loads without real SF auth
-    await page.route("**/api/explorer/bootstrap", async (route) => {
+    // explorerBootstrap() calls /api/salesforce/map/bootstrap (not /api/explorer/bootstrap)
+    await page.route("**/api/salesforce/map/bootstrap", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ points: [], rows: [], fields: [] }),
+        body: JSON.stringify([]),
       });
     });
     await page.route("**/api/explorer/fields", async (route) => {
@@ -28,6 +28,15 @@ test.describe("Explorer — filter panel", () => {
           { key: "site.country", label: "Country", type: "string", source: "site" },
           { key: "sf.C_Number_of_Stage2_Individuals_followed__c", label: "Stage 2", type: "number", source: "sf" },
         ]),
+      });
+    });
+    // Default search mock for the SWR bootstrap's explorerSearch() call — prevents session-expired overlay.
+    // Individual tests can override with their own route mock (Playwright uses LIFO order).
+    await page.route("**/api/explorer/search", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ points: [], rows: [], total: 0 }),
       });
     });
     await page.goto("/explorer");

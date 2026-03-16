@@ -35,6 +35,7 @@ import { EXPLORER_BOOT_KEY } from "../lib/cacheKeys";
 import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
+import Moby from "../assets/Moby.png";
 
 const OP_LABELS: Record<string, string> = {
   equals: "=", not_equals: "≠", contains: "contains", not_contains: "!contains",
@@ -538,6 +539,78 @@ function NearbyModal({
   );
 }
 
+/* ================= Modal Nearby Multi ================= */
+function NearbyMultiModal({
+  open,
+  count,
+  defaultKm = 120,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  count: number;
+  defaultKm?: number;
+  onClose: () => void;
+  onConfirm: (opts: { maxKm: number }) => void;
+}) {
+  const [km, setKm] = useState<number>(defaultKm);
+  useEffect(() => { if (open) setKm(defaultKm); }, [open, defaultKm]);
+  if (!open) return null;
+
+  const apply = () => onConfirm({ maxKm: Math.max(1, Number.isFinite(km) ? km : defaultKm) });
+
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl ring-1 ring-black/5">
+        <div className="px-6 pt-5 pb-2 border-b">
+          <div className="flex items-center gap-2 text-gray-800">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z" stroke="currentColor" strokeWidth="1.5"/>
+            </svg>
+            <h3 className="text-lg font-semibold tracking-tight">Find nearby sites</h3>
+          </div>
+          <div className="mt-1 text-xs text-gray-600">
+            Base: <span className="font-semibold text-gray-900">{count} selected site{count !== 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <label className="block text-sm font-medium text-gray-900">
+            Max driving distance (km)
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={1} max={1000} step={1}
+              value={km}
+              onChange={(e) => setKm(Number(e.target.value))}
+              className="flex-1 accent-[#0072CE]"
+            />
+            <input
+              type="number"
+              min={1} step={1}
+              value={km}
+              onChange={(e) => setKm(Math.max(1, Number(e.target.value || 1)))}
+              onKeyDown={(e) => { if (e.key === "Enter") apply(); }}
+              className="w-24 rounded-lg border px-3 py-2 text-sm focus:ring-2 focus:ring-[#0072CE]"
+            />
+          </div>
+          <p className="text-xs text-gray-500">
+            Uses Google Distance Matrix (driving distance). Each INNODIA site within range of any selected site will be included.
+          </p>
+        </div>
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 px-6 py-3 bg-gray-50 rounded-b-2xl border-t">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-gray-700 hover:bg-white border">
+            Cancel
+          </button>
+          <button onClick={apply} className="rounded-lg px-4 py-2 text-sm font-medium text-white bg-violet-600 hover:bg-violet-700">
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ================= Drawer Nearby (reworked) ================= */
 function NearbyDrawer({
   open,
@@ -556,6 +629,7 @@ function NearbyDrawer({
   onToggleSeparate,
   onChangeFiltersNearby,
   onApplyFilters,
+  onClearFilters,
   onApplyKm,
   onClear,
   closeOnBackdrop = false,
@@ -576,6 +650,7 @@ function NearbyDrawer({
   onToggleSeparate: (v: boolean) => void;
   onChangeFiltersNearby: (fg: FilterGroup) => void;
   onApplyFilters: () => void;
+  onClearFilters: () => void;
   onApplyKm: (nextKm: number) => void;
   onClear: () => void;
   closeOnBackdrop?: boolean;
@@ -742,10 +817,7 @@ function NearbyDrawer({
                   </button>
                   <button
                     className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
-                    onClick={() => {
-                      onChangeFiltersNearby({ logic: "AND", rules: [] });
-                      setTimeout(() => onApplyFilters(), 0);
-                    }}
+                    onClick={onClearFilters}
                     title="Clear and re-run nearby with no extra filters"
                   >
                     Clear nearby filters
@@ -1210,7 +1282,7 @@ export default function ExplorerView() {
   const [useSeparateNearbyFilters, setUseSeparateNearbyFilters] = useState(false);
   const [filtersNearby, setFiltersNearby] = useState<FilterGroup>({ logic: "AND", rules: [] });
   const [autoSearchTrigger, setAutoSearchTrigger] = useState(0);
-  const [lastNearbyParams, setLastNearbyParams] = useState<{ baseAccountId: string; maxKm: number } | null>(null);
+  const [lastNearbyParams, setLastNearbyParams] = useState<{ baseAccountId?: string; baseAccountIds?: string[]; maxKm: number } | null>(null);
 
   // ===== Details state (NEW) =====
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -1436,6 +1508,7 @@ export default function ExplorerView() {
       revalidateIfStale: false,
       revalidateOnReconnect: false,
       revalidateOnMount: true,
+      shouldRetryOnError: false,
       onError: (e: any) => {
         // Si simplemente fue un timeout/abort del fetch, no ensuciamos la UI con "Timeout"
         if (isTimeoutErr(e)) {
@@ -1795,8 +1868,12 @@ export default function ExplorerView() {
     } finally { setBusy(false); }
   };
 
+  // ===== Row selection (for multi-nearby) =====
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+
   // ===== Nearby actions =====
   const [nearbyModalOpen, setNearbyModalOpen] = useState(false);
+  const [nearbyMultiModalOpen, setNearbyMultiModalOpen] = useState(false);
   const [nearbyBaseAccount, setNearbyBaseAccount] = useState<string | null>(null);
 
   const openNearbyFor = (accountId: string) => {
@@ -1842,16 +1919,107 @@ export default function ExplorerView() {
     }
   };
 
+  const applyNearbyMulti = async ({ maxKm }: { maxKm: number }) => {
+    setNearbyMultiModalOpen(false);
+    const accountIds = Array.from(selectedRowIds);
+    if (accountIds.length === 0) return;
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/explorer/search/nearby-multi", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_account_ids: accountIds,
+          max_km: maxKm,
+          filters: filtersNearby,  // always use separate nearby filters for multi (not the main Explorer filter used to select the bases)
+          columns: allColumnKeys,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const r = await res.json();
+      setNearbyActive(true);
+      setNearbyPanelOpen(true);
+      const npts = Array.isArray(r.points) ? r.points : [];
+      const nrws = Array.isArray(r.rows) ? r.rows : [];
+      setFullNearbyPoints(npts);
+      setFullNearbyRows(nrws);
+      setNearbyPoints(npts);
+      setNearbyRows(nrws);
+      setNeighborsAll(Array.isArray(r.neighbors_all) ? r.neighbors_all : []);
+      setNearbyMeta({ max_km: r?.meta?.max_km ?? maxKm });
+      const label = `${accountIds.length} selected site${accountIds.length !== 1 ? "s" : ""}`;
+      setNearbyBaseName(label);
+      setLastNearbyBaseName(label);
+      setLastNearbyParams({ baseAccountIds: accountIds, maxKm });
+      setSelectedAccountId(null);
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || "Nearby multi search error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Helper: fetch nearby results for either single-site or multi-site mode
+  const _fetchNearbyResult = async (maxKm: number, nearbyFilters: FilterGroup) => {
+    if (lastNearbyParams?.baseAccountIds) {
+      // Multi-site mode: call /nearby-multi with all base IDs
+      const res = await fetch("/api/explorer/search/nearby-multi", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_account_ids: lastNearbyParams.baseAccountIds,
+          max_km: maxKm,
+          filters: nearbyFilters,
+          columns: allColumnKeys,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } else {
+      // Single-site mode: call /within-drive-km
+      return fetchNearbyDriveKm({
+        baseAccountId: lastNearbyParams!.baseAccountId!,
+        maxKm,
+        filters: useSeparateNearbyFilters ? nearbyFilters : filters,
+        columns: allColumnKeys,
+      });
+    }
+  };
+
+  // clearNearbyFilters: clears filtersNearby and re-runs nearby with empty filters.
+  // Uses a local emptyFilters variable (not the state) to avoid stale closure issues
+  // when called synchronously after setFiltersNearby.
+  const clearNearbyFilters = async () => {
+    if (!nearbyActive || !lastNearbyParams) return;
+    const emptyFilters: FilterGroup = { logic: "AND", rules: [] };
+    setFiltersNearby(emptyFilters);
+    setBusy(true); setErr(null);
+    try {
+      const r = await _fetchNearbyResult(lastNearbyParams.maxKm, emptyFilters);
+      const npts = Array.isArray(r.points) ? r.points : [];
+      const nrws = Array.isArray(r.rows) ? r.rows : [];
+      setFullNearbyPoints(npts);
+      setFullNearbyRows(nrws);
+      setNearbyPoints(npts);
+      setNearbyRows(nrws);
+      setNeighborsAll(Array.isArray(r.neighbors_all) ? r.neighbors_all : []);
+      setNearbyMeta({ max_km: r?.meta?.max_km ?? lastNearbyParams.maxKm });
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || "Nearby (clear filters) error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const reapplyNearbyWithFilters = async () => {
     if (!nearbyActive || !lastNearbyParams) return;
     setBusy(true); setErr(null);
     try {
-      const r = await fetchNearbyDriveKm({
-        baseAccountId: lastNearbyParams.baseAccountId,
-        maxKm: lastNearbyParams.maxKm,
-        filters: useSeparateNearbyFilters ? filtersNearby : filters,
-        columns: allColumnKeys,
-      });
+      const r = await _fetchNearbyResult(lastNearbyParams.maxKm, filtersNearby);
       const npts = Array.isArray(r.points) ? r.points : [];
       const nrws = Array.isArray(r.rows) ? r.rows : [];
       setFullNearbyPoints(npts);
@@ -1872,12 +2040,7 @@ export default function ExplorerView() {
     if (!nearbyActive || !lastNearbyParams) return;
     setBusy(true); setErr(null);
     try {
-      const r = await fetchNearbyDriveKm({
-        baseAccountId: lastNearbyParams.baseAccountId,
-        maxKm: nextKm,
-        filters: useSeparateNearbyFilters ? filtersNearby : filters,
-        columns: allColumnKeys,
-      });
+      const r = await _fetchNearbyResult(nextKm, filtersNearby);
       const npts = Array.isArray(r.points) ? r.points : [];
       const nrws = Array.isArray(r.rows) ? r.rows : [];
       setFullNearbyPoints(npts);
@@ -1886,7 +2049,7 @@ export default function ExplorerView() {
       setNearbyRows(nrws);
       setNeighborsAll(Array.isArray(r.neighbors_all) ? r.neighbors_all : []);
       setNearbyMeta({ max_km: r?.meta?.max_km ?? nextKm });
-      setLastNearbyParams({ baseAccountId: lastNearbyParams.baseAccountId, maxKm: nextKm });
+      setLastNearbyParams({ ...lastNearbyParams, maxKm: nextKm });
     } catch (e: any) {
       console.error(e);
       setErr(e?.message || "Nearby (apply km) error");
@@ -1901,6 +2064,7 @@ export default function ExplorerView() {
     setNearbyPoints([]); setNearbyRows([]); setNeighborsAll([]); setNearbyMeta(null);
     setSelectedAccountId(null);
     setLastNearbyParams(null);
+    setSelectedRowIds(new Set());
   }, []);
 
   const showNearbyPanel = () => setNearbyPanelOpen(true);
@@ -2074,6 +2238,27 @@ export default function ExplorerView() {
     const gf = f as LocalFieldDef;
     return gf.group || undefined;
   };
+
+  // Filter fieldDefs to only show sf.* / extra.* columns that have at least one non-empty value
+  // across the full result set. qual.* and site.* columns are always kept (they may be sparse
+  // by design — qual data is only uploaded for some sites).
+  const nonEmptyFieldDefs = useMemo(() => {
+    const fds = Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : [];
+    const activeRows = nearbyActive ? fullNearbyRows : fullRows;
+    if (!activeRows.length) return fds;
+    const visibleSet = new Set(visibleColumns);
+    return fds.filter((f) => {
+      // Always keep currently-selected columns so they don't vanish from the picker
+      if (visibleSet.has(f.key)) return true;
+      // Always keep qual.* and site.* — sparsely populated by design
+      if (f.key.startsWith("qual.") || f.key.startsWith("site.")) return true;
+      // For sf.* and extra.* columns: hide if no row has a non-empty value
+      return activeRows.some((r) => {
+        const v = r.data?.[f.key];
+        return v !== null && v !== undefined && !(typeof v === "string" && v.trim() === "");
+      });
+    });
+  }, [fieldDefs, nearbyActive, fullNearbyRows, fullRows, visibleColumns]);
 
   // Tabla
   // 🔑 FUENTE ÚNICA DE VERDAD: los datasets "full*" de la primera carga
@@ -2683,7 +2868,7 @@ export default function ExplorerView() {
           <span className="text-sm font-medium text-blue-700">Columns</span>
         </div>
         <ColumnPicker
-          fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]) : []}
+          fields={nonEmptyFieldDefs}
           value={visibleColumns}
           onChange={(next) => {
             const allowed = new Set((fieldDefs as any[]).map((f: any) => f.key));
@@ -2773,6 +2958,20 @@ showPresets={false}
             {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
 
+          {selectedRowIds.size > 0 && (
+            <button
+              data-testid="explorer-nearby-multi-btn"
+              onClick={() => setNearbyMultiModalOpen(true)}
+              className="inline-flex items-center gap-1 text-sm bg-violet-600 text-white rounded-md px-3 py-1.5 hover:bg-violet-700"
+              title={`Find INNODIA sites within driving distance of the ${selectedRowIds.size} selected row${selectedRowIds.size !== 1 ? "s" : ""}`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Z" stroke="currentColor" strokeWidth="1.8"/>
+                <circle cx="12" cy="9" r="2.5" fill="currentColor"/>
+              </svg>
+              Nearby ({selectedRowIds.size} selected)
+            </button>
+          )}
           <button
             data-testid="explorer-btn-export-tsv"
             className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
@@ -2782,43 +2981,96 @@ showPresets={false}
           >
             Export filtered (TSV)
           </button>
-          {/* Chart button — updates live as filters are applied */}
-          <div className="relative">
-            <button
-              data-testid="explorer-btn-chart"
-              className="ml-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-40"
-              onClick={openChartWizard}
-              disabled={(nearbyActive ? fullNearbyRows : fullRows).length === 0}
-              title="Visualize current filtered rows as chart — updates automatically when filters change"
-            >
-              📊 Chart
-              {(nearbyActive ? fullNearbyRows : fullRows).length > 0 && (
-                <span className="ml-1.5 rounded-full bg-blue-200 px-1.5 py-0.5 text-xs font-medium">
-                  {(nearbyActive ? fullNearbyRows : fullRows).length}
-                </span>
-              )}
-            </button>
-            <button
-            className="ml-2 rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50"
-            onClick={() =>
-              askAIAndMaybeShowChart(
-                "Show me the top 5 sites with most patients per year in a table and bar chart"
-              )
-            }
-            title="Ask AI agent and open chart if applicable"
+          {/* Chart button */}
+          <button
+            data-testid="explorer-btn-chart"
+            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-40 inline-flex items-center gap-1"
+            onClick={openChartWizard}
+            disabled={(nearbyActive ? fullNearbyRows : fullRows).length === 0}
+            title="Visualize current filtered rows as chart — updates automatically when filters change"
           >
-            Ask AI →
+            📊 Chart
+            {(nearbyActive ? fullNearbyRows : fullRows).length > 0 && (
+              <span className="rounded-full bg-blue-200 px-1.5 py-0.5 text-xs font-medium">
+                {(nearbyActive ? fullNearbyRows : fullRows).length}
+              </span>
+            )}
           </button>
-          </div>
+          {/* Ask Moby button */}
+          <button
+            className="rounded-md border px-2.5 py-1.5 hover:bg-indigo-50 flex items-center gap-1.5"
+            onClick={() => {
+              const activeRows = nearbyActive ? fullNearbyRows : fullRows;
+              const labelMap: Record<string, string> = {};
+              (fieldDefs as any[]).forEach((f: any) => { if (f?.key) labelMap[f.key] = f.label || f.key; });
+              const contextTable = {
+                columns: visibleColumns.map(k => ({ key: k, label: labelMap[k] || k })),
+                rows: activeRows.slice(0, 500),
+              };
+              try {
+                sessionStorage.setItem("moby_last_table_v1", JSON.stringify(contextTable));
+                sessionStorage.setItem("moby_last_filters_v1", JSON.stringify(filters));
+              } catch {}
+              window.dispatchEvent(new CustomEvent("cts:explorer:ask-ai", {
+                detail: { table: contextTable, filters, rowCount: activeRows.length },
+              }));
+              window.history.pushState({}, "", `${window.location.origin}/chat`);
+              window.dispatchEvent(new Event("popstate"));
+            }}
+            title="Ask Moby about the current Explorer data"
+          >
+            <img src={Moby} width={18} height={18} alt="Moby" />
+          </button>
         </div>
       </div>
 
       {/* Tabla */}
       <div ref={tableContainerRef} data-testid="explorer-results-table" className="overflow-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+        {/* Selection banner — shown when rows are selected */}
+        {selectedRowIds.size > 0 && (
+          <div className="flex items-center gap-3 px-3 py-1.5 bg-violet-50 border-b border-violet-100 text-xs text-violet-800">
+            <span className="font-medium">{selectedRowIds.size} row{selectedRowIds.size !== 1 ? "s" : ""} selected</span>
+            {selectedRowIds.size < viewRows.length && (
+              <button
+                className="underline hover:no-underline"
+                onClick={() => setSelectedRowIds(new Set(viewRows.map((r) => r.account_id).filter(Boolean)))}
+              >
+                Select all {viewRows.length} results
+              </button>
+            )}
+            {selectedRowIds.size === viewRows.length && viewRows.length > 0 && (
+              <span className="text-violet-600">All {viewRows.length} results selected</span>
+            )}
+            <button
+              className="ml-auto underline hover:no-underline"
+              onClick={() => setSelectedRowIds(new Set())}
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
+                {/* Checkbox select-all */}
+                <th className="px-2 py-2 w-8 align-bottom">
+                  <input
+                    type="checkbox"
+                    title="Select all visible rows"
+                    className="accent-violet-600 cursor-pointer"
+                    checked={table.getRowModel().rows.length > 0 && table.getRowModel().rows.every(r => selectedRowIds.has((r.original as ExplorerRow).account_id))}
+                    onChange={(e) => {
+                      const ids = table.getRowModel().rows.map(r => (r.original as ExplorerRow).account_id).filter(Boolean);
+                      setSelectedRowIds(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) ids.forEach(id => next.add(id));
+                        else ids.forEach(id => next.delete(id));
+                        return next;
+                      });
+                    }}
+                  />
+                </th>
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const dir = header.column.getIsSorted() as false | "asc" | "desc";
@@ -2877,26 +3129,46 @@ showPresets={false}
           <tbody>
             {table.getRowModel().rows.length === 0 ? (
               <tr>
-                <td className="px-3 py-6 text-center text-gray-500" colSpan={table.getAllLeafColumns().length}>
+                <td className="px-3 py-6 text-center text-gray-500" colSpan={table.getAllLeafColumns().length + 1}>
                   {busy || bootLoading ? "Loading…" : "No results"}
                 </td>
               </tr>
             ) : (
-              table.getRowModel().rows.map((row) => (
+              table.getRowModel().rows.map((row) => {
+                const accId = (row.original as ExplorerRow).account_id;
+                const isChecked = selectedRowIds.has(accId);
+                return (
                 <tr
                   key={row.id}
                   data-testid="explorer-table-row"
-                  data-account-id={(row.original as ExplorerRow).account_id}
+                  data-account-id={accId}
                   className={[
                     "border-t hover:bg-gray-50",
-                    selectedAccountId && (row.original as ExplorerRow).account_id === selectedAccountId ? "bg-blue-50/40" : "",
+                    isChecked ? "bg-violet-50/40" : "",
+                    selectedAccountId && accId === selectedAccountId ? "bg-blue-50/40" : "",
                     // NEW: estilo de resaltado (coincide con eventos del chat)
-                    highlightIds.includes((row.original as ExplorerRow).account_id)
+                    highlightIds.includes(accId)
                       ? "bg-amber-50 ring-1 ring-amber-300"
                       : ""
                   ].join(" ")}
-                  onClick={() => setSelectedAccountId((row.original as ExplorerRow).account_id)}
+                  onClick={() => setSelectedAccountId(accId)}
                 >
+                  {/* Per-row checkbox */}
+                  <td className="px-2 py-2 w-8" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      className="accent-violet-600 cursor-pointer"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        setSelectedRowIds(prev => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(accId);
+                          else next.delete(accId);
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} data-testid="explorer-table-cell" className="px-3 py-2 whitespace-nowrap">
                       {flexRender(
@@ -2906,7 +3178,8 @@ showPresets={false}
                     </td>
                   ))}
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
@@ -2960,6 +3233,14 @@ showPresets={false}
         </button>
       )}
 
+      {/* Modal Nearby Multi */}
+      <NearbyMultiModal
+        open={nearbyMultiModalOpen}
+        count={selectedRowIds.size}
+        onClose={() => setNearbyMultiModalOpen(false)}
+        onConfirm={applyNearbyMulti}
+      />
+
       {/* Modal Nearby */}
       <NearbyModal
         open={nearbyModalOpen}
@@ -2987,6 +3268,7 @@ showPresets={false}
         onToggleSeparate={setUseSeparateNearbyFilters}
         onChangeFiltersNearby={setFiltersNearby}
         onApplyFilters={reapplyNearbyWithFilters}
+        onClearFilters={clearNearbyFilters}
         onApplyKm={reapplyNearbyWithKm}
         onClear={clearNearby}
       />

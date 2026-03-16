@@ -715,7 +715,14 @@ export default function MapView({
       ...(neighborsOnly || []),
       ...(base ? [{ account_id: base.account_id, lat: base.lat, lng: base.lng } as any] : []),
     ].filter((p) => p.lat && p.lng);
-    if (!all.length) return;
+    if (!all.length) {
+      // No points to fit — reset to default Europe view so stale zoom doesn't persist
+      try {
+        if (initialCenterRef.current) map.setCenter(initialCenterRef.current);
+        map.setZoom(5);
+      } catch {}
+      return;
+    }
     const bounds = new (window as any).google.maps.LatLngBounds();
     all.forEach((p) => bounds.extend({ lat: p.lat!, lng: p.lng! }));
     map.fitBounds(bounds, 48);

@@ -30,6 +30,17 @@ export default function App() {
   const { authed, sessionExpired, setSessionExpired } = useSalesforceAuth();
   useIdleTimer(sessionExpired, setSessionExpired);
 
+  // Pre-fetch Members + warm Explorer cache as soon as auth is confirmed
+  const [membersPrefetch, setMembersPrefetch] = useState<any[] | null>(null);
+  useEffect(() => {
+    if (authed !== true) return;
+    fetch("/api/members/bootstrap", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.rows?.length) setMembersPrefetch(data.rows); })
+      .catch(() => {});
+    fetch("/api/salesforce/map/bootstrap", { credentials: "include" }).catch(() => {});
+  }, [authed]);
+
 
 
   // Escucha cambios del historial (back/forward)
@@ -95,7 +106,7 @@ export default function App() {
         )}
         {tab === "upload" && <LinkAuthView />}
         {tab === "explorer" && <ExplorerView />}
-        {tab === "members" && <MembersView />}
+        {tab === "members" && <MembersView prefetchedRows={membersPrefetch} />}
         {tab === "chat" && <ChatView />}
       </main>
       <footer className="mt-10 py-6 text-center text-xs text-slate-500" aria-hidden={sessionExpired}>

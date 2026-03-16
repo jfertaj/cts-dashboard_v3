@@ -68,15 +68,22 @@ test.describe("Dashboard navigation", () => {
 
   test("URL updates when switching tabs", async ({ page }) => {
     // Mock explorer APIs so the Explorer view doesn't block with a loading state
-    await page.route("**/api/explorer/bootstrap", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ points: [], rows: [], fields: [] }) })
+    // explorerBootstrap() calls /api/salesforce/map/bootstrap (not /api/explorer/bootstrap)
+    await page.route("**/api/salesforce/map/bootstrap", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) })
     );
     await page.route("**/api/explorer/fields", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) })
     );
+    await page.route("**/api/explorer/search", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ points: [], rows: [], total: 0 }) })
+    );
     await page.goto("/");
     await page.locator(S.TAB_EXPLORER).click();
     await expect(page).toHaveURL(/\/explorer/);
+    // Wait for the Explorer bootstrap to complete (removes the full-screen loading overlay)
+    // so that TAB_CHAT is not blocked by the z-[9999] LoadingOverlay
+    await expect(page.locator(S.EXPLORER_SEARCH_BTN)).toBeEnabled({ timeout: 15000 });
     await page.locator(S.TAB_CHAT).click();
     await expect(page).toHaveURL(/\/chat/);
   });

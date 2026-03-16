@@ -389,7 +389,9 @@ test.describe("MEMBERS-FILTER — filter panel interactions", () => {
       });
     });
 
+    // With tag-input: fill → Enter to add tag → then click Search
     await page.locator(S.MEMBERS_FILTER_NAME).fill("test");
+    await page.locator(S.MEMBERS_FILTER_NAME).press("Enter");
     await page.locator(S.MEMBERS_SEARCH_BTN).click();
     await page.waitForTimeout(500);
     expect(searchCalled).toBe(true);
@@ -406,7 +408,9 @@ test.describe("MEMBERS-FILTER — filter panel interactions", () => {
       });
     });
 
+    // With tag-input: fill → Enter to add tag → then click Search
     await page.locator(S.MEMBERS_FILTER_NAME).fill("München");
+    await page.locator(S.MEMBERS_FILTER_NAME).press("Enter");
     await page.locator(S.MEMBERS_SEARCH_BTN).click();
     await page.waitForTimeout(500);
 
@@ -415,14 +419,18 @@ test.describe("MEMBERS-FILTER — filter panel interactions", () => {
     )).toBe(true);
   });
 
-  test("MEMBERS-FILTER-9: Enter key in name input triggers search", async ({ page }) => {
+  test("MEMBERS-FILTER-9: Enter key adds name tag; Search button triggers search", async ({ page }) => {
     let searchCalled = false;
     await page.route("**/api/members/search", async (route) => {
       searchCalled = true;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [], total: 0 }) });
     });
+    // Enter adds the tag (input clears), then Search button triggers the API call
     await page.locator(S.MEMBERS_FILTER_NAME).fill("test");
     await page.locator(S.MEMBERS_FILTER_NAME).press("Enter");
+    // Tag chip should now be visible
+    await expect(page.locator('[data-testid="members-filter-name"]')).toHaveValue("");
+    await page.locator(S.MEMBERS_SEARCH_BTN).click();
     await page.waitForTimeout(500);
     expect(searchCalled).toBe(true);
   });
@@ -510,7 +518,9 @@ test.describe("MEMBERS-FILTER — filter panel interactions", () => {
     await page.route("**/api/members/search", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [MOCK_ROWS[0]], total: 1 }) })
     );
+    // With tag-input: fill → Enter to add tag → Search
     await page.locator(S.MEMBERS_FILTER_NAME).fill("München");
+    await page.locator(S.MEMBERS_FILTER_NAME).press("Enter");
     await page.locator(S.MEMBERS_SEARCH_BTN).click();
     await expect(page.locator(S.MEMBERS_TABLE_ROW)).toHaveCount(1, { timeout: 5000 });
 

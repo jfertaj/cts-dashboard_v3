@@ -18,7 +18,10 @@ const stableBodyKey = (init?: RequestInit) => {
 };
 
 // Peticiones en vuelo para coalescing (method+url+bodyKey)
-const inflight = new Map<string, Promise<Response>>();
+// Stores a pre-parsed RawResp (not the raw Response) so multiple concurrent
+// callers can share the same result without "body stream already read" errors.
+type RawResp = { status: number; ok: boolean; statusText: string; text: string | null };
+const inflight = new Map<string, Promise<RawResp>>();
 const inflightKey = (url: string, init?: RequestInit) =>
   `${(init?.method || "GET").toUpperCase()} ${url} :: ${stableBodyKey(init)}`;
 
@@ -52,9 +55,18 @@ async function api<T>(path: string, init?: RequestInit & { timeoutMs?: number; r
   };
 
   const key = inflightKey(url, reqInit);
-  const doFetch = async (): Promise<Response> => {
+  const doFetch = async (): Promise<RawResp> => {
     if (inflight.has(key)) return inflight.get(key)!;
-    const p = fetch(url, reqInit).finally(() => inflight.delete(key));
+    // Eagerly read the body text so multiple concurrent callers share a plain
+    // object — avoids "body stream already read" when two calls coalesce.
+    const p = fetch(url, reqInit)
+      .then(async (r) => ({
+        status: r.status,
+        ok: r.ok,
+        statusText: r.statusText,
+        text: r.status !== 204 ? await r.text().catch(() => null) : null,
+      }))
+      .finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   };
@@ -66,16 +78,15 @@ async function api<T>(path: string, init?: RequestInit & { timeoutMs?: number; r
       const res = await doFetch();
       if (res.ok) {
         clearTimeout(to);
-        if (res.status === 204) return undefined as unknown as T;
-        return (await res.json()) as T;
+        if (res.status === 204 || res.text == null) return undefined as unknown as T;
+        return JSON.parse(res.text) as T;
       }
       if (["GET","HEAD","OPTIONS"].includes(String(reqInit.method || "GET").toUpperCase())
           && [502,503,504].includes(res.status) && attempt <= retries) {
         await sleep(150 * attempt * attempt);
         continue;
       }
-      const txt = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status}: ${txt || res.statusText}`);
+      throw new Error(`HTTP ${res.status}: ${res.text || res.statusText}`);
     }
   } finally {
     clearTimeout(to);

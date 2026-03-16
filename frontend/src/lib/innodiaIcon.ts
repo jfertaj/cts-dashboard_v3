@@ -8,25 +8,26 @@ export const INNODIA_CRYSTAL_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg
 // The pin tip is at viewBox (12, 36) → display (PIN_W/2, PIN_H)
 // Anchor for Google Maps must be (PIN_W/2, PIN_H) — the bottom tip.
 //
-const PIN_W = 32;
-const PIN_H = 48;
-const PIN_W_SEL = 40;
-const PIN_H_SEL = 60;
+const PIN_W = 22;
+const PIN_H = 33;
+const PIN_W_SEL = 28;
+const PIN_H_SEL = 42;
 
 const _pinSvg = (color: string, size: [number, number]): string => {
   const [w, h] = size;
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"` +
     ` width="${w}" height="${h}" viewBox="0 0 24 36">` +
-    `<defs><clipPath id="cc"><circle cx="12" cy="12" r="10"/></clipPath></defs>` +
-    // Teardrop pin shape
+    // PNG 306×289: petal tips at exactly r=10 SVG with w=20. Use r=11 clip + white bg → 1 SVG margin.
+    `<defs><clipPath id="cc"><circle cx="12" cy="12" r="11"/></clipPath></defs>` +
+    // Teardrop pin with white border stroke
     `<path d="M12 0C5.373 0 0 5.373 0 12c0 7.822 11.026 22.783 11.486 23.382` +
     `.228.292.8.292 1.028 0C12.974 34.783 24 19.822 24 12 24 5.373 18.627 0 12 0z"` +
-    ` fill="${color}"/>` +
-    // White circle in the head
-    `<circle cx="12" cy="12" r="10" fill="white"/>` +
-    // Crystal zoomed in to fill the circle (negative offset scales up PNG so crystal fills clip area)
-    `<image x="-3" y="-3" width="30" height="30" clip-path="url(#cc)" href="${INNODIA_CRYSTAL_URL}"/>` +
+    ` fill="${color}" stroke="white" stroke-width="1.2"/>` +
+    // White circle behind crystal (r=8 → 1 SVG unit margin around the 14×14 image)
+    `<circle cx="12" cy="12" r="8" fill="white"/>` +
+    // Crystal image
+    `<image x="5" y="5" width="14" height="14" href="${INNODIA_CRYSTAL_URL}"/>` +
     `</svg>`
   );
 };

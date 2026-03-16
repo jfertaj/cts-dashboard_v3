@@ -4,7 +4,7 @@ from sqlalchemy import literal
 from typing import Any, Dict, List, Optional, Set, Literal, Tuple, Iterable
 from fastapi import APIRouter, HTTPException, Request, Body, Depends
 from pydantic import BaseModel, Field
-import os, time, math, re, json, logging, threading
+import os, time, math, re, json, logging, threading, asyncio
 import httpx
 from pathlib import Path
 from datetime import datetime
@@ -2584,6 +2584,7 @@ async def explorer_search(
                 if nf == "Assignment.Name":
                     _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
                     extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                    need_batch_extras = True  # must fetch assignment data from SF
                 # Other sf.Assignment.* fields (Type, Stage, MCA, Payment) silently skipped
             else:
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
@@ -2592,6 +2593,12 @@ async def explorer_search(
             need_account_extras = True
         elif f.startswith("qual."):
             qual_rules.append(Rule(field=f[5:], operator=op, value=val))
+        elif f.startswith("Assignment."):
+            # Frontend strips "sf." prefix: "sf.Assignment.Name" → "Assignment.Name"
+            if f == "Assignment.Name":
+                _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
+                extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                need_batch_extras = True
         else:
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
                 sf_rules.append(Rule(field=f, operator=op, value=val))
@@ -2676,18 +2683,27 @@ async def explorer_search(
     ACT_RT = ("Activity", "RT_Activity")
     _rt_in = ", ".join("'" + x.replace("'", "\\'") + "'" for x in ACT_RT)
 
-    # Asegura universo de subcuentas clínicas activas y tolera variantes: Type='Activity' o RT contiene 'Activity'
-    act_where = (
-        "WHERE AccountId != null "
-        "AND (RecordType.DeveloperName IN (" + _rt_in + ") OR Type = 'Activity') "
-        "AND AccountId IN (SELECT Id FROM Account "
-        "  WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
-        "    AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
-        "    AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)"
-        ")"
-    )
+    # Activity SOQL:
+    # - When a name/sf filter is applied (extra_where), skip the SubAccount restriction
+    #   so sponsor-owned Activities (e.g. "Beta Preserve" linked to Sanofi) are found.
+    #   The name filter itself keeps the result set small.
+    # - Without a filter, restrict to SubAccount clinical accounts for performance.
     if extra_where:
-        act_where += f" AND {extra_where}"
+        act_where = (
+            "WHERE AccountId != null "
+            "AND (RecordType.DeveloperName IN (" + _rt_in + ") OR Type = 'Activity') "
+            f"AND {extra_where}"
+        )
+    else:
+        act_where = (
+            "WHERE AccountId != null "
+            "AND (RecordType.DeveloperName IN (" + _rt_in + ") OR Type = 'Activity') "
+            "AND AccountId IN (SELECT Id FROM Account "
+            "  WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
+            "    AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
+            "    AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)"
+            ")"
+        )
 
     soql_acts = (
         "SELECT Id, Name, AccountId, RecordType.DeveloperName "
@@ -4193,6 +4209,12 @@ async def explorer_search_within_drive_km(
                 need_account_fields = True
                 need_account_extras = True
                 account_fields_needed.add(fld)
+        elif f.startswith("Assignment."):
+            # Frontend strips "sf." prefix: "sf.Assignment.Name" → "Assignment.Name"
+            if f == "Assignment.Name":
+                _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
+                extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                need_batch_extras = True
         else:
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
                 sf_rules.append(Rule(field=f, operator=op, value=val))
@@ -4831,4 +4853,525 @@ async def explorer_search_within_drive_km(
         "points": points,                  # vecinos que cumplen filtros
         "rows": rows,                      # colapsados por cuenta
         "meta": {"mode": "drive_km", "max_km": max_km}
+    }
+
+
+# ============================================================
+# Endpoint: nearby-multi — same as within-drive-km but with
+# multiple base account IDs; each candidate's distance is the
+# minimum over all bases.
+# ============================================================
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Straight-line Haversine distance in km."""
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    return R * 2 * math.asin(math.sqrt(a))
+
+
+@explorer_router.post("/search/nearby-multi")
+async def explorer_search_nearby_multi(
+    payload: Dict = Body(...),
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Find INNODIA sites within max_km driving distance of ANY of the given base_account_ids.
+    Each candidate site's distance is the minimum driving distance to any base site.
+    Response shape is compatible with within-drive-km (same NearbyDrawer on frontend).
+    """
+    sf = _get_sf(request)
+    _ensure_describes(sf)
+
+    base_account_ids: List[str] = payload.get("base_account_ids") or []
+    max_km: Optional[float] = payload.get("max_km")
+    if not base_account_ids:
+        raise HTTPException(status_code=400, detail="base_account_ids is required")
+    if not max_km or max_km <= 0:
+        max_km = 120.0
+
+    filters = payload.get("filters") or {"logic": "AND", "rules": []}
+    columns = payload.get("columns") or []
+
+    # -------- classify rules (same logic as within-drive-km) --------
+    site_rules:    List[Rule] = []
+    sf_rules:      List[Rule] = []
+    qual_rules:    List[Rule] = []
+    account_rules: List[Rule] = []
+    extra_rules:   List[Rule] = []
+    member_rules:  List[Rule] = []
+    need_member = False
+    need_batch_extras = False
+    need_account_fields = False
+    account_fields_needed: Set[str] = set()
+    requested_account_cols: Set[str] = set()
+    nd_counts_by_acc: Dict[str, Dict[str, Optional[int]]] = {}
+
+    def _norm_safe(k: str) -> str:
+        try: return _norm_label_to_key(k)
+        except Exception: return k
+
+    for r in (filters.get("rules") or []):
+        f  = _norm_safe(r.get("field") or "")
+        op = r.get("op") or r.get("operator") or "equals"
+        val = r.get("value")
+        if f in ("sf.Account.MemberName", "Account.MemberName"):
+            member_rules.append(Rule(field="Account.MemberName", operator=op, value=val)); need_member = True; continue
+        if f.startswith("site."):
+            site_rules.append(Rule(field=f, operator=op, value=val))
+        elif f.startswith("qual."):
+            qual_rules.append(Rule(field=f[5:], operator=op, value=val))
+        elif f.startswith("extra."):
+            extra_rules.append(Rule(field=f, operator=op, value=val)); need_batch_extras = True
+        elif f.startswith("sf."):
+            nf = f[3:]
+            if nf == "Account.Id":
+                sf_rules.append(Rule(field="AccountId", operator=op, value=val))
+            elif nf.startswith("Account."):
+                fld = nf.split(".", 1)[1]
+                account_rules.append(Rule(field=fld, operator=op, value=val)); need_account_fields = True; account_fields_needed.add(fld)
+            elif nf.startswith("Assignment."):
+                if nf == "Assignment.Name":
+                    _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
+                    extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val)); need_batch_extras = True
+            else:
+                sf_rules.append(Rule(field=nf, operator=op, value=val))
+        elif f.startswith("Account."):
+            fld = f.split(".", 1)[1]
+            if fld == "Id":
+                sf_rules.append(Rule(field="AccountId", operator=op, value=val))
+            else:
+                account_rules.append(Rule(field=fld, operator=op, value=val)); need_account_fields = True; account_fields_needed.add(fld)
+        elif f.startswith("Assignment."):
+            # Frontend strips "sf." prefix: "sf.Assignment.Name" → "Assignment.Name"
+            if f == "Assignment.Name":
+                _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
+                extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val)); need_batch_extras = True
+        else:
+            if f in ALLOWED_FIELDS and not f.startswith("Account."):
+                sf_rules.append(Rule(field=f, operator=op, value=val))
+
+    sf_filter = FilterQuery(logic=filters.get("logic", "AND"), rules=sf_rules)
+
+    requested_cols: List[str] = []
+    requested_extra_cols: Set[str] = set()
+    for c in (columns or []):
+        k = _norm_safe(c)
+        requested_cols.append(k)
+        if k in ("sf.Account.Member__c", "Account.Member__c", "sf.Account.MemberName", "Account.MemberName"):
+            need_member = True
+        acct_field = None
+        if k.startswith("Account."): acct_field = _strip_account_prefix(k)
+        elif k.startswith("sf.Account."): acct_field = _strip_account_prefix(k)
+        if acct_field: requested_account_cols.add(acct_field); need_account_fields = True
+        if k.startswith("extra."): requested_extra_cols.add(k); need_batch_extras = True
+
+    # -------- load site coords --------
+    site_rows = db.execute(
+        select(Site.salesforce_account_id, Site.latitude, Site.longitude, Site.city, Site.country, Site.id)
+        .where(Site.salesforce_account_id.isnot(None))
+    ).all()
+    site_by_acc: Dict[str, Dict[str, Any]] = {}
+    site_id_by_acc: Dict[str, int] = {}
+    for acc, lat, lng, city, country, sid in site_rows:
+        site_by_acc[str(acc)] = {"lat": lat, "lng": lng, "city": city, "country": country}
+        site_id_by_acc[str(acc)] = int(sid)
+
+    # -------- all CTS accounts --------
+    acc_ids_all = [r["AccountId"] for r in _sf_query_all(
+        sf, f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null GROUP BY AccountId"
+    )]
+    acc_map_all = _build_account_map(sf, acc_ids_all)
+
+    # merge coords for all active accounts
+    coords_by_acc: Dict[str, Dict[str, Any]] = {}
+    for aid in set(list(site_by_acc.keys()) + acc_ids_all):
+        if aid not in acc_map_all:
+            continue
+        a = acc_map_all.get(aid, {})
+        s = site_by_acc.get(aid, {})
+        lat = a.get("lat") if a.get("lat") is not None else s.get("lat")
+        lng = a.get("lng") if a.get("lng") is not None else s.get("lng")
+        coords_by_acc[aid] = {"lat": lat, "lng": lng, "city": a.get("city") or s.get("city"), "country": a.get("country") or s.get("country")}
+
+    # geocode missing coords
+    for aid, info in list(coords_by_acc.items()):
+        if (info.get("lat") is None or info.get("lng") is None) and (info.get("city") or info.get("country")):
+            glat, glng = await _geocode_city_country(info.get("city"), info.get("country"))
+            if glat is not None and glng is not None:
+                info["lat"], info["lng"] = glat, glng
+
+    # -------- resolve base coords --------
+    base_coords: List[Tuple[float, float]] = []
+    acc_map_bases = _build_account_map(sf, base_account_ids)
+    for bid in base_account_ids:
+        a = acc_map_bases.get(bid) or {}
+        s = site_by_acc.get(str(bid)) or {}
+        lat = a.get("lat") if a.get("lat") is not None else s.get("lat")
+        lng = a.get("lng") if a.get("lng") is not None else s.get("lng")
+        if lat is None or lng is None:
+            glat, glng = await _geocode_city_country(a.get("city") or s.get("city"), a.get("country") or s.get("country"))
+            lat, lng = glat, glng
+        if lat is not None and lng is not None:
+            base_coords.append((float(lat), float(lng)))
+
+    if not base_coords:
+        raise HTTPException(status_code=404, detail="None of the base accounts have geolocation")
+
+    # -------- haversine pre-filter (2× max_km) --------
+    dests: List[Tuple[float, float]] = []
+    dest_accs: List[str] = []
+    for acc, info in coords_by_acc.items():
+        if acc in base_account_ids:
+            continue
+        lat_i, lng_i = info.get("lat"), info.get("lng")
+        if lat_i is None or lng_i is None:
+            continue
+        # pre-filter: min haversine to any base ≤ 2× max_km
+        min_hav = min(_haversine_km(float(b[0]), float(b[1]), float(lat_i), float(lng_i)) for b in base_coords)
+        if min_hav <= float(max_km) * 2:
+            dests.append((float(lat_i), float(lng_i)))
+            dest_accs.append(acc)
+
+    log.info("nearby-multi: bases=%s candidate_coords=%s", len(base_coords), len(dest_accs))
+
+    # -------- driving distance from each base (parallel) --------
+    # Fire all base → candidates Distance Matrix calls concurrently, keep min per destination.
+    dist_per_dest: List[Optional[float]] = [None] * len(dests)
+    all_base_dists = await asyncio.gather(
+        *[_drive_km_matrix(base_latng, dests) for base_latng in base_coords],
+        return_exceptions=True,
+    )
+    for result in all_base_dists:
+        if isinstance(result, Exception):
+            log.warning("nearby-multi: _drive_km_matrix failed for one base: %s", result)
+            continue
+        for i, d in enumerate(result):
+            if d is not None:
+                if dist_per_dest[i] is None or d < dist_per_dest[i]:
+                    dist_per_dest[i] = d
+
+    # -------- keep candidates within max_km --------
+    neighbor_accs = [acc for acc, d in zip(dest_accs, dist_per_dest) if d is not None and d <= float(max_km)]
+    dist_by_acc: Dict[str, float] = {acc: d for acc, d in zip(dest_accs, dist_per_dest) if d is not None and d <= float(max_km)}
+    log.info("nearby-multi: within_max=%s max_km=%s", len(neighbor_accs), max_km)
+
+    # -------- fetch extras for neighbors_all --------
+    fields_to_fetch_neighbors: Set[str] = (account_fields_needed | requested_account_cols) - {"MemberName", "HasPI"}
+    account_extras_for_neighbors: Dict[str, Dict[str, Any]] = {}
+    if need_account_fields and neighbor_accs and fields_to_fetch_neighbors:
+        account_extras_for_neighbors = _fetch_account_extras(sf, neighbor_accs, fields_to_fetch_neighbors)
+
+    extras_map_neighbors: Dict[str, Dict[str, Any]] = {}
+    if neighbor_accs:
+        extras_map_neighbors = batch_fetch_account_extras(sf, neighbor_accs)
+
+    member_by_acc_neighbors: Dict[str, Optional[str]] = {}
+    if need_member and neighbor_accs:
+        vals = ",".join(f"'{a}'" for a in neighbor_accs)
+        rows_m = _sf_query_all(sf, f"SELECT Id, C_Member__c, C_Member__r.Name FROM Account WHERE Id IN ({vals})")
+        for a in rows_m:
+            member_by_acc_neighbors[str(a.get("Id"))] = (a.get("C_Member__r") or {}).get("Name") or None
+
+    acc_map_neighbors = _build_account_map(sf, neighbor_accs) if neighbor_accs else {}
+    active_neighbor_ids = list(acc_map_neighbors.keys())
+    log.info("nearby-multi: active_neighbor_ids=%s", len(active_neighbor_ids))
+
+    # -------- build neighbors_all --------
+    neighbors_all: List[Dict[str, Any]] = []
+    for acc in active_neighbor_ids:
+        accd = acc_map_neighbors.get(acc)
+        lat, lng = accd.get("lat"), accd.get("lng")
+        if lat is None or lng is None:
+            glat, glng = await _geocode_city_country(accd.get("city"), accd.get("country"))
+            if glat is not None: lat, lng = glat, glng
+        if lat is None or lng is None:
+            s_info = site_by_acc.get(acc) or {}
+            lat = lat if lat is not None else s_info.get("lat")
+            lng = lng if lng is not None else s_info.get("lng")
+        if (lat is None or lng is None) and site_by_acc.get(acc):
+            glat, glng = await _geocode_city_country((site_by_acc.get(acc) or {}).get("city"), (site_by_acc.get(acc) or {}).get("country"))
+            if glat is not None: lat, lng = glat, glng
+        if lat is None or lng is None:
+            continue
+        extras: Dict[str, Any] = {}
+        if need_member:    extras["MemberName"] = member_by_acc_neighbors.get(str(acc))
+        if need_account_fields: extras.update(account_extras_for_neighbors.get(str(acc), {}))
+        assignments_list = _split_assignment_names(extras_map_neighbors.get(str(acc), {}).get("extra.AssignmentsNames"))
+        assign_count = _safe_int(extras_map_neighbors.get(str(acc), {}).get("extra.AssignmentsCount"))
+        nd_meta = accd.get("nd_counts") or {}
+        cs_flags = accd.get("cs") or {}
+        neighbors_all.append({
+            "lat": lat, "lng": lng,
+            "account_id": acc,
+            "account_name": accd.get("name"),
+            "city": accd.get("city") or (site_by_acc.get(acc) or {}).get("city"),
+            "country": accd.get("country") or (site_by_acc.get(acc) or {}).get("country"),
+            "distance_km": dist_by_acc.get(acc),
+            "extras": extras,
+            "badges": {"profiling": False, "qualification": False},
+            "cs": {"clinical": bool(cs_flags.get("clinical")), "referral": bool(cs_flags.get("referral")), "detect": bool(cs_flags.get("detect"))},
+            "meta": {
+                "pi_name": extras_map_neighbors.get(str(acc), {}).get("extra.PIName"),
+                "pi_email": extras_map_neighbors.get(str(acc), {}).get("extra.PIEmail"),
+                "pi_phone": extras_map_neighbors.get(str(acc), {}).get("extra.PIPhone"),
+                "assignments": assignments_list, "assignments_count": assign_count,
+                "nd_u18": nd_meta.get("u18"), "nd_o18": nd_meta.get("o18"),
+            },
+        })
+
+    if not active_neighbor_ids:
+        return {
+            "base": {"account_ids": base_account_ids, "count": len(base_account_ids)},
+            "neighbors_all": neighbors_all, "points": [], "rows": [],
+            "meta": {"mode": "drive_km_multi", "max_km": max_km, "bases_count": len(base_account_ids)},
+        }
+
+    # -------- SOQL filter on active neighbors --------
+    vals_sql = ", ".join(f"'{a}'" for a in active_neighbor_ids)
+    base_where = f"Type IN ({TYPE_IN}) AND AccountId != null AND AccountId IN ({vals_sql})"
+    extra_where = _build_sf_where(sf_filter)
+    where_sql = f"WHERE {base_where}" + (f" AND {extra_where}" if extra_where else "")
+
+    opp_fields: Set[str] = {"Id", "Name", "Type", "StageName", "IsClosed", "CloseDate", "AccountId"}
+    for r in sf_rules:
+        if r.field.startswith("Account."): continue
+        if _exists_on_opportunity(r.field): opp_fields.add(r.field)
+    for k in requested_cols:
+        if not k.startswith("sf."): continue
+        raw = k[3:]
+        if raw.startswith("Account."):
+            inner = raw.split(".", 1)[1]
+            if _exists_on_account(inner): opp_fields.add(f"Account.{inner}")
+        else:
+            if _exists_on_opportunity(raw): opp_fields.add(raw)
+
+    opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
+    select_fields = ", ".join(sorted(opp_fields_valid))
+    opps = _sf_query_all(sf, f"SELECT {select_fields} FROM Opportunity {where_sql}")
+    if not opps:
+        return {
+            "base": {"account_ids": base_account_ids, "count": len(base_account_ids)},
+            "neighbors_all": neighbors_all, "points": [], "rows": [],
+            "meta": {"mode": "drive_km_multi", "max_km": max_km, "bases_count": len(base_account_ids)},
+        }
+
+    acc_ids = sorted({o.get("AccountId") for o in opps if o.get("AccountId")})
+    acc_map = _build_account_map(sf, acc_ids)
+
+    qual_rows_db = db.execute(select(SiteQual.site_id, SiteQual.data)).all()
+    groups_by_slug = _qual_groups_from_questions(db)
+    qual_by_site: Dict[int, Dict[str, Any]] = {
+        sid: _expand_describe_keys_for_row(_expand_comments_keys_for_row(data or {}, groups_by_slug), groups_by_slug)
+        for sid, data in qual_rows_db
+    }
+
+    member_by_acc: Dict[str, Optional[str]] = {}
+    if need_member and acc_ids:
+        vals2 = ",".join(f"'{x}'" for x in acc_ids)
+        rows_m2 = _sf_query_all(sf, f"SELECT Id, C_Member__c, C_Member__r.Name FROM Account WHERE Id IN ({vals2})")
+        for a in rows_m2:
+            member_by_acc[str(a.get("Id"))] = (a.get("C_Member__r") or {}).get("Name") or None
+
+    fields_to_fetch = (account_fields_needed | requested_account_cols) - {"MemberName", "HasPI"}
+    account_extras_by_acc: Dict[str, Dict[str, Any]] = {}
+    if need_account_fields and acc_ids and fields_to_fetch:
+        account_extras_by_acc = _fetch_account_extras(sf, acc_ids, fields_to_fetch)
+
+    extras_map: Dict[str, Dict[str, Any]] = {}
+    if need_batch_extras and acc_ids:
+        extras_map = batch_fetch_account_extras(sf, acc_ids)
+
+    # -------- pass_* helpers --------
+    def pass_site_m(acc: Dict[str, Any]) -> bool:
+        if not site_rules: return True
+        def match_one(rule: Rule) -> bool:
+            val = ""
+            if rule.field == "site.city":    val = acc.get("city") or ""
+            if rule.field == "site.country": val = acc.get("country") or ""
+            op = _OP_SYNONYM.get(rule.operator, rule.operator); s = str(rule.value or "")
+            if op in ("is_null","isnull","is_empty"): return val == ""
+            if op in ("is_not_null","notnull","is_not_empty"): return val != ""
+            if rule.field == "site.country" and op in ("equals","=","not_equals","!=","in","not_in"):
+                val = (_country_norm(val) or val).upper()
+                if op not in ("in","not_in"): s = (_country_norm(s) or s).upper()
+            if op in ("in","not_in"):
+                raw_items = [x.strip() for x in str(rule.value or "").split(",") if x.strip()]
+                items = [(_country_norm(x) or x).upper() for x in raw_items] if rule.field == "site.country" else [x.lower() for x in raw_items]
+                present = (val.upper() if rule.field == "site.country" else val.lower()) in items
+                return present if op == "in" else not present
+            if op in ("equals","="): return val.lower() == s.lower()
+            if op in ("not_equals","!="): return val.lower() != s.lower()
+            if op == "contains": return s.lower() in val.lower()
+            if op == "not_contains": return s.lower() not in val.lower()
+            if op == "starts_with": return val.lower().startswith(s.lower())
+            if op == "ends_with": return val.lower().endswith(s.lower())
+            return True
+        glue_and = (filters.get("logic") or "AND") == "AND"
+        res = [match_one(r) for r in site_rules]
+        return all(res) if glue_and else any(res)
+
+    def pass_qual_m(qual_data: Dict[str, Any]) -> bool:
+        if not qual_rules: return True
+        res = [_eval_qual_rule(_qual_get(qual_data, qr.field), qr.operator, qr.value) for qr in qual_rules]
+        return all(res) if (filters.get("logic") or "AND") == "AND" else any(res)
+
+    def pass_member_m(aid: str) -> bool:
+        if not member_rules: return True
+        actual = member_by_acc.get(str(aid)) or ""
+        def eval_one(rule: Rule) -> bool:
+            op = _OP_SYNONYM.get(rule.operator, rule.operator); s = str(rule.value or "")
+            if op in ("equals","="): return actual == s
+            if op in ("not_equals","!="): return actual != s
+            if op == "contains": return s.lower() in actual.lower()
+            return True
+        return all(eval_one(r) for r in member_rules) if (filters.get("logic") or "AND") == "AND" else any(eval_one(r) for r in member_rules)
+
+    def pass_account_m(aid: str) -> bool:
+        if not account_rules: return True
+        vals_d = dict(account_extras_by_acc.get(str(aid), {})); vals_d.setdefault("Id", str(aid))
+        if need_member: vals_d["MemberName"] = member_by_acc.get(str(aid))
+        glue_and = (filters.get("logic") or "AND") == "AND"
+        res = [_eval_qual_rule(vals_d.get(ar.field.split(".",1)[1]), ar.operator, ar.value) for ar in account_rules]
+        return all(res) if glue_and else any(res)
+
+    def pass_extra_m(aid: str) -> bool:
+        if not extra_rules: return True
+        vals_d = extras_map.get(str(aid), {}) if extras_map else {}
+        glue_and = (filters.get("logic") or "AND") == "AND"
+        res = [_eval_qual_rule(vals_d.get(er.field), er.operator, er.value) for er in extra_rules]
+        return all(res) if glue_and else any(res)
+
+    _root_and = (filters.get("logic") or "AND") == "AND"
+    def passes_row_checks_m(acc: Dict[str, Any], qual_data: Dict[str, Any], aid: str) -> bool:
+        if _root_and:
+            return pass_site_m(acc) and pass_qual_m(qual_data) and pass_member_m(aid) and pass_account_m(aid) and pass_extra_m(aid)
+        checks = []
+        if site_rules:    checks.append(pass_site_m(acc))
+        if qual_rules:    checks.append(pass_qual_m(qual_data))
+        if member_rules:  checks.append(pass_member_m(aid))
+        if account_rules: checks.append(pass_account_m(aid))
+        if extra_rules:   checks.append(pass_extra_m(aid))
+        return any(checks) if checks else True
+
+    # -------- build rows --------
+    rows_out: List[Dict[str, Any]] = []
+    for o in opps:
+        aid = o.get("AccountId")
+        if not aid or aid not in acc_map: continue
+        acc = acc_map.get(aid) or {}
+        sid = site_id_by_acc.get(str(aid))
+        qual_data = qual_by_site.get(sid, {}) if sid else {}
+        if not passes_row_checks_m(acc, qual_data, aid): continue
+        data: Dict[str, Any] = {}
+        for k in requested_cols:
+            if k == "site.city":    data[k] = acc.get("city"); continue
+            if k == "site.country": data[k] = acc.get("country"); continue
+            if k.startswith("Account."):
+                sub = k.split(".",1)[1]
+                if sub == "Id":              data[k] = aid
+                elif sub == "Name":          data[k] = acc.get("name")
+                elif sub == "ShippingCity":  data[k] = acc.get("city")
+                elif sub == "ShippingCountry": data[k] = acc.get("country")
+                elif sub == "MemberName":    data[k] = member_by_acc.get(str(aid)) if need_member else None
+                elif sub == "HasPI":         data[k] = None
+                else: data[k] = (account_extras_by_acc.get(str(aid), {}) or {}).get(sub)
+                continue
+            if k.startswith("qual."):  data[k] = _qual_get(qual_data, k[5:]); continue
+            if k.startswith("sf."):    data[k] = o.get(k[3:]); continue
+            if k.startswith("extra."): data[k] = (extras_map.get(str(aid), {}) or {}).get(k); continue
+            data[k] = o.get(k)
+        _flatten_sf_inplace(data)
+        rows_out.append({
+            "account_id": aid,
+            "account_name": acc.get("name"),
+            "country": acc.get("country"),
+            "city": acc.get("city"),
+            "opportunity_type": _norm_type(o.get("Type")),
+            "distance_km": dist_by_acc.get(aid),
+            "data": data,
+        })
+
+    rows_out = collapse_rows_by_account(rows_out)
+
+    # inject extra.* / Account.* into returned rows
+    extra_batch_map: Dict[str, Dict[str, Any]] = {}
+    if need_batch_extras and acc_ids:
+        try: extra_batch_map = batch_fetch_account_extras(sf, list(acc_ids)) or {}
+        except Exception as e: log.warning("nearby-multi: batch_fetch_account_extras failed: %s", e)
+    map_extra = extra_batch_map if extra_batch_map else (batch_fetch_account_extras(sf, list(acc_ids)) if acc_ids else {})
+
+    if rows_out:
+        for r in rows_out:
+            aid = str(r.get("account_id") or "")
+            if not aid: continue
+            r.setdefault("data", {})
+            data = r["data"]
+            if need_member:
+                m = (extra_batch_map.get(aid, {}) or {}).get("extra.MemberName") or member_by_acc.get(aid)
+                data["Account.MemberName"] = m
+                if "extra.MemberName" not in data: data["extra.MemberName"] = m
+            # inject distance_km as a data column
+            data["distance_km"] = dist_by_acc.get(aid)
+
+    # -------- build points --------
+    badges: Dict[str, Dict[str, bool]] = {}
+    for r in rows_out:
+        aid = r.get("account_id")
+        if not aid: continue
+        b = badges.setdefault(aid, {"profiling": False, "qualification": False})
+        t = (r.get("opportunity_type") or "").lower()
+        if t in ("profiling","both"): b["profiling"] = True
+        if t in ("qualification","both"): b["qualification"] = True
+
+    acc_map_final = _build_account_map(sf, [r["account_id"] for r in rows_out if r.get("account_id")])
+    points_out: List[Dict[str, Any]] = []
+    for r in rows_out:
+        aid = r.get("account_id")
+        accd = acc_map_final.get(aid) or {}
+        lat, lng = accd.get("lat"), accd.get("lng")
+        if lat is None or lng is None:
+            glat, glng = await _geocode_city_country(accd.get("city"), accd.get("country"))
+            if glat is not None: lat, lng = glat, glng
+        if lat is None or lng is None:
+            s_info = site_by_acc.get(str(aid)) or {}
+            lat = lat if lat is not None else s_info.get("lat")
+            lng = lng if lng is not None else s_info.get("lng")
+        if (lat is None or lng is None) and site_by_acc.get(str(aid)):
+            glat, glng = await _geocode_city_country((site_by_acc.get(str(aid)) or {}).get("city"), (site_by_acc.get(str(aid)) or {}).get("country"))
+            if glat is not None: lat, lng = glat, glng
+        if lat is None or lng is None: continue
+        cs_flags = accd.get("cs") or {}
+        extras_entry = map_extra.get(aid) or {}
+        assignments_list = _split_assignment_names(extras_entry.get("extra.AssignmentsNames"))
+        assign_count = _safe_int(extras_entry.get("extra.AssignmentsCount"))
+        nd_meta = accd.get("nd_counts") or {}
+        points_out.append({
+            "lat": lat, "lng": lng,
+            "account_id": aid,
+            "account_name": accd.get("name") or r.get("account_name"),
+            "city": accd.get("city") or r.get("city"),
+            "country": accd.get("country") or r.get("country"),
+            "distance_km": dist_by_acc.get(aid),
+            "badges": badges.get(aid, {"profiling": False, "qualification": False}),
+            "cs": {"clinical": bool(cs_flags.get("clinical")), "referral": bool(cs_flags.get("referral")), "detect": bool(cs_flags.get("detect"))},
+            "meta": {
+                "pi_name": extras_entry.get("extra.PIName"),
+                "pi_email": extras_entry.get("extra.PIEmail"),
+                "pi_phone": extras_entry.get("extra.PIPhone"),
+                "assignments": assignments_list, "assignments_count": assign_count,
+                "nd_u18": nd_meta.get("u18"), "nd_o18": nd_meta.get("o18"),
+            },
+        })
+
+    log.info("nearby-multi: neighbors_all=%s rows=%s points=%s bases=%s max_km=%s", len(neighbors_all), len(rows_out), len(points_out), len(base_account_ids), max_km)
+
+    return {
+        "base": {"account_ids": base_account_ids, "count": len(base_account_ids)},
+        "neighbors_all": neighbors_all,
+        "points": points_out,
+        "rows": rows_out,
+        "meta": {"mode": "drive_km_multi", "max_km": max_km, "bases_count": len(base_account_ids)},
     }

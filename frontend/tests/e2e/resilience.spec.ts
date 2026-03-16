@@ -63,12 +63,9 @@ test.describe("Resilience — network errors and edge cases", () => {
   });
 
   test("RESIL-3: explorer search handles 401 gracefully", async ({ page }) => {
-    await page.route("**/api/explorer/bootstrap", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ points: [], rows: [], fields: [] }),
-      });
+    // explorerBootstrap() calls /api/salesforce/map/bootstrap (not /api/explorer/bootstrap)
+    await page.route("**/api/salesforce/map/bootstrap", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
     });
     await page.route("**/api/explorer/fields", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
@@ -78,11 +75,11 @@ test.describe("Resilience — network errors and edge cases", () => {
     });
 
     await page.goto("/explorer");
-    await page.locator(S.EXPLORER_SEARCH_BTN).click();
 
-    // Should show SF session expired warning (not crash)
-    await page.waitForTimeout(2000);
-    await expect(page.locator(S.EXPLORER_FILTER_PANEL)).toBeVisible();
+    // 401 from explorerSearch -> ExplorerView renders its own "session expired" banner.
+    // Filter panel should be visible (app didn't crash) and loading is done (no overlay).
+    await expect(page.locator(S.EXPLORER_FILTER_PANEL)).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/salesforce session expired/i)).toBeVisible({ timeout: 5000 });
   });
 
   test("RESIL-4: chat handles malformed SSE gracefully", async ({ page }) => {

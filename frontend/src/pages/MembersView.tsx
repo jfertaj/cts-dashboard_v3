@@ -45,7 +45,7 @@ const VALIDATED_ROLES = [
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function buildFilterGroup(
-  filterName: string,
+  filterNames: string[],
   filterCountry: string,
   filterLevel: string,
   filterProposed: string[],
@@ -53,14 +53,18 @@ function buildFilterGroup(
 ) {
   const rules: any[] = [];
 
-  if (filterName.trim()) {
-    rules.push({ field: "sf.Name", operator: "contains", value: filterName.trim() });
+  if (filterNames.length === 1) {
+    rules.push({ field: "sf.Name", operator: "contains", value: filterNames[0] });
+  } else if (filterNames.length > 1) {
+    rules.push({
+      logic: "OR",
+      rules: filterNames.map((n) => ({ field: "sf.Name", operator: "contains", value: n })),
+    });
   }
   if (filterCountry) {
     rules.push({ field: "site.country", operator: "equals", value: filterCountry });
   }
   if (filterLevel) {
-    // Match against whichever level field has data
     rules.push({
       logic: "OR",
       rules: [
@@ -92,7 +96,7 @@ function RoleBadge({ label, active }: { label: string; active: boolean }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function MembersView() {
+export default function MembersView({ prefetchedRows }: { prefetchedRows?: any[] | null }) {
   // Data state
   const [allRows, setAllRows] = useState<MemberRow[]>([]);
   const [viewRows, setViewRows] = useState<MemberRow[]>([]);
@@ -101,11 +105,15 @@ export default function MembersView() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filter state
-  const [filterName, setFilterName] = useState("");
+  const [filterNames, setFilterNames] = useState<string[]>([]);
+  const [nameInput, setNameInput] = useState("");
   const [filterCountry, setFilterCountry] = useState("");
   const [filterLevel, setFilterLevel] = useState("");
   const [filterProposed, setFilterProposed] = useState<string[]>([]);
   const [filterValidated, setFilterValidated] = useState<string[]>([]);
+
+  // Suggestions dropdown state
+  const [showNameSugg, setShowNameSugg] = useState(false);
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -123,6 +131,12 @@ export default function MembersView() {
   // ── Bootstrap load ───────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (prefetchedRows && prefetchedRows.length > 0) {
+      setAllRows(prefetchedRows);
+      setViewRows(prefetchedRows);
+      setLoading(false);
+      return;
+    }
     let alive = true;
     const run = async () => {
       setLoading(true);
@@ -143,7 +157,7 @@ export default function MembersView() {
     };
     run();
     return () => { alive = false; };
-  }, []);
+  }, [prefetchedRows]);
 
   // ── Country list derived from loaded data ────────────────────────────────
 
@@ -166,8 +180,19 @@ export default function MembersView() {
 
   // ── Search / filter ──────────────────────────────────────────────────────
 
+  // Name suggestions for autocomplete (excludes already-selected names)
+  const nameSuggestions = useMemo(() => {
+    if (!nameInput.trim()) return [];
+    const q = nameInput.toLowerCase();
+    return allRows
+      .map((r) => r.account_name)
+      .filter((name) => name.toLowerCase().includes(q) && !filterNames.includes(name))
+      .sort()
+      .slice(0, 10);
+  }, [nameInput, allRows, filterNames]);
+
   const hasFilters =
-    filterName.trim() !== "" ||
+    filterNames.length > 0 ||
     filterCountry !== "" ||
     filterLevel !== "" ||
     filterProposed.length > 0 ||
@@ -181,7 +206,7 @@ export default function MembersView() {
     }
     setSearching(true);
     try {
-      const fg = buildFilterGroup(filterName, filterCountry, filterLevel, filterProposed, filterValidated);
+      const fg = buildFilterGroup(filterNames, filterCountry, filterLevel, filterProposed, filterValidated);
       const res = await fetch("/api/members/search", {
         method: "POST",
         credentials: "include",
@@ -201,11 +226,13 @@ export default function MembersView() {
   };
 
   const handleClear = () => {
-    setFilterName("");
+    setFilterNames([]);
+    setNameInput("");
     setFilterCountry("");
     setFilterLevel("");
     setFilterProposed([]);
     setFilterValidated([]);
+    setShowNameSugg(false);
     setViewRows(allRows);
     setPageIndex(0);
   };
@@ -371,28 +398,82 @@ export default function MembersView() {
       <aside data-testid="members-filter-panel" className="w-64 flex-shrink-0 bg-white rounded-xl border shadow-sm p-4 space-y-4">
         <div className="text-sm font-semibold text-gray-700">Filters</div>
 
-        {/* Institution name */}
-        <div>
+        {/* Institution name — multi-tag autocomplete */}
+        <div className="relative">
           <label className="text-xs text-gray-500 block mb-1">Institution name</label>
+          {/* Selected tags */}
+          {filterNames.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              {filterNames.map((name) => (
+                <span
+                  key={name}
+                  className="inline-flex items-center gap-1 rounded-full bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 max-w-full"
+                  title={name}
+                >
+                  <span className="truncate max-w-[140px]">{name}</span>
+                  <button
+                    type="button"
+                    className="hover:text-red-600 flex-shrink-0"
+                    onClick={() => setFilterNames((prev) => prev.filter((n) => n !== name))}
+                    aria-label={`Remove ${name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {/* Text input */}
           <input
             data-testid="members-filter-name"
             type="text"
-            value={filterName}
-            onChange={(e) => setFilterName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            placeholder="Search…"
+            value={nameInput}
+            onChange={(e) => { setNameInput(e.target.value); setShowNameSugg(true); }}
+            onFocus={() => setShowNameSugg(true)}
+            onBlur={() => setTimeout(() => setShowNameSugg(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const trimmed = nameInput.trim();
+                if (trimmed && !filterNames.includes(trimmed)) {
+                  setFilterNames((prev) => [...prev, trimmed]);
+                }
+                setNameInput("");
+                setShowNameSugg(false);
+              }
+            }}
+            placeholder={filterNames.length > 0 ? "Add another…" : "Search… (Enter to add)"}
             className="w-full text-sm border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
+          {showNameSugg && nameSuggestions.length > 0 && (
+            <div className="absolute z-50 left-0 right-0 top-full mt-0.5 bg-white border rounded-md shadow-lg max-h-40 overflow-y-auto">
+              {nameSuggestions.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="w-full text-left px-2.5 py-1.5 text-sm hover:bg-blue-50 truncate"
+                  onMouseDown={() => {
+                    if (!filterNames.includes(name)) {
+                      setFilterNames((prev) => [...prev, name]);
+                    }
+                    setNameInput("");
+                    setShowNameSugg(false);
+                  }}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Country */}
+        {/* Country — native select */}
         <div>
           <label className="text-xs text-gray-500 block mb-1">Country</label>
           <select
             data-testid="members-filter-country"
             value={filterCountry}
             onChange={(e) => setFilterCountry(e.target.value)}
-            className="w-full text-sm border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+            className="w-full text-sm border rounded-md px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
           >
             <option value="">All countries</option>
             {countryOptions.map((iso) => (
@@ -401,14 +482,14 @@ export default function MembersView() {
           </select>
         </div>
 
-        {/* Membership level */}
+        {/* Membership level — native select */}
         <div>
           <label className="text-xs text-gray-500 block mb-1">Membership level</label>
           <select
             data-testid="members-filter-level"
             value={filterLevel}
             onChange={(e) => setFilterLevel(e.target.value)}
-            className="w-full text-sm border rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+            className="w-full text-sm border rounded-md px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
           >
             <option value="">All levels</option>
             {levelOptions.map((l) => (

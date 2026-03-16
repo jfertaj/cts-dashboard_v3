@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Literal, Optional, Any, Dict, Tuple
-import os, json, re
+import os, json, re, math
 import threading
 import queue as _std_queue
 import httpx
@@ -2537,11 +2537,14 @@ def tool_sites_with_any_activity(
     })
 
 
-def tool_list_all_activities(sf):
-    """List all Activities (RT_Activity/Activity Opportunities). Returns up to 15 names/ids."""
+def tool_list_all_activities(sf, name_like: str = None, account_name_like: str = None):
+    """List Activities (RT_Activity/Activity Opportunities).
+    If name_like is given, filters by Name LIKE '%name_like%' (up to 2000).
+    If account_name_like is given, filters by Account.Name LIKE '%account_name_like%' (sponsor/pharma company).
+    Otherwise returns up to 500 alphabetically."""
     if not sf:
         raise HTTPException(400, "No SF session")
-    
+
     import os
     rt_cfg = os.environ.get("SF_RT_ACTIVITY", "Activity,RT_Activity").strip()
     rt_list = [s.strip() for s in rt_cfg.split(",") if s.strip()] or ["Activity","RT_Activity"]
@@ -2550,26 +2553,32 @@ def tool_list_all_activities(sf):
     if "RT_Activity" not in rt_list:
         rt_list.append("RT_Activity")
     rt_vals = ", ".join([f"'{x}'" for x in rt_list])
-    
-    # Query Activities: include either RecordType or Type='Activity', cap to 15
-    soql = (
-        f"SELECT Id, Name "
-        f"FROM Opportunity "
-        f"WHERE (RecordType.DeveloperName IN ({rt_vals}) OR Type = 'Activity') "
-        f"ORDER BY Name LIMIT 15"
-    )
+
+    where = f"(RecordType.DeveloperName IN ({rt_vals}) OR Type = 'Activity')"
+    if name_like:
+        safe = name_like.replace("'", "\\'")
+        where += f" AND Name LIKE '%{safe}%'"
+    if account_name_like:
+        safe_acc = account_name_like.replace("'", "\\'")
+        where += f" AND Account.Name LIKE '%{safe_acc}%'"
+    limit = 2000 if (name_like or account_name_like) else 500
+
+    soql = f"SELECT Id, Name, Account.Name FROM Opportunity WHERE {where} ORDER BY Name LIMIT {limit}"
     recs = tool_salesforce_query(sf, soql).get("records", [])
-    
-    rows = []
-    for r in recs:
-        rows.append({
+
+    rows = [
+        {
             "activity_name": r.get("Name"),
+            "sponsor": (r.get("Account") or {}).get("Name") or "",
             "activity_id": r.get("Id"),
-        })
-    
+        }
+        for r in recs
+    ]
+
     return _normalize_table_for_ui({
         "columns": [
             {"key":"activity_name","label":"Activity"},
+            {"key":"sponsor","label":"Sponsor / Account"},
             {"key":"activity_id","label":"Activity Id"},
         ],
         "rows": rows,
@@ -3728,10 +3737,15 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "list_activities",
-            "description": "List all Activities (Opportunities with RecordType RT_Activity). Returns Opportunity Name, Account Name, Open Date, Stage, Type. Use this when user asks for 'list of activities' or 'what activities exist' or 'show all activities' WITHOUT asking about countries/sites.",
+            "description": "List all Activities (Opportunities with RecordType RT_Activity). Returns Activity Name, Sponsor/Account, Activity Id. Use this when user asks for 'list of activities', 'what activities exist', 'show all activities', or 'activities where [company] is the sponsor/account'. Can filter by sponsor/account name.",
             "parameters": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "account_name_like": {
+                        "type": "string",
+                        "description": "Filter activities by sponsor or account name (case-insensitive LIKE match). E.g. 'Sanofi' to find activities where the linked account/sponsor contains 'Sanofi'."
+                    }
+                }
             }
         }
     },
@@ -5212,8 +5226,37 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
         # INTENCIÓN DIRECTA: Activities
         try:
+            # 1c-pre) Follow-up sponsor swap — runs BEFORE _act_intent check so "the ones for Lilly"
+            # works even without the word "activit" in the query.
+            # Triggered when previous table was an activities table (has 'activity_name' column).
+            if sf:
+                _prev_cols_act = [c.get("key") if isinstance(c, dict) else str(c)
+                                  for c in (last_table_from_payload or {}).get("columns", [])]
+                if "activity_name" in _prev_cols_act:
+                    _m_fu = (
+                        re.search(r"\bfor\s+([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I) or
+                        re.search(r"\bnow\s+(?:for\s+|with\s+)?([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I) or
+                        re.search(r"\bwhat\s+about\s+([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I) or
+                        re.search(r"\bones?\s+(?:from|of|by)\s+([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I)
+                    )
+                    if _m_fu:
+                        _cand_fu = _m_fu.group(1).strip().rstrip(".,;?")
+                        _stop_fu = {"the", "a", "an", "all", "any", "some", "this", "that",
+                                    "them", "it", "these", "those", "here", "there"}
+                        if _cand_fu.lower() not in _stop_fu and len(_cand_fu) >= 2:
+                            table = tool_list_all_activities(sf, account_name_like=_cand_fu)
+                            rows = table.get("rows") or []
+                            ans = (f"Found <strong>{len(rows)}</strong> activit{'y' if len(rows)==1 else 'ies'} "
+                                   f"where the sponsor / account matches <em>{_cand_fu}</em>.")
+                            return {"answer": f"<p>{ans}</p>", "table": table}
+
             # Acepta 'activities', 'activity' y typos frecuentes como 'activites'
             _act_intent = bool(re.search(r"\bactivit(?:y|ies)\b", s) or re.search(r"\bactivites\b", s) or ("activit" in s))
+            # Skip activity handler if this is a "within N km of [activity/assignment] [name]" query
+            # e.g. "a 100 km de la actividad Safeguard" — handled by assignment-km handler below
+            # Also covers English "in a 120 km of any BetaPreserve activity"
+            if _act_intent and re.search(r"\d+\s*km\b", s) and re.search(r"actividad|within\s+\d+\s*km|\bin\s+a?\s*\d+\s*km", s):
+                _act_intent = False
             if _act_intent and not sf:
                 return {"answer": "<p>⚠️ Activity/enrollment data requires an active Salesforce session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
@@ -5265,16 +5308,47 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 # 1) Resto de intenciones con activities
                 # Distinguish: "list activities" vs "sites with activities" or "activities by country"
                 # Robust detection: tolerate typos like "acitvites"/"activties"
+                # 1b) Sponsor / account filter on activities
+                # "activities where Sanofi is the sponsor"
+                # "activities sponsored by Novo Nordisk"
+                # "activities with Sanofi as sponsor/account"
+                _sponsor_name: str | None = None
+                if re.search(r"\bsponsor\b", s, re.I):
+                    _m_sp = (
+                        re.search(r"where\s+([\w\s\-&']{2,40}?)\s+is\s+(?:the\s+)?sponsor", s, re.I) or
+                        re.search(r"sponsor(?:ed)?\s+by\s+([\w\s\-&']{2,40})", s, re.I) or
+                        re.search(r"with\s+([\w\s\-&']{2,40}?)\s+as\s+(?:the\s+)?sponsor", s, re.I) or
+                        re.search(r"([\w\s\-&']{2,40}?)\s+(?:is|as)\s+(?:the\s+)?sponsor", s, re.I)
+                    )
+                    if _m_sp:
+                        _cand_sp = _m_sp.group(1).strip().rstrip(".,;")
+                        _stop_sp = {"the", "a", "an", "all", "any", "some", "this", "that", "their"}
+                        if _cand_sp.lower() not in _stop_sp and len(_cand_sp) >= 2:
+                            _sponsor_name = _cand_sp
+                if _sponsor_name:
+                    table = tool_list_all_activities(sf, account_name_like=_sponsor_name)
+                    rows = table.get("rows") or []
+                    ans = (f"Found <strong>{len(rows)}</strong> activit{'y' if len(rows)==1 else 'ies'} "
+                           f"where the sponsor / account matches <em>{_sponsor_name}</em>.")
+                    return {"answer": f"<p>{ans}</p>", "table": table}
+
                 has_list_word = bool(re.search(r"\b(list|show|all|what|which|lista|listar|mostrar|muestra)\b", s))
                 has_activity_token = ("activ" in s) or bool(re.search(r"\bactivit(?:y|ies)\b|\bactividades\b", s))
                 mentions_group_or_location = bool(re.search(r"\b(site|sites|sitio|sitios|country|countries|ciudad|ciudades|pa[ií]s|pa[ií]ses|by|per|por)\b", s))
                 is_list_activities = has_list_word and has_activity_token and not mentions_group_or_location
-                
+
                 if is_list_activities:
-                    # Just list the Activities themselves (names only, max 15)
-                    table = tool_list_all_activities(sf)
+                    # Extract optional name filter: "all Fabulinus activities" → "Fabulinus"
+                    _act_name_m = re.search(r"\ball\s+([\w\s'\-]{2,40}?)\s+activit", qtxt, re.IGNORECASE)
+                    _act_name_filter: str = ""
+                    if _act_name_m:
+                        _cand = _act_name_m.group(1).strip()
+                        if _cand.lower() not in {"the", "any", "of", "some", "existing", "current", "available"}:
+                            _act_name_filter = _cand
+                    table = tool_list_all_activities(sf, name_like=_act_name_filter or None)
                     rows = table.get("rows") or []
-                    ans = f"Found {len(rows)} activity/activities."
+                    _filter_txt = f' matching "{_act_name_filter}"' if _act_name_filter else ""
+                    ans = f"Found {len(rows)} activit{'y' if len(rows)==1 else 'ies'}{_filter_txt}."
                     return {"answer": f"<p>{ans}</p>", "table": table}
                 else:
                     # Summary of activities (by activity name) → aggregated table (sites_total, countries)
@@ -5744,7 +5818,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     "AND Account.C_Type__c='Clinical' "
                     f"AND ({stage_cond}) "
                     "ORDER BY C_Number_of_Stage1_Individuals_followed__c DESC NULLS LAST "
-                    "LIMIT 200"
+                    "LIMIT 2000"
                 )
                 raw_s12 = tool_salesforce_query(sf, soql_s12)
                 recs_s12 = raw_s12.get("records", []) if isinstance(raw_s12, dict) else []
@@ -6683,49 +6757,204 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             logic = "AND"
         return {"logic": logic, "rules": rules}
 
-    # ===== Determinista: within X km OF [Assignment/Study Name] SITES =====
+    # ===== Determinista: within/in a X km OF [Assignment/Study Name] SITES/ACTIVITY =====
     # e.g. "sites within 100 km of Beta Preserve sites"
-    # Detects the "[Name] sites" pattern (assignment name, not a city) and builds
-    # a per-reference-site table showing nearby INNODIA sites.
+    #      "sites in a 120 km of any BetaPreserve activity"
+    # Detects the "[Name] sites/activity" pattern (assignment/activity name, not a city) and builds
+    # a deduplicated table of nearby INNODIA sites sorted by minimum driving distance.
     try:
         qtxt = (payload.messages[-1].content or "") if payload.messages else ""
-        # Match "within N km ... of [Name] sites" (Name = multi-word entity like "Beta Preserve")
+        # Match "within N km ... of [Name] sites"  (EN: "within 100 km of Beta Preserve sites")
+        # Also match Spanish: "a N km de ... [actividad/assignment/estudio] [Name]"
+        #   e.g. "a 100 km de cualquier implicado en la actividad Safeguard"
+        #        "sitios a 100 km de los participantes en el assignment Baricade"
         m_assign_km = re.search(
-            r"within\s*(\d{2,4})\s*km\b.{0,80}\bof\s+([\w\s'\-]{2,40?}?)\s+(?:study\s+|trial\s+|clinical\s+)?sites?\b",
+            r"(?:within|in\s+a?\s*)(\d{2,4})\s*km\b.{0,80}\bof\s+(?:any\s+)?([\w\s',\-]{2,60}?)\s+(?:study\s+|trial\s+|clinical\s+)?(?:sites?|activit(?:y|ies))\b",
             qtxt, re.IGNORECASE,
         )
+        if not m_assign_km:
+            # P1b: inverted order — "[around|near|close to] NAME within/in a N km"
+            # e.g. "find all sites around BetaPreserve within 100 km"
+            #      "INNODIA sites near Safeguard activity within 80 km"
+            _m1b = re.search(
+                r"\b(?:around|near|close\s+to)\s+(?:any\s+)?([\w\s'\-]{2,40}?)\s*(?:activit(?:y|ies)|study|trial|sites?)?\s*(?:within|in\s+a?\s*)(\d{2,4})\s*km\b",
+                qtxt, re.IGNORECASE,
+            )
+            if _m1b:
+                # Clean up artifact: lazy name group may swallow keyword or "with" from "within"
+                # Order matters: strip "with" (from "within") first, then trailing activity keyword
+                _p1b_name = _m1b.group(1).strip()
+                _p1b_name = re.sub(r"\s+with$", "", _p1b_name, flags=re.IGNORECASE).strip()
+                _p1b_name = re.sub(r"\s+(?:activit(?:y|ies)|study|trial|sites?)\s*$", "", _p1b_name, flags=re.IGNORECASE).strip()
+                class _FakeMatchP1b:
+                    def __init__(self, km, name):
+                        self._km = km; self._name = name
+                    def group(self, i):
+                        return self._km if i == 1 else self._name
+                m_assign_km = _FakeMatchP1b(_m1b.group(2), _p1b_name)
+        if not m_assign_km:
+            # Spanish variant: "a N km de ... [actividad|assignment|estudio|trial] NAME"
+            m_assign_km = re.search(
+                r"\ba\s*(\d{2,4})\s*km\b.{0,100}\b(?:actividad|assignment|estudio|trial|activity)\s+([\w\s'\-]{2,40}?)\s*(?:\b(?:sites?|sitios?|centros?|implicados?|participantes?)\b|$)",
+                qtxt, re.IGNORECASE,
+            )
+            if not m_assign_km:
+                # Spanish variant 2: "... en la actividad NAME" + "a N km"
+                m_assign_km_name = re.search(
+                    r"\b(?:actividad|assignment|estudio|trial|activity)\s+([\w\s'\-]{2,40}?)\s*(?:\b(?:sites?|sitios?|centros?)\b|\?|$)",
+                    qtxt, re.IGNORECASE,
+                )
+                m_assign_km_dist = re.search(r"\ba\s*(\d{2,4})\s*km\b", qtxt, re.IGNORECASE)
+                if m_assign_km_name and m_assign_km_dist:
+                    class _FakeMatch:
+                        def __init__(self, km, name):
+                            self._km = km; self._name = name
+                        def group(self, i):
+                            return self._km if i == 1 else self._name
+                    m_assign_km = _FakeMatch(m_assign_km_dist.group(1), m_assign_km_name.group(1))
+        # Country adjective → ISO2 map for queries like "Beta Preserve italian sites"
+        _COUNTRY_ADJ_MAP = {
+            "italian": "IT", "spanish": "ES", "french": "FR", "german": "DE",
+            "british": "GB", "dutch": "NL", "belgian": "BE", "swiss": "CH",
+            "austrian": "AT", "swedish": "SE", "norwegian": "NO", "danish": "DK",
+            "finnish": "FI", "polish": "PL", "czech": "CZ", "romanian": "RO",
+            "hungarian": "HU", "portuguese": "PT", "greek": "GR", "turkish": "TR",
+        }
         if m_assign_km and sf and db is not None:
             _km_limit = float(m_assign_km.group(1))
-            _assign_name = m_assign_km.group(2).strip().strip("the ").strip()
+            _assign_name = m_assign_km.group(2).strip()
+            # Remove leading "the " properly (str.strip("the ") removes individual chars, not substring)
+            if _assign_name.lower().startswith("the "):
+                _assign_name = _assign_name[4:].strip()
+            # Un-CamelCase: "BetaPreserve" → "Beta Preserve" so it matches stored labels
+            _assign_name = re.sub(r'(?<=[a-z])(?=[A-Z])', ' ', _assign_name).strip()
+
+            # Strip trailing country adjective and remember it as a reference-site filter
+            # e.g. "Beta Preserve italian" → name="Beta Preserve", ref_country_iso="IT"
+            _ref_country_iso: str = ""
+            _words = _assign_name.split()
+            if _words and _words[-1].lower() in _COUNTRY_ADJ_MAP:
+                _ref_country_iso = _COUNTRY_ADJ_MAP[_words[-1].lower()]
+                _assign_name = " ".join(_words[:-1]).strip()
 
             # Step 1 — find reference sites via explorer search (Assignment.Name filter)
-            _assign_filter = {
-                "logic": "AND",
-                "rules": [{"field": "sf.Assignment.Name", "operator": "contains", "value": _assign_name}],
-            }
+            # NOTE: explorer_search only scans top-level rules for need_batch_extras, so nested
+            # OR groups for sf.Assignment.Name are NOT handled correctly. For multi-activity
+            # queries we make one search per activity and combine, which also gives us accurate
+            # _ref_activity tags per site.
+            _name_parts = [p.strip() for p in re.split(r'\s*[,/]\s*|\s+(?:or|and|y|o)\s+', _assign_name, flags=re.IGNORECASE) if p.strip()]
+            _display_name = " / ".join(_name_parts) if len(_name_parts) > 1 else _assign_name
             _req_headers: Dict[str, str] = {}
             if request:
                 _ck = request.headers.get("cookie")
                 if _ck: _req_headers["cookie"] = _ck
-            with httpx.Client(timeout=90.0) as _cli:
-                _ref_resp = _cli.post(
-                    f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}",
-                    json={"filters": _assign_filter},
-                    headers=_req_headers,
-                )
-            if _ref_resp.status_code >= 400:
-                raise Exception(f"explorer_search failed: {_ref_resp.status_code}")
-            _ref_json  = _ref_resp.json()
-            _ref_rows  = _ref_json.get("rows") or []
-            _ref_pts: Dict[str, tuple] = {
-                p["account_id"]: (float(p["lat"]), float(p["lng"]))
-                for p in (_ref_json.get("points") or [])
-                if p.get("account_id") and p.get("lat") and p.get("lng")
-            }
+
+            _ref_rows: list = []
+            _ref_pts: Dict[str, tuple] = {}
+            _ref_activity: Dict[str, str] = {}  # account_id → activity label(s)
+
+            for _part in _name_parts:
+                _part_rules: list = [{"field": "sf.Assignment.Name", "operator": "contains", "value": _part}]
+                if _ref_country_iso:
+                    _part_rules.append({"field": "site.country", "operator": "equals", "value": _ref_country_iso})
+                _part_filter = {"logic": "AND", "rules": _part_rules}
+                with httpx.Client(timeout=90.0) as _cli:
+                    _pr = _cli.post(
+                        f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}",
+                        # Request extra.AssignmentsNames so we can show specific activity names
+                        json={"filters": _part_filter, "columns": ["extra.AssignmentsNames"]},
+                        headers=_req_headers,
+                    )
+                if _pr.status_code >= 400:
+                    raise Exception(f"explorer_search failed: {_pr.status_code}")
+                _pj = _pr.json()
+                for _row in (_pj.get("rows") or []):
+                    _aid = str(_row.get("account_id", ""))
+                    # Resolve specific assignment name(s) from extra.AssignmentsNames
+                    # The field is stored as a "; "-separated string (e.g. "Fabulinus CTS Team - Part A; FABULINUS RP Network")
+                    _rdata = _row.get("data", {})
+                    _raw_acts = _rdata.get("extra.AssignmentsNames") or ""
+                    _racts = [a.strip() for a in str(_raw_acts).split(";") if a.strip()] if _raw_acts else []
+                    _matching = [a for a in _racts if _part.lower() in a.lower()]
+                    _specific_label = "; ".join(_matching) if _matching else _part
+                    if _aid in _ref_activity:
+                        # Site appears in multiple activities — extend label
+                        if _specific_label not in _ref_activity[_aid]:
+                            _ref_activity[_aid] += f" / {_specific_label}"
+                    else:
+                        _ref_activity[_aid] = _specific_label
+                        _ref_rows.append(_row)
+                for _pt in (_pj.get("points") or []):
+                    _paid = _pt.get("account_id")
+                    if _paid and _pt.get("lat") and _pt.get("lng") and _paid not in _ref_pts:
+                        _ref_pts[_paid] = (float(_pt["lat"]), float(_pt["lng"]))
 
             # Only proceed if we actually found sites with that assignment
             if _ref_rows:
-                # Step 2 — load all clinical site coordinates from local DB
+                # Step 2 — call /api/explorer/search/nearby-multi with all base account IDs
+                # This uses the full CTS account list (Opportunity records) as candidates,
+                # which is much more complete than the local DB Site table.
+                _base_ids = [str(r.get("account_id", "")) for r in _ref_rows if r.get("account_id")]
+                _nm_resp: Optional[Dict[str, Any]] = None
+                try:
+                    with httpx.Client(timeout=180.0) as _nm_cli:
+                        _nm_r = _nm_cli.post(
+                            f"http://127.0.0.1:8000/api/explorer/search/nearby-multi",
+                            json={
+                                "base_account_ids": _base_ids,
+                                "max_km": int(_km_limit),
+                                "filters": {"logic": "AND", "rules": []},
+                                "columns": [],
+                            },
+                            headers=_req_headers,
+                        )
+                    if _nm_r.status_code == 200:
+                        _nm_resp = _nm_r.json()
+                    else:
+                        _dbg("nearby-multi returned %s — falling back to local DB", _nm_r.status_code)
+                except Exception as _nm_e:
+                    _dbg("nearby-multi call failed: %s — falling back to local DB", _nm_e)
+
+                if _nm_resp is not None:
+                    _nm_rows = _nm_resp.get("rows") or []
+                    _flat_rows_out = sorted(
+                        [
+                            {
+                                "site": r.get("account_name", ""),
+                                "account_id": r.get("account_id", ""),
+                                "city": r.get("city", ""),
+                                "country": r.get("country", ""),
+                                "closest_ref": _display_name,
+                                "ref_activity": _display_name,
+                                "distance_km": r.get("data", {}).get("distance_km"),
+                            }
+                            for r in _nm_rows
+                        ],
+                        key=lambda x: (
+                            x.get("country") or "ZZ",
+                            x.get("distance_km") if isinstance(x.get("distance_km"), (int, float)) else 99999,
+                        ),
+                    )
+                    _dist_type = "driving distance"
+                    _country_qualifier = f" in {_ref_country_iso}" if _ref_country_iso else ""
+                    _cols = [
+                        {"key": "site",        "label": "INNODIA Site"},
+                        {"key": "city",        "label": "City"},
+                        {"key": "country",     "label": "Country"},
+                        {"key": "closest_ref", "label": f"Within {int(_km_limit)} km of {_display_name}"},
+                        {"key": "distance_km", "label": "Driving Distance (km)"},
+                    ]
+                    _ans = (
+                        f"<p>Found <strong>{len(_flat_rows_out)} INNODIA site{'s' if len(_flat_rows_out) != 1 else ''}</strong> "
+                        f"within <strong>{int(_km_limit)} km</strong> of at least one "
+                        f"<strong>{_display_name}</strong> site{_country_qualifier} "
+                        f"({_dist_type}). "
+                        f"The {len(_ref_rows)} <strong>{_display_name}</strong> reference sites are excluded from the results. "
+                        f"Sorted by country, then distance."
+                        f"</p>"
+                    )
+                    return {"answer": _ans, "table": {"columns": _cols, "rows": _flat_rows_out}}
+                # nearby-multi failed → fall back to local DB approach
                 from app.models.site import Site as _SiteM  # noqa
                 _all_sites = db.query(
                     _SiteM.salesforce_account_id,
@@ -6735,7 +6964,6 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _SiteM.latitude,
                     _SiteM.longitude,
                 ).filter(_SiteM.salesforce_account_id.isnot(None)).all()
-
                 def _hav2(la1, lo1, la2, lo2):
                     R = 6371.0
                     dlat = math.radians(la2 - la1)
@@ -6794,90 +7022,121 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
                 _use_drive = bool(_gkey)
 
-                # Step 3 — for each reference site find nearby sites (flat table)
-                _flat_rows: list = []
+                # Step 3 — for each reference site find nearby sites (parallelized)
                 _ref_ids = {str(r.get("account_id", "")) for r in _ref_rows}
-                for _ref in _ref_rows:
-                    _rid      = str(_ref.get("account_id", ""))
-                    _rname    = _ref.get("account_name", "")
-                    _rcountry = _ref.get("country", "")
-                    _rcity    = _ref.get("city", "")
-                    # Resolve reference coordinates (points from explorer > local DB)
-                    _rcoords = _ref_pts.get(_rid)
+
+                def _process_one_ref(_ref_item):
+                    """Process one reference site: find all INNODIA sites within _km_limit km."""
+                    _rid           = str(_ref_item.get("account_id", ""))
+                    _rname         = _ref_item.get("account_name", "")
+                    _rcountry      = _ref_item.get("country", "")
+                    _rcity         = _ref_item.get("city", "")
+                    _rref_activity = _ref_activity.get(_rid, _display_name)
+                    _rcoords       = _ref_pts.get(_rid)
                     if not _rcoords:
                         _rs = next((x for x in _all_sites if str(x.salesforce_account_id) == _rid), None)
                         if _rs and _rs.latitude and _rs.longitude:
                             _rcoords = (_rs.latitude, _rs.longitude)
                     if not _rcoords:
-                        _flat_rows.append({
-                            "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
-                            "nearby_site": "⚠ No coordinates", "nearby_city": "", "nearby_country": "",
-                            "distance_km": "—",
-                        })
-                        continue
+                        return [{"ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
+                                 "ref_activity": _rref_activity,
+                                 "nearby_site": "⚠ No coordinates", "nearby_city": "", "nearby_country": "", "distance_km": "—"}]
                     _rlat, _rlng = _rcoords
-
-                    # Haversine pre-filter: 2× limit (road distance > straight-line)
                     _candidates = [
                         _ns for _ns in _all_sites
                         if str(_ns.salesforce_account_id) not in _ref_ids
                         and _ns.latitude and _ns.longitude
                         and _hav2(_rlat, _rlng, float(_ns.latitude), float(_ns.longitude)) <= _km_limit * 2.0
                     ]
-
                     if _use_drive and _candidates:
-                        # Google Distance Matrix for actual driving distances
                         _dest_ll = [(float(_ns.latitude), float(_ns.longitude)) for _ns in _candidates]
                         _drive_dists = _drive_matrix_sync((_rlat, _rlng), _dest_ll)
                         _nearby = [
-                            (_drive_dists[_i], _candidates[_i].name or "", _candidates[_i].city or "", _candidates[_i].country or "")
+                            (_drive_dists[_i], _candidates[_i].name or "", _candidates[_i].city or "",
+                             _candidates[_i].country or "", str(_candidates[_i].salesforce_account_id or ""))
                             for _i in range(len(_candidates))
                             if _drive_dists[_i] is not None and _drive_dists[_i] <= _km_limit
                         ]
                     else:
-                        # Haversine fallback (no API key or no candidates)
                         _nearby = [
                             (_hav2(_rlat, _rlng, float(_ns.latitude), float(_ns.longitude)),
-                             _ns.name or "", _ns.city or "", _ns.country or "")
+                             _ns.name or "", _ns.city or "", _ns.country or "",
+                             str(_ns.salesforce_account_id or ""))
                             for _ns in _candidates
                         ]
                         _nearby = [x for x in _nearby if x[0] <= _km_limit]
-
                     _nearby.sort(key=lambda x: x[0])
                     if _nearby:
-                        for _d, _n, _nc, _nco in _nearby[:15]:
-                            _flat_rows.append({
-                                "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
-                                "nearby_site": _n, "nearby_city": _nc, "nearby_country": _nco,
-                                "distance_km": _d,
-                            })
-                    else:
-                        _flat_rows.append({
-                            "ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
-                            "nearby_site": f"— None within {int(_km_limit)} km —",
-                            "nearby_city": "", "nearby_country": "", "distance_km": "—",
-                        })
+                        return [{"ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
+                                 "ref_activity": _rref_activity,
+                                 "nearby_site": _n, "nearby_city": _nc, "nearby_country": _nco,
+                                 "nearby_account_id": _naid, "distance_km": _d}
+                                for _d, _n, _nc, _nco, _naid in _nearby[:15]]
+                    return [{"ref_site": _rname, "ref_country": _rcountry, "ref_city": _rcity,
+                             "ref_activity": _rref_activity,
+                             "nearby_site": f"— None within {int(_km_limit)} km —",
+                             "nearby_city": "", "nearby_country": "", "nearby_account_id": "", "distance_km": "—"}]
 
-                _dist_label = "Driving Distance (km)" if _use_drive else "Distance (km, straight-line)"
-                _cols = [
-                    {"key": "ref_site",       "label": f"{_assign_name} Site"},
-                    {"key": "ref_country",    "label": "Country"},
-                    {"key": "ref_city",       "label": "City"},
-                    {"key": "nearby_site",    "label": "Nearby INNODIA Site"},
-                    {"key": "nearby_city",    "label": "Nearby City"},
-                    {"key": "nearby_country", "label": "Nearby Country"},
-                    {"key": "distance_km",    "label": _dist_label},
-                ]
-                _n_with = len({r["ref_site"] for r in _flat_rows
-                               if r["nearby_site"] and "None" not in r["nearby_site"] and "⚠" not in r["nearby_site"]})
-                _dist_type = "driving distance" if _use_drive else "straight-line distance"
-                _ans = (
-                    f"<p>Found <strong>{len(_ref_rows)}</strong> sites with assignment "
-                    f"<strong>{_assign_name}</strong>. "
-                    f"<strong>{_n_with}</strong> of them have other INNODIA sites within "
-                    f"{int(_km_limit)} km ({_dist_type}).</p>"
+                from concurrent.futures import ThreadPoolExecutor as _TPEX
+                _flat_rows: list = []
+                with _TPEX(max_workers=min(len(_ref_rows), 12)) as _pool:
+                    for _ref_result in _pool.map(_process_one_ref, _ref_rows):
+                        _flat_rows.extend(_ref_result)
+
+                # Deduplicate: each INNODIA site appears once, keeping minimum distance
+                # and the name of the closest reference site (so users see WHY it qualifies)
+                _best: dict = {}
+                for _r in _flat_rows:
+                    _nk = _r.get("nearby_site", "")
+                    _nd = _r.get("distance_km")
+                    if not _nk or "None" in _nk or "⚠" in _nk:
+                        continue
+                    if _nk not in _best or (
+                        isinstance(_nd, (int, float))
+                        and isinstance(_best[_nk]["distance_km"], (int, float))
+                        and _nd < _best[_nk]["distance_km"]
+                    ):
+                        _best[_nk] = {
+                            "site": _nk,
+                            "account_id": _r.get("nearby_account_id", ""),
+                            "city": _r.get("nearby_city", ""),
+                            "country": _r.get("nearby_country", ""),
+                            "closest_ref": _r.get("ref_site", ""),
+                            "ref_activity": _r.get("ref_activity", _display_name),
+                            "distance_km": _nd,
+                        }
+                _flat_rows_out = sorted(
+                    _best.values(),
+                    key=lambda x: (
+                        x.get("country") or "ZZ",   # primary: country alphabetically
+                        x.get("distance_km") if isinstance(x.get("distance_km"), (int, float)) else 99999,
+                    ),
                 )
-                return {"answer": _ans, "table": {"columns": _cols, "rows": _flat_rows}}
+
+                _dist_label = "Driving Distance (km)" if _use_drive else "Distance (km)"
+                # Use short label for the reference column based on assignment name
+                _ref_label = f"Closest {_display_name} Site"
+                _cols = [
+                    {"key": "site",        "label": "INNODIA Site"},
+                    {"key": "city",        "label": "City"},
+                    {"key": "country",     "label": "Country"},
+                    {"key": "closest_ref", "label": _ref_label},
+                ]
+                if len(_name_parts) > 1:
+                    _cols.append({"key": "ref_activity", "label": "Activity"})
+                _cols.append({"key": "distance_km", "label": _dist_label})
+                _dist_type = "driving distance" if _use_drive else "straight-line distance"
+                _country_qualifier = f" in {_ref_country_iso}" if _ref_country_iso else ""
+                _ans = (
+                    f"<p>Found <strong>{len(_flat_rows_out)} INNODIA site{'s' if len(_flat_rows_out) != 1 else ''}</strong> "
+                    f"within <strong>{int(_km_limit)} km</strong> of at least one "
+                    f"<strong>{_display_name}</strong> site{_country_qualifier} "
+                    f"({_dist_type}). "
+                    f"The {len(_ref_rows)} <strong>{_display_name}</strong> reference sites are excluded from the results. "
+                    f"Sorted by country, then distance."
+                    f"</p>"
+                )
+                return {"answer": _ans, "table": {"columns": _cols, "rows": _flat_rows_out}}
             # _ref_rows empty → fall through to city-based handler
     except Exception as _e_assign_km:
         _dbg("WARN: within-km-of-assignment handler: %s", _e_assign_km)
@@ -6888,9 +7147,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         m_dist = re.search(r"(?:within|radius|radio|distancia|a)\s*(\d{2,4})\s*km\b", s)
         # city or reference site: "of <city>" or "of the clinical site of <city>"
         m_city = re.search(r"\b(?:of|from|de|desde)\s+(?:the\s+clinical\s+site\s+of\s+)?([a-zA-ZÀ-ÿ'\- ]{2,}?)(?:\s+(?:with|con)\b|\b)", s)
-        if m_dist and m_city and sf:
+        # Common English/Spanish words that look like a city after "of/from" but aren't
+        _NON_CITY_WORDS = {"any", "some", "all", "each", "every", "the", "these", "those",
+                           "any", "un", "una", "los", "las", "any", "sites", "site"}
+        _city_candidate = m_city.group(1).strip().strip(". ") if m_city else None
+        if _city_candidate and _city_candidate.lower().split()[0] in _NON_CITY_WORDS:
+            _city_candidate = None  # "of any …" / "of some …" — not a real city
+        if m_dist and _city_candidate and sf:
             max_km = float(m_dist.group(1))
-            city = m_city.group(1).strip().strip(". ")
+            city = _city_candidate
             # Try nearest_filtered_sites first (returns distance_km, more reliable)
             try:
                 _filters_p1 = _build_nearest_filters(qtxt)
@@ -7140,8 +7405,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         if _ctx_rows:
             _ctx_cols = [c.get("key") if isinstance(c, dict) else str(c)
                          for c in (last_table_from_payload.get("columns") or [])]
-            _ctx_sample = _ctx_rows if len(_ctx_rows) <= 50 else _ctx_rows[:10]
-            _ctx_label = "Full data" if len(_ctx_rows) <= 50 else f"Sample (first 10 of {len(_ctx_rows)} rows)"
+            # Send all rows up to 500 (≈9 000 tokens, <5% of context window)
+            # For larger tables send first 500 rows as a representative sample
+            _ctx_sample = _ctx_rows if len(_ctx_rows) <= 500 else _ctx_rows[:500]
+            _ctx_label = "Full data" if len(_ctx_rows) <= 500 else f"Sample (first 500 of {len(_ctx_rows)} rows)"
             msgs.append({
                 "role": "system",
                 "content": (
@@ -7893,7 +8160,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         if not sf:
                             msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
                         else:
-                            out_table = tool_list_all_activities(sf)
+                            _la_acc = (tool_args or {}).get("account_name_like")
+                            out_table = tool_list_all_activities(sf, account_name_like=_la_acc or None)
                             last_table = out_table
                             msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
                     except Exception as ee:
