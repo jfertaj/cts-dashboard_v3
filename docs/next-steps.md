@@ -18,15 +18,16 @@ The `client` object is never called in any Moby code path. All LLM calls go thro
 
 ---
 
-## 2. Extract shared country-normalisation code into a single module
+## 2. ~~Extract shared country-normalisation code into a single module~~ — DONE (2026-03-17)
 
-**Observation:** The ISO2 ↔ country-name mapping exists in four separate places with different structures:
+**Observation:** The ISO2 ↔ country-name mapping now exists in **five** separate places:
 - `salesforce_explorer.py`: `_ISO2` (name→ISO2) and `_ISO2_TO_DISPLAY` (ISO2→name)
 - `members_explorer.py`: `_ISO2` (name→ISO2) and `_ISO2_TO_DISPLAY` (ISO2→name) — identical copy
 - `ai_chat.py`: `_COUNTRY_MAP` (name→(sf_name, ISO2)) — different dict structure
+- `moby_planner.py`: `_ALIAS_TO_ISO2` — most complete (includes adjective forms, Spanish names)
 - `frontend/src/lib/countryUtils.ts`: `ISO2_COUNTRY` (ISO2→name)
 
-**Why it matters:** `members_explorer.py` was added after `salesforce_explorer.py` and its `_ISO2` / `_ISO2_TO_DISPLAY` blocks were literally copied. Any addition of a new country (e.g., Turkey `TR` is in `salesforce_explorer.py` but Montenegro `ME` is only in `countryUtils.ts`) requires the same edit in at least 3 Python files.
+**Why it matters:** `members_explorer.py` was added after `salesforce_explorer.py` and its `_ISO2` / `_ISO2_TO_DISPLAY` blocks were literally copied. Adding a new country (e.g., Montenegro `ME`) requires the same edit in at least 3 Python files. `moby_planner.py`'s `_ALIAS_TO_ISO2` is the richest — use it as canonical source.
 
 **Files:** Create `backend/app/utils/country_norms.py`, move the canonical maps there, import in `salesforce_explorer.py` and `members_explorer.py`. Update `ai_chat.py`'s `_COUNTRY_MAP` to derive from the same source if practical.
 
