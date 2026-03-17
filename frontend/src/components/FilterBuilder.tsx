@@ -608,8 +608,8 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
 
               {/* Empty-value warning */}
               {isEmpty && (
-                <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-0.5" title="This filter has no value and will be ignored">
-                  ⚠ value required
+                <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-0.5" title="No value set — this filter will be skipped">
+                  ⚠ will be skipped
                 </span>
               )}
 

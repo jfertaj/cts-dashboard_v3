@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAuthenticationFailed
+from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAuthenticationFailed, SalesforceMalformedRequest
 
 from app.services.salesforce_oauth import (
     COOKIE_NAME, unsign_value, get_salesforce_from_session_id,
@@ -41,6 +41,8 @@ def _sf_query(sf, soql: str) -> List[Dict]:
         return res.get("records", [])
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
         raise HTTPException(status_code=401, detail="Salesforce session expired")
+    except SalesforceMalformedRequest as e:
+        raise HTTPException(status_code=400, detail=f"Invalid query: {e}")
     except Exception as e:
         log.exception("SF query failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Salesforce query failed: {e}")
@@ -406,6 +408,10 @@ def members_search(request: Request, body: SearchRequest):
 @router.get("/{account_id}/detail")
 def member_detail(account_id: str, request: Request):
     """Return full detail for one Member: contacts + SubAccounts + their contacts."""
+    # Validate SF ID format (15 or 18 alphanumeric chars)
+    if not re.fullmatch(r"[A-Za-z0-9]{15,18}", account_id):
+        raise HTTPException(status_code=404, detail="Member not found")
+
     sf = _get_sf(request)
 
     # --- Member account basic info (from cache) ---
