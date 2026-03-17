@@ -23,6 +23,16 @@ from app.routers.salesforce_explorer import _build_account_map
 from app.services.sf_labels import humanize_headers
 from app.utils.soql_helpers import build_followup_accounts_query
 import anthropic as _anthropic_sdk
+from app.routers.moby_planner import (
+    parse_query_plan,
+    plan_to_system_hint,
+    can_short_circuit,
+    plan_to_filter_group,
+    can_followup_merge,
+    merge_with_last_filters,
+    build_clarification,
+    validate_filter_group,
+)
 
 DEBUG = os.environ.get("AI_CHAT_DEBUG", "0") == "1"
 INDEX_REFRESH_SEC = int(os.environ.get("AI_INDEX_REFRESH_SEC", "600"))
@@ -95,7 +105,9 @@ ALLOWED_CTES = {"scored", "q", "site_rows", "ranked"}
 ALLOWED_TABLES = {
     "public.sites", "sites",
     "public.site_qual", "site_qual",
-    "public.profiling_kv", "profiling_kv",
+    # profiling_kv excluded: table is empty (sync not yet wired to startup).
+    # Kept in rank_sites internal path but blocked from Claude-generated SQL
+    # to avoid confusing 0-row results. Re-add when sync is active.
     "public.questionnaires", "questionnaires",
     "public.sections", "sections",
     "public.questions", "questions",
@@ -1084,6 +1096,23 @@ def tool_explorer_search(
     Proxy interno al endpoint /api/explorer/search.
     Acepta FilterGroup con reglas qual.*, sf.* y site.* y devuelve una tabla unificada.
     """
+    # Phase 4: validate FilterGroup before executing — surface errors to Claude so it can fix them
+    if filters:
+        _vl_errors = validate_filter_group(filters)
+        if _vl_errors:
+            _dbg("WARN: invalid FilterGroup from tool call: %s", _vl_errors)
+            return {
+                "error": "invalid_filter_group",
+                "validation_errors": _vl_errors,
+                "message": (
+                    f"The filter group has {len(_vl_errors)} validation error(s): "
+                    + "; ".join(_vl_errors[:5])
+                    + ". Please correct the filters and try again."
+                ),
+                "rows": [],
+                "columns": [],
+            }
+
     url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
     # Columnas por defecto si no se especifican
     default_cols = [
@@ -2326,6 +2355,11 @@ def tool_sites_by_activity(
         variants = {nm}
         try:
             variants.update({nm.lower(), nm.upper(), nm.title()})
+            # Fuzzy: strip doubled consonants (e.g. "barricade" → "baricade")
+            _dedup = re.sub(r'([bcdfghjklmnpqrstvwxyz])\1+', r'\1', nm.lower(), flags=re.I)
+            if _dedup != nm.lower():
+                variants.add(_dedup)
+                variants.add(_dedup.title())
         except Exception:
             pass
         like_parts = [f"C_Opportunity_Name__r.Name LIKE '%{v}%'" for v in sorted(variants) if v]
@@ -3563,16 +3597,19 @@ TOOLS_SPEC = [
                 "Search clinical trial sites using a FilterGroup (qual.*, sf.* and site.* fields). "
                 "Use for ANY site query that involves filtering by country, city, qual checklist fields, SF metrics, or combinations. "
                 "CRITICAL: ALWAYS express every filter as a rule — NEVER pass an empty filters object. "
-                "Country filter: {field:'site.country', operator:'equals', value:'Spain'}. "
+                "Country filter: {field:'site.country', operator:'equals', value:'ES'} (ISO-2 codes). "
                 "City filter: {field:'site.city', operator:'equals', value:'Barcelona'}. "
+                "NESTED GROUPS: rules[] can contain sub-groups {logic, rules} for complex AND/OR. "
                 "Examples: "
-                "'sites in Spain' → filters={logic:'AND',rules:[{field:'site.country',operator:'equals',value:'Spain'}]}. "
-                "'sites in Germany and Italy' → filters={logic:'OR',rules:[{field:'site.country',operator:'equals',value:'Germany'},{field:'site.country',operator:'equals',value:'Italy'}]}. "
+                "'sites in Spain' → filters={logic:'AND',rules:[{field:'site.country',operator:'equals',value:'ES'}]}. "
+                "'Spain OR Italy with overnight' → filters={logic:'AND',rules:[{logic:'OR',rules:[{field:'site.country',op:'equals',value:'ES'},{field:'site.country',op:'equals',value:'IT'}]},{field:'qual.3_5_2__overnight_stay',operator:'equals',value:'Yes'}]}. "
+                "'(Germany AND overnight) OR (France AND pediatric)' → filters={logic:'OR',rules:[{logic:'AND',rules:[{field:'site.country',operator:'equals',value:'DE'},{field:'qual.3_5_2__overnight_stay',operator:'equals',value:'Yes'}]},{logic:'AND',rules:[{field:'site.country',operator:'equals',value:'FR'},{field:'qual.3_5_2__overnight_stay',operator:'is_not_empty'}]}]}. "
                 "'sites with pharmacy AND ND>50' → filters={logic:'AND',rules:[{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus',operator:'equals',value:'On-site'},{field:'sf.C_Number_of_new_T1D_diagnosed_O_18__c',operator:'>',value:50}]}. "
                 "Operators: equals, not_equals, >, >=, <, <=, contains, in, not_in, is_empty, is_not_empty, between. "
+                "ALWAYS use ISO-2 for country values: ES, IT, FR, DE, GB, BE, NL, PT, PL, CZ, SE, DK, NO, FI, AT, CH, IE. "
                 "qual.* keys: 'qual.<section_key>' (e.g. 'qual.3_6__is_your_pharmacy_on_site_or_off_campus'). "
                 "sf.* keys: 'sf.<ApiName>' (e.g. 'sf.C_Number_of_new_T1D_diagnosed_O_18__c'). "
-                "site.* keys: 'site.country', 'site.city'. "
+                "site.* keys: 'site.country' (ISO-2), 'site.city'. "
                 "After results you can call render_chart to visualize them."
             ),
             "parameters": {
@@ -3581,12 +3618,13 @@ TOOLS_SPEC = [
                     "filters": {
                         "type": "object",
                         "description": (
-                            "FilterGroup: {logic: 'AND'|'OR', rules: [{field, operator, value}, ...]}. "
-                            "Rules can be nested groups. "
-                            "Example: {logic:'AND', rules:["
-                            "{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'},"
-                            "{field:'sf.C_Number_of_ND_Patients_O_18__c', operator:'>', value:50}"
-                            "]}"
+                            "FilterGroup: {logic: 'AND'|'OR'|'<expr>', rules: [rule_or_group, ...]}. "
+                            "Each element in rules[] is either a leaf rule {field, operator, value} "
+                            "or a nested sub-group {logic:'AND'|'OR', rules:[...]}. "
+                            "Country values MUST be ISO-2 (e.g. 'ES', 'IT', 'DE', 'FR', 'GB'). "
+                            "Simple: {logic:'AND', rules:[{field:'site.country', operator:'equals', value:'ES'}]}. "
+                            "Multi-country OR: {logic:'AND', rules:[{logic:'OR', rules:[{field:'site.country',operator:'equals',value:'ES'},{field:'site.country',operator:'equals',value:'IT'}]}, {field:'qual.3_5_2__overnight_stay',operator:'equals',value:'Yes'}]}. "
+                            "Grouped: {logic:'OR', rules:[{logic:'AND', rules:[...]}, {logic:'AND', rules:[...]}]}."
                         )
                     },
                     "columns": {
@@ -3991,19 +4029,9 @@ SCHEMA_HINT = """
 POSTGRES (warehouse):
 - public.sites(id, name, street, city, country, postcode, latitude, longitude, salesforce_account_id)
 - public.site_qual(site_id -> sites.id, data JSONB)  // Qualification flattened key→value.
-- public.profiling_kv(site_id -> sites.id, key TEXT, value TEXT)  // Profiling key-value store.
-  Frequent keys:
-    'C_Aware_of_any_Screening_Program__c', 'C_Center_for_Running_Early_Diagnosis__c',
-    'C_Number_of_Stage1_Individuals_followed__c', 'C_Number_of_Stage2_Individuals_followed__c',
-    'C_Number_of_T1D_Patients_currently_U_18__c', 'C_Number_of_T1D_Patients_currently_O_18__c',
-    'C_Number_of_new_T1D_diagnosed_U_18__c', 'C_Number_of_new_T1D_diagnosed_O_18__c',
-    plus many comments (keys containing 'comment').
   JSONB tips:
     - Safe casts, e.g. COALESCE(NULLIF(sq.data->>'C_Number_of_T1D_Patients_currently_U_18__c','')::int, 0) AS t1d_u18
     - For YES/NO strings, normalize to LOWER and compare to 'yes'.
-  PROFILING_KV tips:
-    - Use LEFT JOIN profiling_kv ON profiling_kv.site_id = sites.id AND profiling_kv.key = :key
-    - Numeric cast: COALESCE(NULLIF(regexp_replace(profiling_kv.value,'[^0-9\\.\\-]','', 'g'),'')::numeric,0)
 
 SALESFORCE (runtime):
 - salesforce_query supports: Opportunity, Account, Contact, AccountContactRelation
@@ -4213,14 +4241,17 @@ Use `explorer_search` when the query mixes qualification checklist fields (qual.
 This tool calls the Explorer's filter engine which handles the JOIN internally — do NOT use sql_query + salesforce_query separately for these.
 
 COUNTRY/CITY FILTERS: Always add them as explicit rules — NEVER pass empty filters when a country or city is mentioned.
+ALWAYS use ISO-2 country codes in site.country rules: ES=Spain, IT=Italy, FR=France, DE=Germany, GB=UK, BE=Belgium, NL=Netherlands, PT=Portugal, PL=Poland, CZ=Czech Republic, SE=Sweden, DK=Denmark, NO=Norway, FI=Finland, AT=Austria, CH=Switzerland, IE=Ireland.
 • "Sites in Spain" / "show me all Spanish sites" / "all centers in Spain"
   → explorer_search(filters={{logic:'AND', rules:[
-      {{field:'site.country', operator:'equals', value:'Spain'}}
+      {{field:'site.country', operator:'equals', value:'ES'}}
     ]}})
 • "Sites in Germany and Italy"
-  → explorer_search(filters={{logic:'OR', rules:[
-      {{field:'site.country', operator:'equals', value:'Germany'}},
-      {{field:'site.country', operator:'equals', value:'Italy'}}
+  → explorer_search(filters={{logic:'AND', rules:[
+      {{logic:'OR', rules:[
+        {{field:'site.country', operator:'equals', value:'DE'}},
+        {{field:'site.country', operator:'equals', value:'IT'}}
+      ]}}
     ]}})
 • "Sites in Spain" (with no other filters) → still use explorer_search with the country rule, NOT empty filters.
   WRONG: explorer_search(filters={{}})  ← NEVER do this when a country is mentioned
@@ -4268,6 +4299,56 @@ KEY sf field keys for explorer_search:
 - Stage 1: sf.C_Number_of_Stage1_Individuals_followed__c
 - HLA typing: sf.C_Is_HLA_typing_performed__c  (value: 'Yes')
 - Country: sf.Account.ShippingCountry  OR  site.country
+
+**BLOCK 9b: Complex grouped filter logic (nested AND/OR)**
+Rules in explorer_search can contain nested sub-groups {{logic, rules}} for full boolean logic.
+Use this for queries that mix country and clinical criteria with mixed AND/OR semantics.
+
+• "Sites in Spain OR Italy, but only with overnight stay"
+  → The "but only" means the overnight constraint applies to ALL results (AND at top).
+  → The country choice is OR (either Spain or Italy counts).
+  → explorer_search(filters={{logic:'AND', rules:[
+      {{logic:'OR', rules:[
+        {{field:'site.country', operator:'equals', value:'ES'}},
+        {{field:'site.country', operator:'equals', value:'IT'}}
+      ]}},
+      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}}
+    ]}})
+
+• "(Germany AND overnight stay) OR (France AND pediatric support)"
+  → Two independent profiles; either one qualifies a site.
+  → explorer_search(filters={{logic:'OR', rules:[
+      {{logic:'AND', rules:[
+        {{field:'site.country', operator:'equals', value:'DE'}},
+        {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}}
+      ]}},
+      {{logic:'AND', rules:[
+        {{field:'site.country', operator:'equals', value:'FR'}},
+        {{field:'qual.3_5_2__overnight_stay', operator:'is_not_empty'}}
+      ]}}
+    ]}})
+
+• "Spain or Italy with Stage 2 > 0, or any German site"
+  → (ES OR IT) AND Stage2>0, OR just DE
+  → explorer_search(filters={{logic:'OR', rules:[
+      {{logic:'AND', rules:[
+        {{logic:'OR', rules:[
+          {{field:'site.country', operator:'equals', value:'ES'}},
+          {{field:'site.country', operator:'equals', value:'IT'}}
+        ]}},
+        {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:0}}
+      ]}},
+      {{field:'site.country', operator:'equals', value:'DE'}}
+    ]}})
+
+• "Show records matching filter 1 AND 2, or filter 3" (expression style with flat rules)
+  → Use numbered expression in logic when rules are flat (no nesting needed).
+  → explorer_search(filters={{logic:'1 AND 2 OR 3', rules:[
+      {{field:'site.country', operator:'equals', value:'ES'}},
+      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}},
+      {{field:'sf.C_Number_of_Stage1_Individuals_followed__c', operator:'>', value:0}}
+    ]}})
+  NOTE: '1 AND 2 OR 3' evaluates as '(1 AND 2) OR 3' (AND binds tighter). Use nested groups for explicit parenthesization.
 
 AFTER explorer_search → you can call render_chart on the returned rows to produce a chart.
 FOLLOW-UP on explorer_search results → if user says "of those, only in Spain", call explorer_search again adding the new rule to the same filters.
@@ -4956,10 +5037,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     INDEX_SNIPPET = " | ".join(preview_items)
 
     # ===== Mini‑planificador determinista =====
-    def _try_planner(user_text: str, has_table: bool = False) -> Optional[Dict[str, Any]]:
+    def _try_planner(user_text: str, has_table: bool = False, last_filters: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
         if not user_text:
             return None
         s = user_text.lower()
+        # Whether the query clearly continues a prior turn (Phase 2 followup merge handles these)
+        _is_followup_prefix = bool(
+            re.match(r"^(and\b|also\b|y\b|también\b|tambien\b|ahora\b|además\b|ademas\b)", s.strip())
+            and last_filters
+        )
 
         # MATH OPERATIONS on last_table (sum, average, min, max, double) — no Claude/SF call needed
         try:
@@ -5257,10 +5343,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     and not re.search(r"\d+\s*km\b", s)
                     and re.search(r"\b(sites?|sitios?|centros?|all|show|ver|todos?|see|get|which)\b", s, re.I)):
                 _assign_name_m = (
-                    re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-]{2,50}?)\s+assignment", s, re.I) or
-                    re.search(r"in\s+(?:the\s+)?([\w\s'\-]{2,50}?)\s+assignment", s, re.I) or
-                    re.search(r"of\s+(?:the\s+)?([\w\s'\-]{2,50}?)\s+assignment", s, re.I) or
-                    re.search(r"(?:assignment|estudio|actividad)\s+(?:called\s+|named\s+)?['\"]?([\w\s'\-]{2,50}?)['\"]?\s*(?:\?|$)", s, re.I)
+                    re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
+                    re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
+                    re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
+                    re.search(r"(?:assignment|estudio|actividad)\s+(?:called\s+|named\s+)?['\"]?([\w\s'\-\(\)]{2,60}?)['\"]?\s*(?:\?|$)", s, re.I)
                 )
             if sf and _assign_name_m:
                 _asgn_name = _assign_name_m.group(1).strip().rstrip(".,;?")
@@ -5578,6 +5664,22 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                                                    {"title": "Sites per Activity"}, {})
                         return {"answer": f"<p>{len(rows_act)} activities found.</p>",
                                 "table": tbl_act, "visualization": viz_act.get("visualization")}
+                    # Catch unquoted "sites that belong to X activity" / "sites in X activity"
+                    _act_belong_m = (
+                        re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
+                        re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
+                        re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
+                        re.search(r"for\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I)
+                    )
+                    _stop_act = {"the", "a", "an", "all", "any", "some", "this", "that"}
+                    if _act_belong_m:
+                        _act_nm = _act_belong_m.group(1).strip().rstrip(".,;?")
+                        if _act_nm.lower() not in _stop_act and len(_act_nm) >= 2:
+                            byname = tool_sites_by_activity(sf, name=_act_nm, countries=countries2 or None, exact=False)
+                            rows_bn = byname.get("rows") or []
+                            if rows_bn:
+                                return {"answer": f"<p>Found <strong>{len(rows_bn)}</strong> site(s) participating in <em>{_act_nm}</em>.</p>", "table": byname}
+
                     # Otherwise list sites with activities (with optional country filter)
                     table = tool_sites_with_any_activity(sf, countries=countries2 or None)
                     rows = table.get("rows") or []
@@ -5831,10 +5933,12 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             asks_sites = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b", s))
             # If query asks for nearest/closest, skip deterministic handler → let Gemini use nearest_filtered_sites tool
             _has_nearest = bool(re.search(r"\bnearest\b|\bclosest\b|\bnear\b|\bcerca\b|\bpróximo[s]?\b|\bproximite\b|\bvicino\b|\bnähe\b|\bnahe\b", s))
+            # If query references specific countries, skip → let Phase 1 planner build the correct country+stage FilterGroup
+            _s12_has_country = any(k in s for k in _COUNTRY_MAP)
             if (has_s1 or has_s2) and not _has_nearest and not sf:
                 return {"answer": "<p>⚠️ Stage 1/2 patient data is stored in Salesforce and requires an active session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
-            if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest:
+            if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest and not _s12_has_country:
                 stage_cond_parts = []
                 if has_s1:
                     stage_cond_parts.append("C_Number_of_Stage1_Individuals_followed__c > 0")
@@ -6092,6 +6196,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             asks_country_sites = bool(re.search(
                 r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
             ))
+            # Skip if this is a followup query — Phase 2 merge handles "and also Germany" etc.
+            if _is_followup_prefix:
+                asks_country_sites = False
             if asks_country_sites:
                 # Match ALL countries in query (deduplicate by sf_name)
                 _matched_countries: List[Tuple[str, str]] = []  # [(sf_name, iso), ...]
@@ -6128,10 +6235,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     ]
                     tbl_country_fb = _normalize_table_for_ui({"columns": cols_country_fb, "rows": rows_country_fb})
                     _dbg("Planner country DB fallback (no SF): %d sites in %s", len(rows_country_fb), _matched_sf_name)
-                    # Include last_filters so multi-turn refinement queries work
+                    # Include last_filters (ISO2) so Phase 2 followup merge works correctly
                     _country_lf = {
                         "logic": "AND",
-                        "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
+                        "rules": [{"field": "site.country", "operator": "equals", "value": _matched_iso}]
                     }
                     return {
                         "answer": f"<p>Found <strong>{len(rows_country_fb)}</strong> clinical site(s) in "
@@ -6197,16 +6304,19 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _dbg("Planner country deterministic (SF query): %d sites in %s",
                          len(rows_country), _country_names_str)
                     # last_filters: OR for multi-country, single rule for one country
+                    # Use ISO2 codes so Phase 2 followup merge can combine them correctly
                     if len(_matched_countries) > 1:
                         _country_sf_lf = {
-                            "logic": "OR",
-                            "rules": [{"field": "site.country", "operator": "equals", "value": n}
-                                      for n, _ in _matched_countries]
+                            "logic": "AND",
+                            "rules": [{"logic": "OR", "rules": [
+                                {"field": "site.country", "operator": "equals", "value": iso2}
+                                for _, iso2 in _matched_countries
+                            ]}],
                         }
                     else:
                         _country_sf_lf = {
                             "logic": "AND",
-                            "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
+                            "rules": [{"field": "site.country", "operator": "equals", "value": _matched_iso}]
                         }
                     # Build a richer answer: top cities + key metrics summary
                     _city_counts: Dict[str, int] = {}
@@ -6662,9 +6772,51 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     except Exception as _qe:
         _dbg("WARN: quick summary pre-planner failed: %s", _qe)
 
+    # ===== Option B: pre-compute plan BEFORE _try_planner to catch followup merges =====
+    # This ensures "Germany too", "add Portugal", "what about Belgium?" etc. are handled
+    # as followup merges even when they don't start with an explicit followup prefix.
+    _qtxt_plan_pre = (payload.messages[-1].content or "") if payload.messages else ""
+    _qplan_pre: Optional[Dict[str, Any]] = None
+    _followup_handled = False
+    if payload.last_filters:
+        try:
+            _qplan_pre = parse_query_plan(
+                _qtxt_plan_pre, kindex,
+                last_filters=payload.last_filters,
+                last_table=last_table_from_payload,
+            )
+            if can_followup_merge(_qplan_pre, payload.last_filters):
+                _merged_fg_pre = merge_with_last_filters(_qplan_pre, payload.last_filters)
+                _dbg("PLAN Option-B followup merge (pre-planner): merged into %d rules", len(_merged_fg_pre.get("rules", [])))
+                _merged_result_pre = tool_explorer_search(request, _merged_fg_pre, columns=None)
+                _merged_rows_pre = (_merged_result_pre or {}).get("rows") or []
+                _merged_tbl_pre = _normalize_table_for_ui({
+                    "columns": _merged_result_pre.get("columns") or [],
+                    "rows":    _merged_rows_pre,
+                })
+                if _merged_rows_pre:
+                    _merged_ans_pre = f"Found <strong>{len(_merged_rows_pre)}</strong> site(s)"
+                    if _qplan_pre.get("countries"):
+                        _merged_ans_pre += f" now including {', '.join(_qplan_pre['countries'])}"
+                else:
+                    # 0 rows — return correct merged filter with empty table rather than
+                    # letting Claude generate a different (potentially wrong) filter.
+                    _merged_ans_pre = "No sites found with the combined filter"
+                    if _qplan_pre.get("countries"):
+                        _merged_ans_pre += f" (including {', '.join(_qplan_pre['countries'])})"
+                _followup_handled = True
+                return {
+                    "answer":       f"<p>{_merged_ans_pre}.</p>",
+                    "table":        _merged_tbl_pre,
+                    "last_filters": _merged_fg_pre,
+                }
+        except Exception as _pre_e:
+            _dbg("WARN: Option-B pre-planner followup failed: %s", _pre_e)
+
     planned = _try_planner(
         (payload.messages[-1].content if payload.messages else "") or "",
-        has_table=has_table_signal
+        has_table=has_table_signal,
+        last_filters=payload.last_filters,
     )
     if planned:
         return planned
@@ -7428,6 +7580,97 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     except Exception as _e:
         _dbg("WARN: nearest-sites fast-path failed: %s", _e)
 
+    # ===== Phase 1 + 2 Structured Planner =====
+    # Build a MobyPlan from the user query (pure regex + catalog, no LLM).
+    # Used to: (a) short-circuit high-confidence table queries directly via
+    # explorer_search, (b) inject a structured hint into Claude's system prompt,
+    # (c) merge followup queries into last_filters, (d) auto-clarify ambiguities.
+    _qtxt_plan = (payload.messages[-1].content or "") if payload.messages else ""
+    # Reuse pre-computed plan from Option B block (already computed when last_filters present)
+    if _qplan_pre is not None:
+        _qplan = _qplan_pre
+    else:
+        _qplan = parse_query_plan(
+            _qtxt_plan, kindex,
+            last_filters=payload.last_filters,
+            last_table=last_table_from_payload,
+        )
+    _dbg(
+        "PLAN: intent=%s conf=%.2f countries=%s filters=%d unresolved=%s",
+        _qplan["intent"], _qplan["confidence"], _qplan["countries"],
+        len(_qplan["filters"]), _qplan["unresolved_terms"],
+    )
+
+    # Phase 2a: Followup merge — combine new countries/filters with last_filters
+    # (skip if already handled by Option B pre-planner above)
+    if not _followup_handled and can_followup_merge(_qplan, payload.last_filters):
+        _merged_fg = merge_with_last_filters(_qplan, payload.last_filters)
+        _dbg("PLAN followup merge: merged into %d rules", len(_merged_fg.get("rules", [])))
+        try:
+            _merged_result = tool_explorer_search(request, _merged_fg, columns=None)
+            _merged_rows = (_merged_result or {}).get("rows") or []
+            if _merged_rows:
+                _merged_tbl = _normalize_table_for_ui({
+                    "columns": _merged_result.get("columns") or [],
+                    "rows":    _merged_rows,
+                })
+                _merged_ans = f"Found <strong>{len(_merged_rows)}</strong> site(s)"
+                if _qplan.get("countries"):
+                    _merged_ans += f" now including {', '.join(_qplan['countries'])}"
+                return {
+                    "answer":       f"<p>{_merged_ans}.</p>",
+                    "table":        _merged_tbl,
+                    "last_filters": _merged_fg,
+                }
+        except Exception as _merge_e:
+            _dbg("WARN: planner followup merge failed: %s", _merge_e)
+            # Fall through to short-circuit or Claude
+
+    # Phase 2b: Clarification — return structured clarify response for known ambiguities
+    _clarify = build_clarification(_qplan)
+    if _clarify:
+        _dbg("PLAN clarification triggered for: %s", _qplan["unresolved_terms"])
+        return _clarify
+
+    # Phase 1: Short-circuit — execute directly when plan is high-confidence table query
+    if can_short_circuit(_qplan):
+        _sc_fg = plan_to_filter_group(_qplan)
+        try:
+            _sc_cols = _qplan.get("requested_columns") or None
+            _sc_result = tool_explorer_search(request, _sc_fg, columns=_sc_cols)
+            _sc_rows = (_sc_result or {}).get("rows") or []
+            if _sc_rows:
+                _sc_tbl = _normalize_table_for_ui({
+                    "columns": _sc_result.get("columns") or [],
+                    "rows":    _sc_rows,
+                })
+                _sc_ans = f"Found <strong>{len(_sc_rows)}</strong> site(s)"
+                if _qplan.get("countries"):
+                    _sc_ans += f" in {', '.join(_qplan['countries'])}"
+                _dbg("PLAN short-circuit: %d rows returned", len(_sc_rows))
+                _sc_resp: Dict[str, Any] = {
+                    "answer":       f"<p>{_sc_ans}.</p>",
+                    "table":        _sc_tbl,
+                    "last_filters": _sc_fg,
+                }
+                # Phase 2c: CSV export — attach csv_data when user asked for export
+                if _qplan.get("needs_export"):
+                    import io, csv as _csv
+                    _csv_buf = io.StringIO()
+                    _all_cols = [c["key"] for c in (_sc_result.get("columns") or [])]
+                    _w = _csv.DictWriter(_csv_buf, fieldnames=["account_name"] + _all_cols, extrasaction="ignore")
+                    _w.writeheader()
+                    for _r in _sc_rows:
+                        _flat = {"account_name": _r.get("account_name", "")}
+                        _flat.update(_r.get("data", {}))
+                        _w.writerow(_flat)
+                    _sc_resp["csv_data"] = _csv_buf.getvalue()
+                    _dbg("PLAN short-circuit CSV: %d bytes", len(_sc_resp["csv_data"]))
+                return _sc_resp
+        except Exception as _sc_e:
+            _dbg("WARN: planner short-circuit failed: %s", _sc_e)
+            # Fall through to Claude
+
     msgs: List[Dict[str, Any]] = [{"role":"system","content":SYSTEM_PROMPT}]
     msgs.append({
         "role":"system",
@@ -7445,6 +7688,11 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 + json.dumps(payload.last_filters, ensure_ascii=False)
             )
         })
+
+    # Inject plan hint so Claude has pre-resolved intent, countries, and filters
+    _plan_hint = plan_to_system_hint(_qplan)
+    if _plan_hint:
+        msgs.append({"role": "system", "content": _plan_hint})
 
     # Inject a compact summary of the previous table so Claude can answer numeric follow-ups
     # (e.g. "what's the average?", "which has the highest?", "compare X vs Y") without re-fetching data.
