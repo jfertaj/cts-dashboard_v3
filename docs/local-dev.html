@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CTS Dashboard — Guía de desarrollo local</title>
+<style>
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3e;
+    --text:     #e2e8f0;
+    --muted:    #8892a4;
+    --accent:   #0072CE;
+    --accent2:  #7c3aed;
+    --green:    #22c55e;
+    --yellow:   #f59e0b;
+    --red:      #ef4444;
+    --code-bg:  #111827;
+    --code-text:#e5e7eb;
+    --inline-bg:#1e2433;
+    --radius:   8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.7;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  nav {
+    width: 240px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 24px 0;
+  }
+  nav .logo {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  nav .logo span {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+  }
+  nav .logo h2 { font-size: 13px; color: var(--muted); font-weight: 400; }
+  nav a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 20px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+    transition: all .15s;
+  }
+  nav a:hover { color: var(--text); background: rgba(255,255,255,.04); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,114,206,.08); }
+  nav .section-label {
+    padding: 14px 20px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ── Main ── */
+  main {
+    flex: 1;
+    max-width: 860px;
+    padding: 48px 56px;
+    min-width: 0;
+  }
+
+  /* ── Typography ── */
+  h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 40px; }
+  h2 {
+    font-size: 20px; font-weight: 700; color: #fff;
+    margin: 52px 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    scroll-margin-top: 24px;
+  }
+  h2:first-of-type { margin-top: 0; }
+  h3 { font-size: 15px; font-weight: 700; color: var(--text); margin: 28px 0 12px; }
+  p { margin-bottom: 14px; color: var(--text); }
+  strong { color: #fff; font-weight: 600; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Code ── */
+  code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: var(--inline-bg);
+    color: #93c5fd;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin: 14px 0 20px;
+    overflow-x: auto;
+    position: relative;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--code-text);
+    font-size: 13px;
+    line-height: 1.65;
+  }
+  .cmd { color: #86efac; }          /* green — shell commands */
+  .cmt { color: #6b7280; }          /* grey — comments */
+  .url { color: #67e8f9; }          /* cyan — URLs */
+  .flag{ color: #fcd34d; }          /* yellow — flags */
+  .str { color: #a5f3fc; }          /* light-cyan — strings */
+  .kw  { color: #c084fc; }          /* purple — keywords */
+
+  /* ── Tables ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 20px;
+    font-size: 14px;
+  }
+  th {
+    text-align: left;
+    padding: 9px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  td {
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: rgba(255,255,255,.02); }
+  td code { font-size: 12px; }
+
+  /* ── Callouts ── */
+  .callout {
+    border-left: 3px solid;
+    padding: 14px 16px;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    margin: 16px 0 20px;
+    font-size: 14px;
+  }
+  .callout-info  { border-color: var(--accent);  background: rgba(0,114,206,.08); }
+  .callout-warn  { border-color: var(--yellow);  background: rgba(245,158,11,.08); }
+  .callout-tip   { border-color: var(--green);   background: rgba(34,197,94,.08); }
+  .callout-title { font-weight: 700; margin-bottom: 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+  .callout-info  .callout-title { color: #60a5fa; }
+  .callout-warn  .callout-title { color: var(--yellow); }
+  .callout-tip   .callout-title { color: var(--green); }
+
+  /* ── Steps ── */
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 16px 0; }
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 16px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .steps li:last-child { border-bottom: none; }
+  .steps li::before {
+    content: counter(step);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px; font-weight: 700;
+    border-radius: 50%;
+    margin-top: 2px;
+  }
+  .steps li .step-body { flex: 1; }
+  .steps li .step-title { font-weight: 600; color: #fff; margin-bottom: 6px; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block;
+    font-size: 11px; font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+  .badge-new { background: var(--accent2); color: #fff; }
+  .badge-tip { background: var(--green); color: #052e16; }
+
+  /* ── Command grid (quick ref) ── */
+  .cmd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+  .cmd-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .cmd-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+  .cmd-card pre { background: transparent; border: none; padding: 0; margin: 0; }
+  .cmd-card pre code { font-size: 12px; color: #86efac; }
+
+  /* ── Feature cards ── */
+  .feature-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin: 16px 0;
+  }
+  .feature-card .fc-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  }
+  .feature-card .fc-num {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    font-weight: 700; font-size: 14px; flex-shrink: 0;
+  }
+  .feature-card .fc-title { font-weight: 700; color: #fff; font-size: 15px; }
+  .feature-card .fc-subtitle { font-size: 12px; color: var(--muted); }
+  .feature-card ol { padding-left: 20px; }
+  .feature-card ol li { margin-bottom: 6px; font-size: 14px; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    nav { display: none; }
+    main { padding: 28px 20px; }
+    .cmd-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<nav>
+  <div class="logo">
+    <span>CTS Dashboard</span>
+    <h2>Guía dev local</h2>
+  </div>
+  <div class="section-label">Setup</div>
+  <a href="#prerequisitos">Prerequisitos</a>
+  <a href="#primera-vez">Primera vez</a>
+  <a href="#uso-diario">Uso diario</a>
+  <div class="section-label">Autenticación</div>
+  <a href="#login-sf">Login Salesforce</a>
+  <a href="#moby">Moby AI</a>
+  <div class="section-label">Features</div>
+  <a href="#features-nuevas">Features nuevas</a>
+  <div class="section-label">Ops</div>
+  <a href="#logs">Logs y debug</a>
+  <a href="#referencia">Referencia rápida</a>
+  <a href="#troubleshooting">Troubleshooting</a>
+</nav>
+
+<!-- ── Main ── -->
+<main>
+
+<h1>Guía de desarrollo local</h1>
+<p class="subtitle">CTS Dashboard v3 · FastAPI + React/Vite + PostgreSQL + Salesforce</p>
+
+<!-- ─────────────── PREREQUISITOS ─────────────── -->
+<h2 id="prerequisitos">Prerequisitos</h2>
+
+<table>
+  <thead><tr><th>Herramienta</th><th>Versión</th><th>Comprobar</th></tr></thead>
+  <tbody>
+    <tr><td>Python</td><td>3.10+</td><td><code>python3 --version</code></td></tr>
+    <tr><td>Node.js</td><td>18+</td><td><code>node --version</code></td></tr>
+    <tr><td>npm</td><td>9+</td><td><code>npm --version</code></td></tr>
+    <tr><td>AWS CLI v2</td><td>2.x</td><td><code>aws --version</code></td></tr>
+    <tr><td>SSO profile <code>juan</code></td><td>configurado</td><td><code>aws configure list-profiles</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Instalar dependencias (una sola vez)</h3>
+<pre><code><span class="cmt"># Backend (Python)</span>
+<span class="cmd">pip install -r backend/requirements.txt</span>
+
+<span class="cmt"># Frontend (Node)</span>
+<span class="cmd">cd frontend && npm install</span></code></pre>
+
+<!-- ─────────────── PRIMERA VEZ ─────────────── -->
+<h2 id="primera-vez">Primera vez</h2>
+
+<ol class="steps">
+  <li>
+    <div class="step-body">
+      <div class="step-title">AWS SSO Login</div>
+      <pre><code><span class="cmd">aws sso login --profile juan</span></code></pre>
+      <p>Se abre el navegador → autorizas → vuelves a la terminal. Las credenciales duran ~8 horas.</p>
+    </div>
+  </li>
+  <li>
+    <div class="step-body">
+      <div class="step-title">Generar <code>backend/.env</code></div>
+      <pre><code><span class="cmd">python3 scripts/gen_local_env.py</span></code></pre>
+      <p>Lee secretos de AWS Secrets Manager (DB, Salesforce OAuth, Google API, Anthropic) y los escribe en <code>backend/.env</code>. El archivo está en <code>.gitignore</code> y nunca se commitea.</p>
+    </div>
+  </li>
+  <li>
+    <div class="step-body">
+      <div class="step-title">Arrancar todo</div>
+      <pre><code><span class="cmt"># Primera vez — hace SSO login + genera .env + arranca</span>
+<span class="cmd">bash scripts/dev.sh --login</span></code></pre>
+    </div>
+  </li>
+  <li>
+    <div class="step-body">
+      <div class="step-title">Login en la aplicación (OAuth Salesforce)</div>
+      <p>Ve a <a href="http://localhost:5173" target="_blank">http://localhost:5173</a> → haz clic en <strong>Login</strong> en el header → OAuth de Salesforce → vuelves logado automáticamente.</p>
+    </div>
+  </li>
+</ol>
+
+<div class="callout callout-tip">
+  <div class="callout-title">Atajo</div>
+  <code>bash scripts/dev.sh --login</code> hace los tres primeros pasos en una sola línea: SSO login, gen .env, arrancar.
+</div>
+
+<!-- ─────────────── USO DIARIO ─────────────── -->
+<h2 id="uso-diario">Uso diario</h2>
+
+<pre><code><span class="cmt"># .env ya existe y sigue válido:</span>
+<span class="cmd">bash scripts/dev.sh</span>
+
+<span class="cmt"># Si quieres refrescar los secretos antes de arrancar:</span>
+<span class="cmd">bash scripts/dev.sh --setup</span>
+
+<span class="cmt"># SSO expirado (pasan ~8h):</span>
+<span class="cmd">bash scripts/dev.sh --login</span></code></pre>
+
+<p>El script comprueba prerequisitos, mata procesos huérfanos en los puertos 8000/5173, arranca el backend con 4 workers, espera a que responda, arranca el frontend (Vite), y abre el navegador automáticamente.</p>
+
+<h3>URLs</h3>
+<table>
+  <thead><tr><th>Servicio</th><th>URL</th></tr></thead>
+  <tbody>
+    <tr><td>App (frontend)</td><td><a href="http://localhost:5173" target="_blank"><code>http://localhost:5173</code></a></td></tr>
+    <tr><td>Backend API</td><td><a href="http://localhost:8000" target="_blank"><code>http://localhost:8000</code></a></td></tr>
+    <tr><td>Swagger / OpenAPI</td><td><a href="http://localhost:8000/docs" target="_blank"><code>http://localhost:8000/docs</code></a></td></tr>
+  </tbody>
+</table>
+
+<h3>Cambios de código</h3>
+<table>
+  <thead><tr><th>Capa</th><th>Hot-reload</th><th>Qué hacer</th></tr></thead>
+  <tbody>
+    <tr><td>Frontend (React/Vite)</td><td>✅ Automático</td><td>Solo guardar el archivo</td></tr>
+    <tr><td>Backend (FastAPI/Python)</td><td>❌ No</td><td>Ctrl+C → <code>bash scripts/dev.sh</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout callout-warn">
+  <div class="callout-title">⚠ 4 workers obligatorios</div>
+  El backend necesita 4 workers (no 1) porque Moby hace llamadas HTTP internas a <code>/api/explorer/search</code> desde dentro del mismo proceso. Con un solo worker esa llamada hace deadlock.
+</div>
+
+<!-- ─────────────── LOGIN SF ─────────────── -->
+<h2 id="login-sf">Login con Salesforce</h2>
+
+<p>El backend usa OAuth 2.0 con refresh token. El flujo completo es:</p>
+
+<pre><code>Navegador → <span class="url">http://localhost:5173</span>  → click Login
+         → <span class="url">http://localhost:8000/api/salesforce/auth</span>
+         → redirect → <span class="url">login.salesforce.com</span>  → autorizas
+         → callback → <span class="url">http://localhost:8000/api/salesforce/oauth/callback</span>
+         → sesión guardada en DB (tabla <span class="str">sf_sessions</span>)
+         → redirect → <span class="url">http://localhost:5173</span></code></pre>
+
+<div class="callout callout-info">
+  <div class="callout-title">Persistencia de sesión</div>
+  La sesión se guarda en PostgreSQL (<code>sf_sessions</code>), por lo que sobrevive reinicios del backend. Sin embargo, el token de acceso de Salesforce expira en ~15–20 min de inactividad. Si ves errores "Salesforce session required", simplemente vuelve a hacer Login.
+</div>
+
+<h3>Verificar sesión activa</h3>
+<pre><code><span class="cmd">curl -s http://localhost:8000/api/salesforce/me \
+  --cookie "sf_session=&lt;valor_de_la_cookie&gt;" | jq .</span></code></pre>
+
+<!-- ─────────────── MOBY ─────────────── -->
+<h2 id="moby">Moby AI</h2>
+
+<p>Moby usa <strong>claude-sonnet-4-6</strong> vía API de Anthropic. Requiere:</p>
+<ul style="margin: 0 0 16px 20px;">
+  <li>Sesión Salesforce activa (para consultar datos en tiempo real)</li>
+  <li><code>ANTHROPIC_API_KEY</code> en <code>backend/.env</code> (se obtiene automáticamente)</li>
+</ul>
+
+<h3>Cómo usarlo</h3>
+<ol class="steps">
+  <li><div class="step-body"><div class="step-title">Ir a la tab Chat</div></div></li>
+  <li><div class="step-body"><div class="step-title">Escribir en español o inglés</div>
+    <pre><code>¿Cuántos sitios Stage 2 hay en España?
+List the 10 closest sites to Madrid with overnight stay
+dame sitios a menos de 150 km de Berlin con farmacia</code></pre>
+  </div></li>
+  <li><div class="step-body"><div class="step-title">Ver la respuesta en streaming</div>
+    <p>Las respuestas aparecen en tiempo real con el cursor <code>▋</code>. Consultas complejas activan "extended thinking" (Moby tarda más pero da respuestas más precisas).</p>
+  </div></li>
+</ol>
+
+<!-- ─────────────── FEATURES ─────────────── -->
+<h2 id="features-nuevas">Features nuevas <span class="badge badge-new">NEW</span></h2>
+
+<div class="feature-card">
+  <div class="fc-header">
+    <div class="fc-num" style="background:#3730a3;color:#fff;">1</div>
+    <div>
+      <div class="fc-title">Members — Filtro multi-nombre</div>
+      <div class="fc-subtitle">Tab /members · filtro de Institution name por múltiples valores (OR)</div>
+    </div>
+  </div>
+  <ol>
+    <li>Ir a la tab <strong>Members</strong></li>
+    <li>En "Institution name": escribe <code>Munich</code> → pulsa <strong>Enter</strong> → aparece chip azul</li>
+    <li>Escribe <code>Leuven</code> → <strong>Enter</strong> → segundo chip</li>
+    <li>Haz clic en <strong>Search</strong> → solo aparecen instituciones que contienen "Munich" <em>o</em> "Leuven"</li>
+    <li>Haz clic en <strong>×</strong> en un chip para eliminarlo individualmente</li>
+    <li><strong>Clear</strong> → borra todos los filtros</li>
+  </ol>
+</div>
+
+<div class="feature-card">
+  <div class="fc-header">
+    <div class="fc-num" style="background:#6d28d9;color:#fff;">2</div>
+    <div>
+      <div class="fc-title">Explorer — Nearby multi-site</div>
+      <div class="fc-subtitle">Tab /explorer · encuentra sites cercanos a múltiples sitios de referencia a la vez</div>
+    </div>
+  </div>
+  <ol>
+    <li>Ir a la tab <strong>Explorer</strong> y hacer una búsqueda</li>
+    <li>Marcar los <strong>checkboxes</strong> en 2–3 filas de la tabla (columna izquierda)</li>
+    <li>Aparece el botón violeta <strong>"Nearby (N selected)"</strong> en la toolbar de resultados</li>
+    <li>Hacer clic → modal de km → ajustar el radio → <strong>Apply</strong></li>
+    <li>El panel lateral muestra todos los sites de INNODIA a X km de <em>cualquiera</em> de los seleccionados</li>
+    <li>La cabecera del panel dice <code>Nearby · N selected sites</code></li>
+  </ol>
+</div>
+
+<!-- ─────────────── LOGS ─────────────── -->
+<h2 id="logs">Logs y depuración</h2>
+
+<pre><code><span class="cmt"># Ver logs en tiempo real</span>
+<span class="cmd">tail -f /tmp/cts-backend.log</span>
+<span class="cmd">tail -f /tmp/cts-frontend.log</span>
+
+<span class="cmt"># Últimas 50 líneas</span>
+<span class="cmd">tail -50 /tmp/cts-backend.log</span>
+
+<span class="cmt"># Estado de los servidores</span>
+<span class="cmd">bash scripts/dev.sh --status</span>
+
+<span class="cmt"># Parar desde otra terminal</span>
+<span class="cmd">bash scripts/dev.sh --stop</span>
+
+<span class="cmt"># API: health check</span>
+<span class="cmd">curl http://localhost:8000/health</span>
+
+<span class="cmt"># Tests unitarios del backend (sin red)</span>
+<span class="cmd">python -m pytest backend/tests/ -v</span>
+
+<span class="cmt"># Tests E2E Playwright</span>
+<span class="cmd">cd frontend && npx playwright test --reporter=list</span></code></pre>
+
+<!-- ─────────────── REFERENCIA ─────────────── -->
+<h2 id="referencia">Referencia rápida</h2>
+
+<div class="cmd-grid">
+  <div class="cmd-card">
+    <div class="label">Primera vez</div>
+    <pre><code>aws sso login --profile juan
+bash scripts/dev.sh --setup</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">Arrancar (diario)</div>
+    <pre><code>bash scripts/dev.sh</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">SSO expirado</div>
+    <pre><code>bash scripts/dev.sh --login</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">Refrescar secretos + arrancar</div>
+    <pre><code>bash scripts/dev.sh --setup</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">Parar servidores</div>
+    <pre><code>Ctrl+C
+# o desde otra terminal:
+bash scripts/dev.sh --stop</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">Ver estado</div>
+    <pre><code>bash scripts/dev.sh --status</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">Ver logs backend</div>
+    <pre><code>tail -f /tmp/cts-backend.log</code></pre>
+  </div>
+  <div class="cmd-card">
+    <div class="label">Tests backend</div>
+    <pre><code>python -m pytest backend/tests/ -v</code></pre>
+  </div>
+</div>
+
+<!-- ─────────────── TROUBLESHOOTING ─────────────── -->
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3><code>backend/.env not found</code></h3>
+<pre><code><span class="cmd">aws sso login --profile juan</span>
+<span class="cmd">python3 scripts/gen_local_env.py</span></code></pre>
+
+<h3><code>ExpiredTokenException</code> de AWS</h3>
+<p>El token SSO ha expirado (~8 horas de vida):</p>
+<pre><code><span class="cmd">bash scripts/dev.sh --login</span></code></pre>
+
+<h3>Puerto ya en uso</h3>
+<p>El script lo resuelve automáticamente. Si persiste:</p>
+<pre><code><span class="cmd">lsof -ti tcp:8000 | xargs kill -9</span>
+<span class="cmd">lsof -ti tcp:5173 | xargs kill -9</span></code></pre>
+
+<h3>Explorer da 500 / 503</h3>
+<p>La sesión Salesforce ha expirado. Ve a <a href="http://localhost:5173" target="_blank">http://localhost:5173</a> → Login.</p>
+
+<h3>Moby no responde o error Anthropic</h3>
+<pre><code><span class="cmt"># Comprobar que la key está en .env</span>
+<span class="cmd">grep ANTHROPIC_API_KEY backend/.env</span>
+
+<span class="cmt"># Si falta, regenerar .env</span>
+<span class="cmd">bash scripts/dev.sh --setup</span></code></pre>
+
+<h3>El frontend muestra datos de producción</h3>
+<div class="callout callout-warn">
+  <div class="callout-title">Ojo</div>
+  El backend local se conecta a la misma PostgreSQL de producción (AWS RDS). Los datos que ves y modificas son reales. Ten cuidado al probar escrituras.
+</div>
+
+<h3><code>uvicorn: command not found</code></h3>
+<pre><code><span class="cmd">pip install -r backend/requirements.txt</span></code></pre>
+
+<h3>Node version error</h3>
+<pre><code><span class="cmd">node --version</span>   <span class="cmt"># debe ser 18+</span>
+<span class="cmt"># Si usas nvm:</span>
+<span class="cmd">nvm use 18</span></code></pre>
+
+</main>
+
+<script>
+  // Highlight active nav link on scroll
+  const sections = document.querySelectorAll('h2[id]');
+  const links = document.querySelectorAll('nav a');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = document.querySelector(`nav a[href="#${e.target.id}"]`);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
