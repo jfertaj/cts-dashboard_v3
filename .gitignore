@@ -16,3 +16,24 @@ __pycache__/
 /tmp
 /build
 backend/.env
+
+# Runtime caches (never commit)
+backend/app/cache/
+
+# Playwright output
+frontend/playwright-report/
+frontend/test-results/
+
+# Data exports / geocoord CSVs (ad-hoc, not part of codebase)
+proposed_geocoords_*.csv
+proposed_site_geocoords_*.csv
+
+# Screenshots / images dumped to root
+*.png
+*.jpg
+*.jpeg
+
+# ECS task-definition JSON exports (contain ARNs; use AWS CLI to re-fetch)
+td-backend.json
+td-backend-new.json
+td-backend-editable.json
