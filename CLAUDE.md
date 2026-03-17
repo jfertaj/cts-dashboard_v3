@@ -12,6 +12,7 @@ At the start of every session in this repository:
 4. Do **not** re-analyse the full repository from scratch unless the user explicitly asks for it, or the documented state is clearly out of date relative to recent commits.
 5. Use the documented state as the baseline for all work.
 6. **Update docs proactively, without being asked**, when changes are significant: new features, bug fixes that affect behavior, architectural changes, or anything a future session would need to know to avoid re-discovering. Update `docs/current-state.md` and/or `docs/next-steps.md` **in the same response as the change**, not at the end of the session. Minor changes (typos, style tweaks, test adjustments) do not require doc updates.
+7. **Mark next-steps items as done**: whenever a change implements an item listed in `docs/next-steps.md`, mark it as `~~done~~ — DONE (YYYY-MM-DD)` in that file **in the same response as the change**. Do not leave completed items unmarked.
 
 ## What this project is
 

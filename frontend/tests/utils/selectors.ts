@@ -58,6 +58,20 @@ export const S = {
   // Explorer filter chips
   EXPLORER_FILTER_CHIP:     '[data-testid="explorer-filter-chip"]',
 
+  // FilterBuilder — rules and logic expression
+  FILTER_ADD_BTN:           '[data-testid="filter-add-btn"]',
+  FILTER_RULE:              '[data-testid="filter-rule"]',
+  FILTER_RULE_REMOVE:       '[data-testid="filter-rule-remove"]',
+  FILTER_LOGIC_BAR:         '[data-testid="filter-logic-bar"]',
+  FILTER_LOGIC_EXPR:        '[data-testid="filter-logic-expr"]',
+  FILTER_LOGIC_EDIT_BTN:    '[data-testid="filter-logic-edit-btn"]',
+  FILTER_LOGIC_MODAL:       '[data-testid="filter-logic-modal"]',
+  FILTER_LOGIC_TEXTAREA:    '[data-testid="filter-logic-textarea"]',
+  FILTER_LOGIC_ERROR:       '[data-testid="filter-logic-error"]',
+  FILTER_LOGIC_VALID:       '[data-testid="filter-logic-valid"]',
+  FILTER_LOGIC_APPLY_BTN:   '[data-testid="filter-logic-apply-btn"]',
+  FILTER_PANEL_COLLAPSE_BTN:'[data-testid="filter-panel-collapse-btn"]',
+
   // ── Site Details Modal ─────────────────────────────────────────────────
   SITE_DETAILS_MODAL:       '[data-testid="site-details-modal"]',
   SITE_DETAILS_CLOSE:       '[data-testid="site-details-close"]',

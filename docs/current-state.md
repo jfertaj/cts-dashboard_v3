@@ -32,7 +32,8 @@ Legend:
 - `ChartModal` for bar/line/pie charts from Explorer data
 - `GET /api/explorer/fields` drives field catalog in FilterBuilder; field groups from `fields_opportunity_curated.json`
 - SWR cache keyed by `EXPLORER_BOOT_KEY` warms the map bootstrap on auth
-- E2E coverage: `filters.spec.ts`, `table.spec.ts`, `map.spec.ts`, `qualification.spec.ts`, `parity.spec.ts`
+- E2E coverage: `filters.spec.ts` (11 tests: FILTER-1–5 + FLOGIC-1–6), `table.spec.ts`, `map.spec.ts`, `qualification.spec.ts`, `parity.spec.ts`
+- **FilterBuilder E2E tests** — CONFIRMED (2026-03-17): 6 new FLOGIC tests cover logic bar appearance (2+ rules), edit modal + custom expression, invalid expression validation + disabled Apply, rule removal updating expression, collapse/expand toggle, collapsed panel chip visibility. Uses new testids: `filter-add-btn`, `filter-rule`, `filter-rule-remove`, `filter-logic-bar`, `filter-logic-expr`, `filter-logic-edit-btn`, `filter-logic-modal`, `filter-logic-textarea`, `filter-logic-error`, `filter-logic-valid`, `filter-logic-apply-btn`, `filter-panel-collapse-btn`
 - Backend unit tests: `test_salesforce_explorer.py` (pure function tests for `_eval_qual_rule`, `_qual_get`); `test_filter_logic.py` (expression evaluator, 27 tests)
 - **Multi-country filter** — CONFIRMED (2026-03-16): `pass_site()` now treats multiple `site.country equals X` rules under AND as OR; `_flatten_filter_rules()` recursively extracts rules from nested FilterGroup sub-groups before classification. Tested: `scripts/test_multi_country.py` — 41/41 pass (20 unit + 14 API + 7 Moby).
 - **Multi-country Moby handler** — CONFIRMED (2026-03-16): country planner handler in `ai_chat.py` collects ALL `_COUNTRY_MAP` matches (removed `break`), builds `IN (...)` SOQL for multi-country, returns OR `last_filters`.
@@ -44,6 +45,9 @@ Legend:
 - Delete questionnaire + SiteQual recompute
 - Alembic migration `a1b2c3d4e5f6` normalises legacy dot-subcode keys in existing JSONB data
 - E2E coverage: `qualification.spec.ts`
+- **ZnT8 duplicate fix** — CONFIRMED (2026-03-17): `"znt8"` and `"are_znt8_tests_available"` added to `QUAL_FIELD_BLACKLIST`; catalog now shows only canonical `qual.3_8__znt8`.
+- **Empty filter value guardrail** — CONFIRMED (2026-03-17): Backend `_build_sf_where()` skips rules where operator requires a value but value is empty/null (prevents HTTP 500 from malformed SOQL). Frontend `FilterBuilder.tsx` shows inline amber `⚠ value required` badge on incomplete rules.
+- **Account Name always visible** — CONFIRMED (2026-03-17): `applyVisibleColumns()` in `ExplorerView.tsx` always re-adds `sf.Account.Name` if missing. `ColumnPicker.tsx` gains `lockedKeys` prop — locked columns show checked+disabled with "always on" label; `clearColumns` preserves them. `ExplorerView` passes `LOCKED_COLUMNS = ["sf.Account.Name"]`.
 - **`_qual_get` 5-fallback lookup** — CONFIRMED (2026-03-17):
   1. Exact key
   2. First `_` → `.` (legacy compat)
@@ -77,7 +81,8 @@ Legend:
 
 ### Moby AI Chat — CONFIRMED
 - `POST /api/ai/chat/stream` SSE endpoint backed by Claude Sonnet 4.6 (`anthropic` SDK)
-- Deterministic planner intercepts 15+ query patterns (country sites, ND top/by-country, Stage 1/2, HLA %, pharmacy/overnight, Study Coordinators/PI, activities, activity-country matrix, sites-per-country chart, nearest sites, km-of-assignment)
+- Deterministic planner intercepts 15+ query patterns (country sites, ND top/by-country, Stage 1/2, HLA %, pharmacy/overnight, Study Coordinators/PI, activities, activity-country matrix, sites-per-country chart, nearest sites, km-of-assignment, assignment-sites)
+- **Assignment-sites planner handler** — CONFIRMED (2026-03-17): new deterministic handler in `_try_planner()` intercepts queries like "sites that belong to Barricade Delay assignment". Detects `\bassignment\b` + no km + sites/show/all keywords; extracts assignment name via 4 regex patterns; calls `tool_sites_by_activity(sf, name=…)` directly. Previously these fell through to Claude which failed (called wrong tool). OpenAI client dead code also removed from `ai_chat.py` (`from openai import …` + `client = OpenAI(…)`) and `except` blocks updated to use `_anthropic_sdk.*Error` classes.
 - `_is_complex_query()` triggers extended thinking (`interleaved-thinking-2025-05-14` beta)
 - `_truncate_history()` limits context to last 12 user turns
 - `ChatView.tsx` renders live streaming bubble, structured table (AIResultTable), optional chart

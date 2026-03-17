@@ -4,7 +4,7 @@ These items are directly supported by observations in the code. Each entry state
 
 ---
 
-## 1. Remove dead OpenAI client instantiation from `ai_chat.py`
+## 1. ~~Remove dead OpenAI client instantiation from `ai_chat.py`~~ — DONE (2026-03-17)
 
 **Observation:** Line 73 of `ai_chat.py`:
 ```python
@@ -32,7 +32,7 @@ The `client` object is never called in any Moby code path. All LLM calls go thro
 
 ---
 
-## 3. Add `sf_sessions` table to Alembic migration history
+## 3. ~~Add `sf_sessions` table to Alembic migration history~~ — DONE (2026-03-17)
 
 **Observation:** `services/salesforce_oauth.py` creates the `sf_sessions` table using raw psycopg3 DDL (`_ensure_sessions_table()`), not through Alembic. The table is therefore invisible to `alembic current`, `alembic heads`, and `alembic downgrade`.
 
@@ -78,15 +78,9 @@ This means if a user builds a filter on `sf.Assignment.C_Assignment_Stage__c` or
 
 ---
 
-## 7. Resolve `nearby-multi` vs. `within-drive-km` base-coordinate asymmetry
+## 7. ~~Resolve `nearby-multi` vs. `within-drive-km` base-coordinate asymmetry~~ — DONE
 
-**Observation:** `nearby-multi` endpoint (`salesforce_explorer.py` ~line 5018) builds its candidate list from all CTS Opportunity AccountIds, then merges coords from SF Account shipping fields + local Site table. `within-drive-km` endpoint (~line 4750) uses only local Site DB rows for base coordinates, meaning only sites with uploaded qualification files can be used as the base site for "within N km" queries.
-
-This is documented in MEMORY.md as the reason Moby switched km-of-assignment to use `nearby-multi`. But the `within-drive-km` endpoint itself is still exposed and used by `NearbyDrawer` in ExplorerView.
-
-**Why it matters:** A user in ExplorerView clicking "Find nearby" on a site that has no local DB row (no qual upload) would get 0 neighbors because the base coordinates cannot be resolved. The `nearby-multi` logic for coord resolution already solves this (merging SF account lat/lng with local DB).
-
-**Files:** `backend/app/routers/salesforce_explorer.py` — refactor `within-drive-km` base-coord lookup to use the same merged-coordinate strategy as `nearby-multi` (query SF Account for lat/lng, fall back to local Site, then geocode if still missing).
+**Observation (2026-03-17 inspection):** `within-drive-km` at `salesforce_explorer.py:4457-4489` now uses the merged SF+local strategy: loads Site DB coords into `site_by_acc`, loads all CTS Opportunity accounts via `_build_account_map()`, then merges with SF coords preferred (`lat = a.get("lat") if a.get("lat") is not None else s.get("lat")`). This matches `nearby-multi`.
 
 ---
 
@@ -104,7 +98,7 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
-## 9. Add E2E tests for the new Salesforce-style FilterBuilder
+## 9. ~~Add E2E tests for the new Salesforce-style FilterBuilder~~ — DONE (2026-03-17)
 
 **Observation:** `FilterBuilder.tsx` was fully rewritten (2026-03-16) to the Salesforce-style numbered-rule + editable-logic-expression model. The logic expression parser (`filterLogic.ts`) has 27 backend unit tests but no Playwright E2E tests covering:
 - Adding 3+ rules and verifying the "Include rows matching" bar appears
@@ -119,7 +113,7 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
-## 11. Fix `FilterBuilder.tsx` — `source` type excludes `"account"` and `"extra"`
+## 11. ~~Fix `FilterBuilder.tsx` — `source` type excludes `"account"` and `"extra"`~~ — DONE (2026-03-17)
 
 **Observation:** `FilterBuilder.tsx` defines `FieldDef.source` as `"sf" | "site" | "qual" | string`. The `GET /api/explorer/fields` response includes fields with `source: "account"` and `source: "extra"` (lines 2500–2521 of `salesforce_explorer.py`). The frontend `FieldDef` type in `api.ts` line 101 declares `source: "site" | "sf" | "qual"` — it does not include `"account"` or `"extra"`.
 
@@ -141,7 +135,7 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
-## 13. Add Profiling and Qualification Opportunity fields to Explorer filter/column catalog
+## 13. ~~Add Profiling and Qualification Opportunity fields to Explorer filter/column catalog~~ — DONE (2026-03-16)
 
 **Observation:** Salesforce query on `dev` (2026-03-16) confirmed two Opportunity RecordTypes not currently represented in `fields_opportunity_curated.json`:
 - `RT_Profiling_Opportunities` — 269 records; 72 fields have ≥ 1 non-null value

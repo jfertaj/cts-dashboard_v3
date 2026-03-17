@@ -20,8 +20,6 @@ from app.routers.salesforce_extras import _account_extras_core
 # Account map/enrichment helper (name, city, country, coords, active filtering)
 from app.routers.salesforce_explorer import _build_account_map
 
-# OpenAI
-from openai import OpenAI, APITimeoutError, APIConnectionError, RateLimitError
 from app.services.sf_labels import humanize_headers
 from app.utils.soql_helpers import build_followup_accounts_query
 import anthropic as _anthropic_sdk
@@ -70,7 +68,6 @@ def _is_valid_sf_id(s: Optional[str], prefix: Optional[str] = None) -> bool:
         return False
     return True
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 router = APIRouter(prefix="/api/ai", tags=["AI"])
 
 def _clean_text(s: str) -> str:
@@ -5250,6 +5247,40 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                                    f"where the sponsor / account matches <em>{_cand_fu}</em>.")
                             return {"answer": f"<p>{ans}</p>", "table": table}
 
+            # ── "sites in/belonging to [NAME] assignment" handler ────────────────
+            # Covers queries like "show all sites that belong to Barricade Delay assignment"
+            # These contain "assignment" but NOT "activ..." so _act_intent misses them.
+            # The km-of-assignment handler only fires when "X km" is present.
+            _assign_name_m = None
+            if (sf
+                    and re.search(r"\bassignment\b", s, re.I)
+                    and not re.search(r"\d+\s*km\b", s)
+                    and re.search(r"\b(sites?|sitios?|centros?|all|show|ver|todos?|see|get|which)\b", s, re.I)):
+                _assign_name_m = (
+                    re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-]{2,50}?)\s+assignment", s, re.I) or
+                    re.search(r"in\s+(?:the\s+)?([\w\s'\-]{2,50}?)\s+assignment", s, re.I) or
+                    re.search(r"of\s+(?:the\s+)?([\w\s'\-]{2,50}?)\s+assignment", s, re.I) or
+                    re.search(r"(?:assignment|estudio|actividad)\s+(?:called\s+|named\s+)?['\"]?([\w\s'\-]{2,50}?)['\"]?\s*(?:\?|$)", s, re.I)
+                )
+            if sf and _assign_name_m:
+                _asgn_name = _assign_name_m.group(1).strip().rstrip(".,;?")
+                _stop = {"the", "a", "an", "all", "any", "some", "this", "that", "named", "called"}
+                if _asgn_name.lower() not in _stop and len(_asgn_name) >= 2:
+                    _dbg("assignment-sites handler: name=%r", _asgn_name)
+                    try:
+                        tbl = tool_sites_by_activity(sf, name=_asgn_name)
+                        rows = tbl.get("rows") or []
+                        if rows:
+                            ans = (f"Found <strong>{len(rows)}</strong> site(s) participating in "
+                                   f"<em>{_asgn_name}</em>.")
+                        else:
+                            ans = (f"No sites found for assignment <em>{_asgn_name}</em>. "
+                                   f"Check the exact name in Salesforce.")
+                        return {"answer": f"<p>{ans}</p>", "table": tbl}
+                    except Exception as _e_asgn:
+                        _dbg("assignment-sites handler error: %s", _e_asgn)
+                        # Fall through to LLM
+
             # Acepta 'activities', 'activity' y typos frecuentes como 'activites'
             _act_intent = bool(re.search(r"\bactivit(?:y|ies)\b", s) or re.search(r"\bactivites\b", s) or ("activit" in s))
             # Skip activity handler if this is a "within N km of [activity/assignment] [name]" query
@@ -7877,8 +7908,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     _dbg("ROUND call → tool_choice=%s | data_intent=%s | thinking=%s", tool_mode, data_intent, _complex)
     try:
         resp = _claude_chat(msgs, tool_choice=tool_mode, use_thinking=_complex)
-    except (APITimeoutError, APIConnectionError, RateLimitError) as e:
-        _dbg("OpenAI Error (1st attempt): %s", e)
+    except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as e:
+        _dbg("Anthropic API error (1st attempt): %s", e)
         return {"answer": f"<p>Service temporarily unavailable (timeout/connection). Please try again later. ({str(e)[:50]})</p>"}
     choice = resp.choices[0]
     assistant_msg = choice.message
@@ -7902,8 +7933,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         # Retry without thinking — the reinforcement hint is enough for retries
         try:
             resp = _claude_chat(msgs, tool_choice="required", use_thinking=False)
-        except (APITimeoutError, APIConnectionError, RateLimitError) as e:
-            _dbg("OpenAI Error (retry): %s", e)
+        except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as e:
+            _dbg("Anthropic API error (retry): %s", e)
             return {"answer": f"<p>Service temporarily unavailable (timeout/connection) during retry. ({str(e)[:50]})</p>"}
         choice = resp.choices[0]
         assistant_msg = choice.message

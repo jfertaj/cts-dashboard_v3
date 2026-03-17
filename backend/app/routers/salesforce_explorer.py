@@ -396,6 +396,10 @@ QUAL_FIELD_BLACKLIST: frozenset[str] = frozenset({
     "how_long_are_documents_retained",
     # Superseded by qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours → strips "_hours"
     "longest_single_day_visit_that_could_be_accommodated",
+    # Superseded by qual.3_8__znt8 → fallback strips prefix → "znt8"
+    "znt8",
+    # Old full-name keys that appear in early uploads before section-prefixed keys were introduced
+    "are_znt8_tests_available",
 })
 
 # Limite de “Describe” puros por subsección (independiente de versiones)
@@ -1201,6 +1205,18 @@ def _build_sf_where(q: FilterQuery) -> str:
         op = _OP_SYNONYM.get(op_raw, op_raw).lower()
         f_no_prefix = f
         ftype = _field_type(f_no_prefix)
+
+        # Guardrail: skip rules where value is empty/None for operators that require a value.
+        # Prevents malformed SOQL (e.g. "Stage2 = ''") that causes Salesforce to return 400.
+        _needs_value = op not in ("is_empty", "is_not_empty", "is_null", "isnull", "is_not_null", "notnull")
+        if _needs_value:
+            _val = r.value
+            _empty = (_val is None) or (_val == "") or (isinstance(_val, (list, tuple)) and not any(
+                str(v).strip() for v in _val if not isinstance(v, (int, float, bool))
+            ) and not any(isinstance(v, (int, float, bool)) for v in _val))
+            if _empty:
+                log.debug("Skipping sf rule with empty value: field=%s op=%s", r.field, op)
+                continue
 
         # Guardrail: AccountId must NOT use LIKE ops (contains/starts/ends) and must not be empty
         if f == "AccountId":

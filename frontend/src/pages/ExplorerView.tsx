@@ -2476,10 +2476,17 @@ export default function ExplorerView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nearbyActive ? nearbyRows : rows, visibleColumns]);
 
+  const LOCKED_COLUMNS = ["sf.Account.Name"];
+
   const applyVisibleColumns = (nextKeys: string[]) => {
     // Evita meter columnas que duplican fijas
     const filtered = nextKeys.filter(k => !EXCLUDED_VISIBLE_COLUMNS.has(k));
-    setVisibleColumns(filtered);
+    // Account Name is always on — add it back if cleared
+    const withLocked = LOCKED_COLUMNS.reduce(
+      (acc, k) => (acc.includes(k) ? acc : [k, ...acc]),
+      filtered
+    );
+    setVisibleColumns(withLocked);
     setColumnOrder((prev) => {
       const start = prev.length ? [...prev] : ensureInitialOrder();
       const keepFixed = new Set(["sf.Account.Name","country","city"]);
@@ -2676,6 +2683,7 @@ export default function ExplorerView() {
       <div data-testid="explorer-filter-panel" className="rounded-xl border bg-white shadow-sm">
         <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
           <button
+            data-testid="filter-panel-collapse-btn"
             className="font-semibold text-gray-800 flex items-center gap-2 hover:text-blue-700 focus:outline-none"
             onClick={() => setFilterCollapsed(v => !v)}
             title={filterCollapsed ? "Expand filters" : "Collapse filters"}
@@ -2945,6 +2953,7 @@ showPresets={false}
             );
           }}
           groupBy={groupByField}
+          lockedKeys={LOCKED_COLUMNS}
         />
       </div>
 

@@ -26,6 +26,8 @@ type ColumnPickerProps = {
   groupBy?: (f: FieldDef) => string | undefined;
   /** Render del encabezado de cada grupo */
   renderGroupHeader?: (groupName: string) => React.ReactNode;
+  /** Columnas que siempre deben estar activas — se muestran checked y deshabilitadas */
+  lockedKeys?: string[];
 };
 
 function uniq<T>(arr: T[]): T[] { return Array.from(new Set(arr)); }
@@ -74,7 +76,9 @@ export default function ColumnPicker({
   sortKeys,
   groupBy,
   renderGroupHeader,
+  lockedKeys = [],
 }: ColumnPickerProps) {
+  const lockedSet = new Set(lockedKeys);
   const [open, setOpen] = useState(defaultOpen);
   const [query, setQuery] = useState("");
   const [activePresetIds, setActivePresetIds] = useState<string[]>([]);
@@ -108,6 +112,7 @@ export default function ColumnPicker({
   // Helpers selección manual
   const toggleKey = (k: string) => {
     if (!allKeys.includes(k)) return;
+    if (lockedSet.has(k)) return;  // locked columns cannot be toggled off
     if (value.includes(k)) onChange(value.filter((x) => x !== k));
     else onChange([...value, k]);
   };
@@ -207,7 +212,7 @@ export default function ColumnPicker({
     setActivePresetIds([]); // desactiva la marca de presets completos
   };
 
-  const clearColumns = () => onChange([]);
+  const clearColumns = () => onChange(lockedKeys);
 
   return (
     <div className="p-3">
@@ -339,17 +344,23 @@ export default function ColumnPicker({
                     <tbody>
                       {keys.map((k) => {
                         const checked = value.includes(k);
+                        const locked = lockedSet.has(k);
                         return (
-                          <tr key={k} className="border-t hover:bg-gray-50">
+                          <tr key={k} className={`border-t ${locked ? "bg-gray-50" : "hover:bg-gray-50"}`}>
                             <td className="px-3 py-2 w-10">
                               <input
                                 type="checkbox"
                                 className="h-4 w-4"
-                                checked={checked}
+                                checked={checked || locked}
+                                disabled={locked}
                                 onChange={() => toggleKey(k)}
+                                title={locked ? "This column is always visible" : undefined}
                               />
                             </td>
-                            <td className="px-3 py-2 whitespace-nowrap">{labelByKey.get(k) ?? k}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {labelByKey.get(k) ?? k}
+                              {locked && <span className="ml-1.5 text-[10px] text-gray-400 font-medium">always on</span>}
+                            </td>
                             <td className="px-3 py-2 text-gray-500">{k}</td>
                           </tr>
                         );

@@ -183,7 +183,7 @@ function FilterLogicModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div data-testid="filter-logic-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-gray-900">Edit Filter Logic</h3>
@@ -199,6 +199,7 @@ function FilterLogicModal({
         </div>
 
         <textarea
+          data-testid="filter-logic-textarea"
           className={`w-full border rounded-lg px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 ${
             error ? "border-red-400 focus:ring-red-200" : "border-gray-300 focus:ring-blue-200"
           }`}
@@ -211,10 +212,10 @@ function FilterLogicModal({
         />
 
         {error && (
-          <p className="mt-1 text-xs text-red-600">{error}</p>
+          <p data-testid="filter-logic-error" className="mt-1 text-xs text-red-600">{error}</p>
         )}
         {!error && draft.trim() && (
-          <p className="mt-1 text-xs text-green-600">Valid expression</p>
+          <p data-testid="filter-logic-valid" className="mt-1 text-xs text-green-600">Valid expression</p>
         )}
 
         {ruleLabels.length > 0 && (
@@ -235,6 +236,7 @@ function FilterLogicModal({
             Cancel
           </button>
           <button
+            data-testid="filter-logic-apply-btn"
             onClick={handleApply}
             disabled={!!error}
             className="rounded-md bg-blue-600 text-white px-4 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-50"
@@ -567,8 +569,13 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
       <div className="space-y-2">
         {rules.map((rule) => {
           const meta = fields.find((f) => f.key === rule.field);
+          const needsValue = !["is_empty", "is_not_empty"].includes(rule.operator);
+          const isEmpty = needsValue && (
+            rule.value === null || rule.value === undefined || rule.value === "" ||
+            (Array.isArray(rule.value) && rule.value.every((v: any) => v === "" || v == null))
+          );
           return (
-            <div key={rule.id} className="flex flex-wrap items-center gap-2">
+            <div key={rule.id} data-testid="filter-rule" className="flex flex-wrap items-center gap-2">
               {/* Number badge */}
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex-shrink-0">
                 {rule.id}
@@ -599,8 +606,16 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
               {/* Value */}
               <ValueInput rule={rule} />
 
+              {/* Empty-value warning */}
+              {isEmpty && (
+                <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-0.5" title="This filter has no value and will be ignored">
+                  ⚠ value required
+                </span>
+              )}
+
               {/* Remove */}
               <button
+                data-testid="filter-rule-remove"
                 className="ml-1 flex-shrink-0 text-gray-400 hover:text-red-500 rounded p-0.5 hover:bg-red-50 transition-colors"
                 onClick={() => removeRule(rule.id)}
                 title="Remove filter"
@@ -617,12 +632,13 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
 
       {/* Logic expression bar (only when 2+ rules) */}
       {rules.length >= 2 && (
-        <div className="mt-3 flex items-center gap-2 px-1">
+        <div data-testid="filter-logic-bar" className="mt-3 flex items-center gap-2 px-1">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Include rows matching</span>
-          <code className="text-sm font-mono text-blue-700 bg-blue-50 rounded px-2 py-0.5 border border-blue-100">
+          <code data-testid="filter-logic-expr" className="text-sm font-mono text-blue-700 bg-blue-50 rounded px-2 py-0.5 border border-blue-100">
             {logicExpr || defaultExpr(rules.length)}
           </code>
           <button
+            data-testid="filter-logic-edit-btn"
             className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 rounded px-2 py-1 hover:bg-gray-100 border border-transparent hover:border-gray-200"
             onClick={() => setShowModal(true)}
             title="Edit filter logic"
@@ -638,6 +654,7 @@ export default function FilterBuilder({ fields, value, onChange }: Props) {
       {/* Add filter button */}
       <div className="mt-3">
         <button
+          data-testid="filter-add-btn"
           className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 hover:bg-blue-100"
           onClick={addRule}
         >

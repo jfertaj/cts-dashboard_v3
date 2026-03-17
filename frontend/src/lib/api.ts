@@ -98,7 +98,7 @@ export type FieldDef = {
   key: string;
   label: string;
   type: "string" | "number" | "boolean" | "date" | "datetime" | "ID";
-  source: "site" | "sf" | "qual";
+  source: "site" | "sf" | "qual" | "account" | "extra";
   group?: string;
   qual_section?: string;
 };
