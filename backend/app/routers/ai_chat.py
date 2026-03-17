@@ -22,6 +22,7 @@ from app.routers.salesforce_explorer import _build_account_map
 
 from app.services.sf_labels import humanize_headers
 from app.utils.soql_helpers import build_followup_accounts_query
+from app.utils.country_norms import _ALIAS_TO_ISO2 as _CN_ALIAS, iso2_to_sf_name as _iso2_to_sf
 import anthropic as _anthropic_sdk
 from app.routers.moby_planner import (
     parse_query_plan,
@@ -127,44 +128,11 @@ INDEX_PREVIEW_LIMIT = int(os.environ.get("AI_INDEX_PREVIEW_LIMIT", "60"))
 
 # Country alias map: lowercase alias → (SF full name, ISO2 code)
 # Used by multiple planner handlers (pharmacy, country, nearest)
+# _COUNTRY_MAP: alias → (sf_display_name, iso2)
+# Derived from the canonical country_norms module — do not edit here.
 _COUNTRY_MAP: Dict[str, tuple] = {
-    "united kingdom": ("United Kingdom", "GB"), "great britain": ("United Kingdom", "GB"),
-    "britain": ("United Kingdom", "GB"), "uk": ("United Kingdom", "GB"),
-    "czech republic": ("Czech Republic", "CZ"), "czechia": ("Czech Republic", "CZ"),
-    "spain": ("Spain", "ES"), "españa": ("Spain", "ES"), "espagne": ("Spain", "ES"),
-    "germany": ("Germany", "DE"), "deutschland": ("Germany", "DE"), "allemagne": ("Germany", "DE"),
-    "france": ("France", "FR"), "frankreich": ("France", "FR"),
-    "italy": ("Italy", "IT"), "italia": ("Italy", "IT"), "italie": ("Italy", "IT"),
-    "netherlands": ("Netherlands", "NL"), "holland": ("Netherlands", "NL"),
-    "belgium": ("Belgium", "BE"), "belgique": ("Belgium", "BE"), "bélgica": ("Belgium", "BE"),
-    "austria": ("Austria", "AT"),
-    "switzerland": ("Switzerland", "CH"), "suiza": ("Switzerland", "CH"), "suisse": ("Switzerland", "CH"),
-    "denmark": ("Denmark", "DK"), "dinamarca": ("Denmark", "DK"),
-    "sweden": ("Sweden", "SE"), "suecia": ("Sweden", "SE"),
-    "norway": ("Norway", "NO"), "noruega": ("Norway", "NO"),
-    "finland": ("Finland", "FI"), "finlandia": ("Finland", "FI"),
-    "portugal": ("Portugal", "PT"),
-    "poland": ("Poland", "PL"), "polonia": ("Poland", "PL"),
-    "slovenia": ("Slovenia", "SI"), "eslovenia": ("Slovenia", "SI"),
-    "croatia": ("Croatia", "HR"), "croacia": ("Croatia", "HR"),
-    "romania": ("Romania", "RO"), "rumania": ("Romania", "RO"),
-    "hungary": ("Hungary", "HU"), "hungría": ("Hungary", "HU"),
-    "greece": ("Greece", "GR"), "grecia": ("Greece", "GR"),
-    "israel": ("Israel", "IL"),
-    "estonia": ("Estonia", "EE"),
-    "ireland": ("Ireland", "IE"), "irlanda": ("Ireland", "IE"),
-    "bulgaria": ("Bulgaria", "BG"),
-    "slovakia": ("Slovakia", "SK"), "eslovaquia": ("Slovakia", "SK"),
-    "serbia": ("Serbia", "RS"),
-    "luxembourg": ("Luxembourg", "LU"),
-    "cyprus": ("Cyprus", "CY"),
-    "malta": ("Malta", "MT"),
-    "latvia": ("Latvia", "LV"), "letonia": ("Latvia", "LV"),
-    "lithuania": ("Lithuania", "LT"), "lituania": ("Lithuania", "LT"),
-    "turkey": ("Turkey", "TR"), "turquía": ("Turkey", "TR"),
-    "united states": ("United States", "US"), "usa": ("United States", "US"),
-    "canada": ("Canada", "CA"),
-    "australia": ("Australia", "AU"),
+    alias: (_iso2_to_sf(iso2), iso2)
+    for alias, iso2 in _CN_ALIAS.items()
 }
 
 def _normalize(s: str) -> str:

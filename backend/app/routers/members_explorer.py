@@ -18,6 +18,7 @@ from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAut
 from app.services.salesforce_oauth import (
     COOKIE_NAME, unsign_value, get_salesforce_from_session_id,
 )
+from app.utils.country_norms import norm_to_iso2, iso2_to_display
 
 log = logging.getLogger("cts-backend")
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -49,48 +50,11 @@ def _sf_query(sf, soql: str) -> List[Dict]:
 
 
 # ---------------------------------------------------------------------------
-# Country normalisation (same map as salesforce_explorer.py)
+# Country normalisation — imported from app.utils.country_norms
 # ---------------------------------------------------------------------------
 
-_ISO2 = {
-    "spain": "ES", "españa": "ES", "espana": "ES",
-    "portugal": "PT", "france": "FR", "francia": "FR",
-    "germany": "DE", "deutschland": "DE",
-    "italy": "IT", "italia": "IT",
-    "belgium": "BE", "netherlands": "NL", "the netherlands": "NL",
-    "nederland": "NL", "holland": "NL",
-    "luxembourg": "LU", "united kingdom": "GB", "uk": "GB",
-    "ireland": "IE", "denmark": "DK", "sweden": "SE",
-    "norway": "NO", "finland": "FI", "poland": "PL",
-    "czech republic": "CZ", "czechia": "CZ",
-    "slovakia": "SK", "hungary": "HU", "romania": "RO",
-    "bulgaria": "BG", "greece": "GR", "croatia": "HR",
-    "serbia": "RS", "estonia": "EE", "latvia": "LV",
-    "lithuania": "LT", "cyprus": "CY", "malta": "MT",
-    "austria": "AT", "switzerland": "CH", "suisse": "CH",
-    "slovenia": "SI", "turkey": "TR",
-}
-_ISO2_TO_DISPLAY: Dict[str, str] = {
-    "AT": "Austria", "BE": "Belgium", "BG": "Bulgaria", "CH": "Switzerland",
-    "CY": "Cyprus", "CZ": "Czechia", "DE": "Germany", "DK": "Denmark",
-    "EE": "Estonia", "ES": "Spain", "FI": "Finland", "FR": "France",
-    "GB": "United Kingdom", "GR": "Greece", "HR": "Croatia", "HU": "Hungary",
-    "IE": "Ireland", "IT": "Italy", "LT": "Lithuania", "LU": "Luxembourg",
-    "LV": "Latvia", "MT": "Malta", "NL": "Netherlands", "NO": "Norway",
-    "PL": "Poland", "PT": "Portugal", "RO": "Romania", "RS": "Serbia",
-    "SE": "Sweden", "SI": "Slovenia", "SK": "Slovakia", "TR": "Turkey",
-}
-
-
 def _country_norm(country: Optional[str]) -> Optional[str]:
-    if not country:
-        return None
-    s = str(country).strip().lower()
-    if s in _ISO2:
-        return _ISO2[s]
-    if len(s) == 2:
-        return s.upper()
-    return str(country).strip()  # return as-is if unknown
+    return norm_to_iso2(country)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +235,7 @@ def _eval_filter(rule: Dict, row: Dict) -> bool:
         if op in ("in",) and isinstance(value, list):
             for v in value:
                 norm_v = _country_norm(str(v)) or str(v).upper()
-                display_v = _ISO2_TO_DISPLAY.get(str(v).upper(), str(v))
+                display_v = iso2_to_display(str(v)) or str(v)
                 if (norm_cell == norm_v or
                         str(cell).lower() == display_v.lower() or
                         str(cell).upper() == str(v).upper()):
@@ -279,7 +243,7 @@ def _eval_filter(rule: Dict, row: Dict) -> bool:
             return False
         # 'equals' operator (single value)
         norm_filter = _country_norm(str(value)) or str(value).upper()
-        display_filter = _ISO2_TO_DISPLAY.get(str(value).upper(), str(value))
+        display_filter = iso2_to_display(str(value)) or str(value)
         return (norm_cell == norm_filter or
                 str(cell).lower() == display_filter.lower() or
                 str(cell).upper() == str(value).upper())

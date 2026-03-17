@@ -25,6 +25,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, TypedDict
 
+from app.utils.country_norms import (
+    _ALIAS_TO_ISO2,
+    SORTED_ALIASES as _SORTED_ALIASES,
+    resolve_countries as _resolve_countries,
+)
+
 
 # ── Typed structures ───────────────────────────────────────────────────────────
 
@@ -49,49 +55,7 @@ class MobyPlan(TypedDict):
 
 
 # ── Country resolution ─────────────────────────────────────────────────────────
-
-# lowercase alias → ISO2  (sorted longest-first at lookup time for max-munch)
-_ALIAS_TO_ISO2: Dict[str, str] = {
-    # English full names
-    "united kingdom": "GB", "great britain": "GB", "britain": "GB", "uk": "GB",
-    "spain": "ES", "france": "FR", "germany": "DE", "italy": "IT",
-    "netherlands": "NL", "holland": "NL", "belgium": "BE", "sweden": "SE",
-    "denmark": "DK", "norway": "NO", "finland": "FI", "austria": "AT",
-    "switzerland": "CH", "poland": "PL", "czech republic": "CZ", "czechia": "CZ",
-    "romania": "RO", "hungary": "HU", "portugal": "PT", "greece": "GR",
-    "turkey": "TR", "israel": "IL", "estonia": "EE", "latvia": "LV",
-    "lithuania": "LT", "slovenia": "SI", "croatia": "HR", "serbia": "RS",
-    "slovakia": "SK", "bulgaria": "BG", "cyprus": "CY",
-    # Spanish / other languages
-    "españa": "ES", "alemania": "DE", "italia": "IT", "holanda": "NL",
-    "países bajos": "NL", "bélgica": "BE", "suecia": "SE", "dinamarca": "DK",
-    "noruega": "NO", "finlandia": "FI", "suiza": "CH", "polonia": "PL",
-    "república checa": "CZ", "rumania": "RO", "hungría": "HU", "grecia": "GR",
-    "turquía": "TR", "reino unido": "GB",
-    # Adjective forms (English)
-    "italian": "IT", "spanish": "ES", "french": "FR", "german": "DE",
-    "british": "GB", "dutch": "NL", "belgian": "BE", "swiss": "CH",
-    "austrian": "AT", "swedish": "SE", "norwegian": "NO", "danish": "DK",
-    "finnish": "FI", "polish": "PL", "czech": "CZ", "romanian": "RO",
-    "hungarian": "HU", "portuguese": "PT", "greek": "GR", "turkish": "TR",
-    "israeli": "IL",
-}
-
-# Pre-sort by length (longest first) for greedy matching
-_SORTED_ALIASES = sorted(_ALIAS_TO_ISO2, key=len, reverse=True)
-
-
-def _resolve_countries(text: str) -> List[str]:
-    """Extract ISO2 country codes mentioned in text (longest match wins)."""
-    s = text.lower()
-    found: List[str] = []
-    for phrase in _SORTED_ALIASES:
-        # Word-boundary aware: avoid matching "it" inside "with"
-        if re.search(r"(?<![a-z])" + re.escape(phrase) + r"(?![a-z])", s):
-            iso2 = _ALIAS_TO_ISO2[phrase]
-            if iso2 not in found:
-                found.append(iso2)
-    return found
+# _ALIAS_TO_ISO2, _SORTED_ALIASES, _resolve_countries imported from app.utils.country_norms
 
 
 # ── Known-field filter extraction ─────────────────────────────────────────────

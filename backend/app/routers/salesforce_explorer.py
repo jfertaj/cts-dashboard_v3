@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAuthenticationFailed
 
 from app.routers.salesforce_extras_batch import batch_fetch_account_extras
+from app.utils.country_norms import norm_to_iso2, iso2_to_display, ISO2_TO_DISPLAY as _ISO2_TO_DISPLAY
 
 # DB
 from sqlalchemy.orm import Session
@@ -1405,63 +1406,8 @@ def _prefix_account_rules_for_where(rules: List[Rule]) -> List[Rule]:
 
 # ======================= UTILIDADES ACCOUNT =======================
 
-# --- Normalización ligera de países (Europa + comunes)
-_ISO2 = {
-    "spain": "ES", "españa": "ES", "espana": "ES", "es": "ES",
-    "portugal": "PT", "pt": "PT",
-    "andorra": "AD", "ad": "AD",
-    "france": "FR", "francia": "FR", "fr": "FR",
-    "germany": "DE", "deutschland": "DE", "de": "DE",
-    "italy": "IT", "italia": "IT", "it": "IT",
-    "belgium": "BE", "belgië": "BE", "belgie": "BE", "belgique": "BE", "be": "BE",
-    "netherlands": "NL", "the netherlands": "NL", "nederland": "NL", "holland": "NL", "nl": "NL",
-    "luxembourg": "LU", "luxemburg": "LU", "lu": "LU",
-    "united kingdom": "GB", "uk": "GB", "gb": "GB",
-    "ireland": "IE", "eire": "IE", "ie": "IE",
-    "denmark": "DK", "danmark": "DK", "dk": "DK",
-    "sweden": "SE", "sverige": "SE", "se": "SE",
-    "norway": "NO", "norge": "NO", "no": "NO",
-    "finland": "FI", "suomi": "FI", "fi": "FI",
-    "poland": "PL", "polska": "PL", "pl": "PL",
-    "czech republic": "CZ", "czechia": "CZ", "cesko": "CZ", "cz": "CZ",
-    "slovakia": "SK", "slovensko": "SK", "sk": "SK",
-    "hungary": "HU", "magyarország": "HU", "hu": "HU",
-    "romania": "RO", "ro": "RO",
-    "bulgaria": "BG", "bg": "BG",
-    "greece": "GR", "ellada": "GR", "ελλάδα": "GR", "gr": "GR",
-    "croatia": "HR", "hrvatska": "HR", "hr": "HR",
-    "serbia": "RS", "srbija": "RS", "rs": "RS",
-    "bosnia": "BA", "bosnia and herzegovina": "BA", "ba": "BA",
-    "montenegro": "ME", "crna gora": "ME", "me": "ME",
-    "north macedonia": "MK", "macedonia": "MK", "mk": "MK",
-    "albania": "AL", "al": "AL",
-    "estonia": "EE", "eesti": "EE", "ee": "EE",
-    "latvia": "LV", "latvija": "LV", "lv": "LV",
-    "lithuania": "LT", "lietuva": "LT", "lt": "LT",
-    "cyprus": "CY", "kypros": "CY", "cy": "CY",
-    "malta": "MT", "mt": "MT",
-    "austria": "AT", "österreich": "AT", "oesterreich": "AT", "at": "AT",
-    "slovenia": "SI", "slovenija": "SI", "si": "SI",
-    # bordes frecuentes
-    "switzerland": "CH", "suisse": "CH", "schweiz": "CH", "svizzera": "CH", "ch": "CH",
-    "turkey": "TR", "türkiye": "TR", "tr": "TR",
-}
-
-# Reverse map ISO2 → English display name (used for country filter matching)
-_ISO2_TO_DISPLAY: Dict[str, str] = {
-    "AD": "Andorra", "AL": "Albania", "AT": "Austria",
-    "BA": "Bosnia and Herzegovina", "BE": "Belgium", "BG": "Bulgaria",
-    "CH": "Switzerland", "CY": "Cyprus", "CZ": "Czechia",
-    "DE": "Germany", "DK": "Denmark", "EE": "Estonia",
-    "ES": "Spain", "FI": "Finland", "FR": "France",
-    "GB": "United Kingdom", "GR": "Greece", "HR": "Croatia",
-    "HU": "Hungary", "IE": "Ireland", "IT": "Italy",
-    "LT": "Lithuania", "LU": "Luxembourg", "LV": "Latvia",
-    "ME": "Montenegro", "MK": "North Macedonia", "MT": "Malta",
-    "NL": "Netherlands", "NO": "Norway", "PL": "Poland",
-    "PT": "Portugal", "RO": "Romania", "RS": "Serbia",
-    "SE": "Sweden", "SI": "Slovenia", "SK": "Slovakia", "TR": "Turkey",
-}
+# Country normalisation — imported from canonical module.
+# _ISO2_TO_DISPLAY and norm_to_iso2 imported at top of file.
 
 # alias de ciudades por país (añade las que vayas viendo)
 _CITY_ALIASES = {
@@ -1475,14 +1421,7 @@ _CITY_ALIASES = {
 }
 
 def _country_norm(country: Optional[str]) -> Optional[str]:
-    if not country: 
-        return None
-    s = str(country).strip().lower()
-    if s in _ISO2:
-         return _ISO2[s]
-    if len(s) == 2:
-         return s.upper()
-    return s.title()  # devuelve legible si no conocemos el país
+    return norm_to_iso2(country)
 
 def _city_alias(city: Optional[str], country_iso2: Optional[str]) -> Optional[str]:
     if not city: 
