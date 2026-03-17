@@ -193,17 +193,37 @@ def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
 
 def _qual_get(qual_data: Dict[str, Any], key: str) -> Any:
     """
-    Lookup de una clave qual en el JSONB con 3 fallbacks, para manejar
+    Lookup de una clave qual en el JSONB con 5 fallbacks, para manejar
     los distintos formatos históricos de almacenamiento:
-      1. Clave exacta:            "2_2__personal_conversation_with_physician"
-      2. Subcode con punto:       "2.2__personal_conversation_with_physician"
-      3. Clave base sin prefijo:  "personal_conversation_with_physician"
+      1. Clave exacta:          "3_5_4__fridge__device_available"
+      2. Primer _ → punto:      "3.5_4__fridge__device_available"  (compat. legacy)
+      3. Todos los _ del prefijo de sección → puntos:
+                                "3.5.4__fridge__device_available"
+         Cubre uploads recientes donde el subsection code usa puntos (3.5.4) en lugar de
+         guiones bajos (3_5_4). Crítico para secciones 3.5.x y 3.7.x.
+      4. Clave base sin prefijo: "fridge__device_available"
+      5. Base sin prefijo y sin último sufijo _word:
+         "3_8__autoantibodies_aab" -> "autoantibodies"
+         "3_3__estimate_arrival_time_of_emergency_personnel_min" -> "estimate_arrival_time_of_emergency_personnel"
     """
     v = qual_data.get(key)
     if v is None and "_" in key:
+        # Fallback 2: replace only first underscore with dot
         v = qual_data.get(key.replace("_", ".", 1))
     if v is None and "__" in key:
-        v = qual_data.get(key.split("__", 1)[1])
+        # Fallback 3: replace ALL underscores in the section prefix with dots
+        section_part, _, rest = key.partition("__")
+        section_dotted = section_part.replace("_", ".")
+        if section_dotted != section_part:
+            v = qual_data.get(f"{section_dotted}__{rest}")
+        # Fallback 4: strip section prefix entirely → base slug
+        if v is None:
+            v = qual_data.get(rest)
+        # Fallback 5: strip last underscore-word suffix from base slug
+        if v is None:
+            last_sep = rest.rfind("_")
+            if last_sep > 0:
+                v = qual_data.get(rest[:last_sep])
     return v
 
 
@@ -358,6 +378,25 @@ def _guess_slugs_for_question(question_text: str, subcode: str | None) -> list[_
 # === Overrides & filtros para el catálogo qual.* que muestra /api/explorer/fields ===
 # Prefijos de grupo (sección) a excluir del Column Picker (p.ej. "4." -> irá a Profiling)
 EXCLUDE_QUAL_GROUP_PREFIXES: tuple[str, ...] = ("1.", "PART I", "4.", "PART IV")
+
+# Keys JSONB históricos (sin prefijo de sección) que aparecen en uploads antiguos pero tienen
+# un campo canónico section-prefixed equivalente en el catálogo actual. El 4º fallback de
+# _qual_get resuelve el campo canónico hacia estos keys viejos, así que el catálogo solo
+# debe mostrar el canónico y excluir estos duplicados.
+QUAL_FIELD_BLACKLIST: frozenset[str] = frozenset({
+    # Superseded by qual.3_8__insulin → fallback strips prefix → "insulin"
+    "are_insulin_tests_available",
+    # Superseded by qual.3_8__gad65 → fallback strips prefix → "gad65"
+    "are_gad65_tests_available",
+    # Superseded by qual.3_8__autoantibodies_aab → 4th fallback strips "_aab" → "autoantibodies"
+    "autoantibodies",
+    # Superseded by qual.3_3__estimate_arrival_time_of_emergency_personnel_min → 5th fallback strips "_min"
+    "estimate_arrival_time_of_emergency_personnel",
+    # Superseded by qual.3_5_1__how_long_are_documents_retained_years → 5th fallback strips "_years"
+    "how_long_are_documents_retained",
+    # Superseded by qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours → strips "_hours"
+    "longest_single_day_visit_that_could_be_accommodated",
+})
 
 # Limite de “Describe” puros por subsección (independiente de versiones)
 # clave = subcode con guiones bajos (p.ej. '3_4')
@@ -902,7 +941,7 @@ class Rule(BaseModel):
     value: Any
 
 class FilterQuery(BaseModel):
-    logic: Literal["AND", "OR"] = "AND"
+    logic: str = "AND"  # "AND", "OR", or expression like "1 AND (2 OR 3)"
     rules: List[Rule] = Field(default_factory=list)
     columns: List[str] = Field(default_factory=list)
 
@@ -974,6 +1013,110 @@ _OP_MAP = {
     "equals": "=", "not_equals": "!=",
     ">": ">", ">=": ">=", "<": "<", "<=": "<=",
 }
+
+def _flatten_filter_rules(group: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Recursively flatten nested FilterGroup sub-groups into a single list of leaf rules.
+
+    FilterBuilder can produce nested groups like:
+        {logic:AND, rules:[{logic:OR, rules:[{site.country=Spain}, {site.country=PT}]}, ...]}
+    The classification loops only handle flat rules. This helper extracts all leaf rules
+    so nested groups are not silently ignored during classification.
+    Note: nested group logic is not preserved — the parent's logic applies after flattening.
+    For site.country rules this is fine because the multi-country AND→OR fix handles them.
+    """
+    result: List[Dict[str, Any]] = []
+    for item in (group.get("rules") or []):
+        if "rules" in item and not item.get("field"):  # sub-group
+            result.extend(_flatten_filter_rules(item))
+        else:
+            result.append(item)
+    return result
+
+
+def _is_logic_expr(logic: str) -> bool:
+    """Returns True if logic is a Salesforce-style expression like '1 AND (2 OR 3)'
+    rather than a simple 'AND' or 'OR'."""
+    return bool(re.search(r"\d", logic or ""))
+
+
+def _eval_logic_expr_be(expr: str, results: Dict[int, bool]) -> bool:
+    """Evaluate a Salesforce-style logic expression like '1 AND (2 OR 3)'.
+
+    results: dict mapping 1-indexed rule numbers to bool.
+             Unknown indices (rules in other categories or SF-filtered rules) default to True.
+
+    Operator precedence: AND binds tighter than OR (standard logic).
+    """
+    tokens: List[Any] = []
+    i = 0
+    s = expr.strip()
+    while i < len(s):
+        c = s[i]
+        if c in " \t\n\r":
+            i += 1; continue
+        if c == "(":
+            tokens.append("LPAREN"); i += 1; continue
+        if c == ")":
+            tokens.append("RPAREN"); i += 1; continue
+        if c.isdigit():
+            n = ""
+            while i < len(s) and s[i].isdigit():
+                n += s[i]; i += 1
+            tokens.append(("NUM", int(n))); continue
+        if s[i:i+3].upper() == "AND" and (i+3 >= len(s) or not s[i+3].isalnum()):
+            tokens.append("AND"); i += 3; continue
+        if s[i:i+2].upper() == "OR" and (i+2 >= len(s) or not s[i+2].isalnum()):
+            tokens.append("OR"); i += 2; continue
+        i += 1  # skip unexpected chars gracefully
+
+    tokens.append("EOF")
+    pos = [0]
+
+    def peek():
+        return tokens[pos[0]] if pos[0] < len(tokens) else "EOF"
+
+    def consume():
+        t = tokens[pos[0]]
+        pos[0] += 1
+        return t
+
+    def parse_expr():
+        left = parse_term()
+        while peek() == "OR":
+            consume()
+            right = parse_term()
+            left = left or right
+        return left
+
+    def parse_term():
+        left = parse_factor()
+        while peek() == "AND":
+            consume()
+            right = parse_factor()
+            left = left and right
+        return left
+
+    def parse_factor():
+        t = peek()
+        if t == "LPAREN":
+            consume()
+            v = parse_expr()
+            if peek() == "RPAREN":
+                consume()
+            return v
+        if isinstance(t, tuple) and t[0] == "NUM":
+            consume()
+            return results.get(t[1], True)  # unknown rule → True (don't exclude)
+        if t == "EOF":
+            return True
+        consume()
+        return True
+
+    try:
+        return bool(parse_expr())
+    except Exception:
+        return True  # fail open: don't exclude rows if expression fails
+
 
 def _norm_label_to_key(x: Any) -> str:
     if isinstance(x, dict):
@@ -1745,7 +1888,12 @@ def _infer_qual_fields(db: Session, sample: int = 200) -> List[Dict[str, Any]]:
         if "__" not in canonical and canonical in key_priority_map:
             if key_priority_map[canonical] != canonical:
                 continue  # Skip the base key, we'll use the versioned one
-        
+
+        # Skip old-style JSONB keys that are superseded by canonical section-prefixed keys
+        # (the canonical key resolves back to these via _qual_get's 4th fallback)
+        if canonical in QUAL_FIELD_BLACKLIST:
+            continue
+
         # Skip if we've already processed this exact key
         if canonical in processed_keys:
             continue
@@ -2557,26 +2705,39 @@ async def explorer_search(
         except Exception:
             return k
 
-    for r in (filters.get("rules") or []):
+    _flat_rules_raw = _flatten_filter_rules(filters)
+    site_rule_indices: List[int] = []
+    sf_rule_indices: List[int] = []
+    qual_rule_indices: List[int] = []
+    account_rule_indices: List[int] = []
+    member_rule_indices: List[int] = []
+    extra_rule_indices: List[int] = []
+
+    for _orig_idx, r in enumerate(_flat_rules_raw):
+        _rule_1idx = _orig_idx + 1
         f = _norm_label_to_key_safe(r.get("field") or "")
         op = r.get("op") or r.get("operator") or "equals"
         val = r.get("value")
 
         if f in ("sf.Account.MemberName", "Account.MemberName"):
             member_rules.append(Rule(field="sf.Account.MemberName", operator=op, value=val))
+            member_rule_indices.append(_rule_1idx)
             need_member = True
             continue
         # (HasPI filtering removed - field deprecated)
 
         if f.startswith("extra."):
             extra_rules.append(Rule(field=f, operator=op, value=val))
+            extra_rule_indices.append(_rule_1idx)
             need_batch_extras = True
         elif f.startswith("site."):
             site_rules.append(Rule(field=f, operator=op, value=val))
+            site_rule_indices.append(_rule_1idx)
         elif f.startswith("sf."):
             nf = f[3:]
             if nf.startswith("Account."):
                 account_rules.append(Rule(field=nf[8:], operator=op, value=val))
+                account_rule_indices.append(_rule_1idx)
                 need_account_extras = True
             elif nf.startswith("Assignment."):
                 # Assignment__c fields are not queryable in Opportunity SOQL.
@@ -2584,27 +2745,37 @@ async def explorer_search(
                 if nf == "Assignment.Name":
                     _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
                     extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                    extra_rule_indices.append(_rule_1idx)
                     need_batch_extras = True  # must fetch assignment data from SF
                 # Other sf.Assignment.* fields (Type, Stage, MCA, Payment) silently skipped
             else:
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
+                sf_rule_indices.append(_rule_1idx)
         elif f.startswith("Account."):
             account_rules.append(Rule(field=f[8:], operator=op, value=val))
+            account_rule_indices.append(_rule_1idx)
             need_account_extras = True
         elif f.startswith("qual."):
             qual_rules.append(Rule(field=f[5:], operator=op, value=val))
+            qual_rule_indices.append(_rule_1idx)
         elif f.startswith("Assignment."):
             # Frontend strips "sf." prefix: "sf.Assignment.Name" → "Assignment.Name"
             if f == "Assignment.Name":
                 _aop = "contains" if op in ("equals", "=") else ("not_contains" if op in ("not_equals", "!=") else op)
                 extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
+                extra_rule_indices.append(_rule_1idx)
                 need_batch_extras = True
         else:
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
                 sf_rules.append(Rule(field=f, operator=op, value=val))
+                sf_rule_indices.append(_rule_1idx)
 
     merged_rules = sf_rules + _prefix_account_rules_for_where(account_rules)
-    sf_filter = FilterQuery(logic=filters.get("logic", "AND"), rules=merged_rules)
+    _raw_logic = filters.get("logic") or "AND"
+    # For expression-based logic (e.g. "1 AND (2 OR 3)"), SOQL uses OR (safe over-inclusion)
+    # Python-side pass_* functions do exact evaluation using the expression.
+    _soql_logic: str = _raw_logic if _raw_logic in ("AND", "OR") else "OR"
+    sf_filter = FilterQuery(logic=_soql_logic, rules=merged_rules)
 
     # -------- Columnas solicitadas --------
     requested_cols: List[str] = []
@@ -3007,12 +3178,15 @@ async def explorer_search(
                 s_norm = s_iso if s_iso else s
                 def _country_match(v: str, needle: str) -> bool:
                     vl, nl = v.lower(), needle.lower()
+                    # For partial-match ops, use the raw (un-normalized) search string
+                    # so "Italy" doesn't become "it" and falsely match "Switzerland" / "Lithuania"
+                    raw = s.lower()
                     if   op in ("equals","="):       return iso.lower() == nl or display.lower() == nl
                     elif op in ("not_equals","!="):  return iso.lower() != nl and display.lower() != nl
-                    elif op == "contains":           return nl in iso.lower() or nl in display.lower()
-                    elif op == "not_contains":       return nl not in iso.lower() and nl not in display.lower()
-                    elif op == "starts_with":        return iso.lower().startswith(nl) or display.lower().startswith(nl)
-                    elif op == "ends_with":          return iso.lower().endswith(nl) or display.lower().endswith(nl)
+                    elif op == "contains":           return raw in iso.lower() or raw in display.lower()
+                    elif op == "not_contains":       return raw not in iso.lower() and raw not in display.lower()
+                    elif op == "starts_with":        return iso.lower().startswith(raw) or display.lower().startswith(raw)
+                    elif op == "ends_with":          return iso.lower().endswith(raw) or display.lower().endswith(raw)
                     return True
                 return _country_match(iso, s_norm)
             if   op in ("equals","="):      return val.lower() == s.lower()
@@ -3022,8 +3196,28 @@ async def explorer_search(
             elif op == "starts_with":       return val.lower().startswith(s.lower())
             elif op == "ends_with":         return val.lower().endswith(s.lower())
             return True
-        glue_and = (filters.get("logic") or "AND") == "AND"
+        logic_str = filters.get("logic") or "AND"
         res = [match_one(r) for r in site_rules]
+        if _is_logic_expr(logic_str):
+            # Expression-based: build per-rule results dict and evaluate
+            expr_results = {site_rule_indices[i]: res[i] for i in range(len(site_rules))}
+            # Multi-country override: a site can't be in two countries simultaneously,
+            # so multiple country rules are always OR-combined (same as AND-mode below).
+            country_pos = [i for i, r in enumerate(site_rules) if r.field == "site.country"]
+            if len(country_pos) > 1:
+                country_pass = any(res[i] for i in country_pos)
+                for i in country_pos:
+                    expr_results[site_rule_indices[i]] = country_pass
+            return _eval_logic_expr_be(logic_str, expr_results)
+        # Multiple "site.country equals X" rules under AND logic is semantically nonsensical
+        # (a site can't be in two countries). Treat country rules as OR, city rules as AND.
+        glue_and = logic_str == "AND"
+        if glue_and:
+            country_idx = [i for i, r in enumerate(site_rules) if r.field == "site.country"]
+            if len(country_idx) > 1:
+                country_pass = any(res[i] for i in country_idx)
+                other_pass = all(res[i] for i in range(len(res)) if i not in set(country_idx))
+                return country_pass and other_pass
         return all(res) if glue_and else any(res)
 
     def pass_qual(qual_data: Dict[str, Any]) -> bool:
@@ -3031,7 +3225,11 @@ async def explorer_search(
             return True
         results = [_eval_qual_rule(_qual_get(qual_data, qr.field), qr.operator, qr.value)
                    for qr in qual_rules]
-        glue_and = (filters.get("logic") or "AND") == "AND"
+        logic_str = filters.get("logic") or "AND"
+        if _is_logic_expr(logic_str):
+            expr_results = {qual_rule_indices[i]: results[i] for i in range(len(qual_rules))}
+            return _eval_logic_expr_be(logic_str, expr_results)
+        glue_and = logic_str == "AND"
         return all(results) if glue_and else any(results)
 
     def pass_member(aid: str) -> bool:
@@ -3047,8 +3245,12 @@ async def explorer_search(
             elif op == "ends_with":         return (actual or "").lower().endswith(s.lower())
             return True
         actual = member_by_acc.get(str(aid)) or ""
-        glue_and = (filters.get("logic") or "AND") == "AND"
         res = [eval_rule_text(actual, r) for r in member_rules]
+        logic_str = filters.get("logic") or "AND"
+        if _is_logic_expr(logic_str):
+            expr_results = {member_rule_indices[i]: res[i] for i in range(len(member_rules))}
+            return _eval_logic_expr_be(logic_str, expr_results)
+        glue_and = logic_str == "AND"
         return all(res) if glue_and else any(res)
 
     # pass_haspi removed: HasPI filtering deprecated/removed
@@ -3057,11 +3259,15 @@ async def explorer_search(
         if not extra_rules:
             return True
         vals = extras_map.get(str(aid), {}) if extras_map else {}
-        glue_and = (filters.get("logic") or "AND") == "AND"
         res = []
         for er in extra_rules:
             actual = vals.get(er.field)
             res.append(_eval_qual_rule(actual, er.operator, er.value))
+        logic_str = filters.get("logic") or "AND"
+        if _is_logic_expr(logic_str):
+            expr_results = {extra_rule_indices[i]: res[i] for i in range(len(extra_rules))}
+            return _eval_logic_expr_be(logic_str, expr_results)
+        glue_and = logic_str == "AND"
         return all(res) if glue_and else any(res)
 
     def pass_account(aid: str) -> bool:
@@ -3081,8 +3287,15 @@ async def explorer_search(
     # Helper: applies all Python-side pass_* checks respecting root AND/OR logic.
     # For AND (default): all categories must pass.
     # For OR: at least one category with actual rules must pass.
-    _root_and = (filters.get("logic") or "AND") == "AND"
+    _root_logic = filters.get("logic") or "AND"
+    _root_and = _root_logic == "AND"
     def passes_row_checks(acc: Dict[str, Any], qual_data: Dict[str, Any], aid: str) -> bool:
+        # Expression mode: each pass_* evaluates its category rules using the expression.
+        # SF rules are pre-filtered by SOQL → treated as True for any surviving row.
+        # This correctly handles same-category expressions; cross-category defaults to AND.
+        if _is_logic_expr(_root_logic):
+            return (pass_site(acc) and pass_qual(qual_data) and
+                    pass_member(aid) and pass_account(aid) and pass_extra(aid))
         if _root_and:
             return (pass_site(acc) and pass_qual(qual_data) and
                     pass_member(aid) and pass_account(aid) and pass_extra(aid))
@@ -4164,8 +4377,8 @@ async def explorer_search_within_drive_km(
         except Exception:
             return k
 
-    # Clasificación de reglas
-    for r in (filters.get("rules") or []):
+    # Clasificación de reglas (nested sub-groups are flattened first)
+    for r in _flatten_filter_rules(filters):
         f = _norm_label_to_key_safe(r.get("field") or "")
         op = r.get("op") or r.get("operator") or "equals"
         val = r.get("value")
@@ -4590,6 +4803,14 @@ async def explorer_search_within_drive_km(
             return True
         glue_and = (filters.get("logic") or "AND") == "AND"
         res = [match_one(r) for r in site_rules]
+        # Multiple "site.country equals X" rules under AND logic is semantically nonsensical
+        # (a site can't be in two countries). Treat country rules as OR, city rules as AND.
+        if glue_and:
+            country_idx = [i for i, r in enumerate(site_rules) if r.field == "site.country"]
+            if len(country_idx) > 1:
+                country_pass = any(res[i] for i in country_idx)
+                other_pass = all(res[i] for i in range(len(res)) if i not in set(country_idx))
+                return country_pass and other_pass
         return all(res) if glue_and else any(res)
 
     def pass_qual(qual_data: Dict[str, Any]) -> bool:

@@ -6062,15 +6062,19 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
             ))
             if asks_country_sites:
-                # Match longest alias first to avoid false positives
-                _matched_country = None
-                _matched_sf_name = None
-                _matched_iso = None
+                # Match ALL countries in query (deduplicate by sf_name)
+                _matched_countries: List[Tuple[str, str]] = []  # [(sf_name, iso), ...]
+                _seen_sf_names: set = set()
                 for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
                     if _cn in s:
-                        _matched_country = _cn
-                        _matched_sf_name, _matched_iso = _COUNTRY_MAP[_cn]
-                        break
+                        _sf_name_c, _iso_c = _COUNTRY_MAP[_cn]
+                        if _sf_name_c not in _seen_sf_names:
+                            _matched_countries.append((_sf_name_c, _iso_c))
+                            _seen_sf_names.add(_sf_name_c)
+                # Back-compat aliases for single-country path
+                _matched_country = _matched_countries[0][0] if _matched_countries else None
+                _matched_sf_name = _matched_countries[0][0] if _matched_countries else None
+                _matched_iso = _matched_countries[0][1] if _matched_countries else None
                 if _matched_country and _matched_sf_name and not sf:
                     # SF session not available → fallback: query local sites table using full country name
                     # (sites table stores full English names like "Italy", not ISO codes)
@@ -6107,7 +6111,13 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     }
                 if _matched_country and _matched_sf_name and sf:
                     # Use WHERE clause directly in SOQL (faster than fetching 2000+ records + Python filter)
-                    _esc_country_sf = _sf_escape_value(_matched_sf_name)
+                    # Multi-country: use IN (...); single-country: use = '...'
+                    if len(_matched_countries) > 1:
+                        _in_vals = ", ".join(f"'{_sf_escape_value(n)}'" for n, _ in _matched_countries)
+                        _country_clause = f"AND Account.ShippingCountry IN ({_in_vals}) "
+                    else:
+                        _esc_country_sf = _sf_escape_value(_matched_sf_name)
+                        _country_clause = f"AND Account.ShippingCountry = '{_esc_country_sf}' "
                     soql_country = (
                         "SELECT Account.Id, Account.Name, Account.ShippingCity, Account.ShippingCountry, "
                         "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
@@ -6116,7 +6126,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         "FROM Opportunity "
                         "WHERE Account.RecordType.DeveloperName='SubAccount' "
                         "AND Account.C_Type__c='Clinical' "
-                        f"AND Account.ShippingCountry = '{_esc_country_sf}' "
+                        + _country_clause +
                         "ORDER BY Account.Name ASC "
                         "LIMIT 300"
                     )
@@ -6152,12 +6162,21 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         {"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2"},
                     ]
                     tbl_country = _normalize_table_for_ui({"columns": cols_country, "rows": rows_country})
+                    _country_names_str = ", ".join(n for n, _ in _matched_countries)
                     _dbg("Planner country deterministic (SF query): %d sites in %s",
-                         len(rows_country), _matched_sf_name)
-                    _country_sf_lf = {
-                        "logic": "AND",
-                        "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
-                    }
+                         len(rows_country), _country_names_str)
+                    # last_filters: OR for multi-country, single rule for one country
+                    if len(_matched_countries) > 1:
+                        _country_sf_lf = {
+                            "logic": "OR",
+                            "rules": [{"field": "site.country", "operator": "equals", "value": n}
+                                      for n, _ in _matched_countries]
+                        }
+                    else:
+                        _country_sf_lf = {
+                            "logic": "AND",
+                            "rules": [{"field": "site.country", "operator": "equals", "value": _matched_sf_name}]
+                        }
                     # Build a richer answer: top cities + key metrics summary
                     _city_counts: Dict[str, int] = {}
                     _s1_total = _s2_total = 0
@@ -6169,7 +6188,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         _s2_total += float(_r.get("sf.C_Number_of_Stage2_Individuals_followed__c") or 0)
                     _top_cities = sorted(_city_counts.items(), key=lambda x: x[1], reverse=True)[:3]
                     _city_txt = ", ".join(f"{c} ({n})" for c, n in _top_cities) if _top_cities else ""
-                    _ans_parts = [f"Found <strong>{len(rows_country)}</strong> clinical site(s) in <strong>{_matched_sf_name}</strong>."]
+                    _ans_parts = [f"Found <strong>{len(rows_country)}</strong> clinical site(s) in <strong>{_country_names_str}</strong>."]
                     if _city_txt:
                         _ans_parts.append(f"Top cities: {_city_txt}.")
                     if _s1_total > 0 or _s2_total > 0:

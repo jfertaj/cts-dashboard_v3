@@ -108,7 +108,10 @@ export type FilterRule = {
   op: "eq" | "neq" | "contains" | "icontains" | "not_contains" | "starts_with" | "ends_with" | ">" | ">=" | "<" | "<=";
   value: any;
 };
-export type FilterGroup = { logic: "AND" | "OR"; rules: (FilterRule | FilterGroup)[] };
+// Rule using "operator" (new canonical format used by FilterBuilder and filterLogic)
+export type Rule = { field: string; operator: string; value: any };
+// FilterGroup accepts both legacy FilterRule (op) and new Rule (operator) as leaves
+export type FilterGroup = { logic: string; rules: (FilterRule | Rule | FilterGroup)[] };
 
 export type ExplorerPoint = {
   lat: number | null;
@@ -181,7 +184,7 @@ function mapOpFlexible(op?: string): string {
 }
 
 // ====== v1 (plano): mantiene compat con backend actual ======
-function normalizeFiltersFlat(input: FilterGroup): { logic: "AND" | "OR"; rules: FlatRule[] } {
+function normalizeFiltersFlat(input: FilterGroup): { logic: string; rules: FlatRule[] } {
   const out: FlatRule[] = [];
   const walk = (g: FilterGroup) => {
     for (const r of g.rules) {

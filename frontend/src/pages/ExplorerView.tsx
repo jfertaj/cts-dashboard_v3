@@ -12,6 +12,7 @@ import {
   explorerFillColumns,
 } from "../lib/api";
 import FilterBuilder from "../components/FilterBuilder";
+import { filterGroupToFlat, removeRuleFromExpr, defaultExpr } from "../lib/filterLogic";
 import MapView from "../components/MapView";
 import ColumnPicker from "../components/ColumnPicker";
 import ChartModal from "../components/ChartModal";
@@ -1260,6 +1261,7 @@ export default function ExplorerView() {
   const [lastNearbyBaseName, setLastNearbyBaseName] = useState<string | null>(null);
   const [nearbyActive, setNearbyActive] = useState(false);
   const [nearbyPanelOpen, setNearbyPanelOpen] = useState(false);
+  const [filterCollapsed, setFilterCollapsed] = useState(false);
   const [nearbyLayout, setNearbyLayout] = useState<NearbyLayout>(
     safeParse<NearbyLayout>(localStorage.getItem(LS_KEYS.nearbyLayout), "side")
   );
@@ -1796,7 +1798,12 @@ export default function ExplorerView() {
 
   // Remove a single top-level filter rule by index and re-trigger search
   const removeRuleAtIndex = useCallback((idx: number) => {
-    setFilters(prev => ({ ...prev, rules: prev.rules.filter((_, i) => i !== idx) }));
+    setFilters(prev => {
+      const removedId = idx + 1;  // rules are 1-indexed in the new system
+      const newRules = prev.rules.filter((_, i) => i !== idx);
+      const newExpr = removeRuleFromExpr(prev.logic, removedId) || defaultExpr(newRules.length);
+      return { ...prev, logic: newExpr, rules: newRules };
+    });
     setAutoSearchTrigger(t => t + 1);
   }, []);
 
@@ -2517,7 +2524,11 @@ export default function ExplorerView() {
     function onSetFilters(e: Event) {
       const ev = e as CustomEvent<{ filters?: FilterGroup }>;
       if (ev.detail?.filters) {
-        setFilters(ev.detail.filters);
+        const flat = filterGroupToFlat(ev.detail.filters);
+        setFilters({
+          logic: flat.logicExpr || defaultExpr(flat.rules.length),
+          rules: flat.rules.map(r => ({ field: r.field, operator: r.operator, value: r.value })),
+        });
         setTimeout(() => { void onSearch(); }, 0);
       }
     }
@@ -2538,7 +2549,11 @@ export default function ExplorerView() {
       const ev = e as CustomEvent<{ filters?: FilterGroup }>;
       if (!ev.detail?.filters) return;
       const incoming = normalizeAccountIdCsvToOr(ev.detail.filters);
-      setFilters(incoming);
+      const flat = filterGroupToFlat(incoming);
+      setFilters({
+        logic: flat.logicExpr || defaultExpr(flat.rules.length),
+        rules: flat.rules.map(r => ({ field: r.field, operator: r.operator, value: r.value })),
+      });
       // ejecuta la búsqueda con todas las columnas
       setTimeout(() => { void onSearch(); }, 0);
     }
@@ -2660,14 +2675,24 @@ export default function ExplorerView() {
       {/* Header filtros */}
       <div data-testid="explorer-filter-panel" className="rounded-xl border bg-white shadow-sm">
         <div className="px-4 py-2 bg-gray-100 border-b flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800 flex items-center gap-2">
-            Filters (nested AND/OR)
+          <button
+            className="font-semibold text-gray-800 flex items-center gap-2 hover:text-blue-700 focus:outline-none"
+            onClick={() => setFilterCollapsed(v => !v)}
+            title={filterCollapsed ? "Expand filters" : "Collapse filters"}
+          >
+            <svg
+              className={`h-4 w-4 text-gray-500 transition-transform ${filterCollapsed ? "-rotate-90" : ""}`}
+              viewBox="0 0 16 16" fill="none" aria-hidden
+            >
+              <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Filters
             {activeRuleCount > 0 && (
               <span className="inline-flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 min-w-[20px]">
                 {activeRuleCount}
               </span>
             )}
-          </h2>
+          </button>
           <div className="flex gap-2 items-center">
             {nearbyActive && (
               <span className="hidden md:inline-flex items-center gap-2 mr-2 text-sm rounded-full border px-3 py-1 bg-emerald-50 text-emerald-700">
@@ -2726,14 +2751,22 @@ export default function ExplorerView() {
         </div>
 
         <div className="p-4">
-          <FilterBuilder
-            value={filters}
-            onChange={setFilters}
-            fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]).filter(f => !EXCLUDED_FILTER_FIELDS.has(f.key)) : []}
-          />
-          {/* Active filter chips */}
+          {!filterCollapsed && (
+            <FilterBuilder
+              value={filters}
+              onChange={setFilters}
+              fields={Array.isArray(fieldDefs) ? (fieldDefs as LocalFieldDef[]).filter(f => !EXCLUDED_FILTER_FIELDS.has(f.key)) : []}
+            />
+          )}
+          {/* Active filter chips — always visible, also serve as summary when collapsed */}
           {filters.rules.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
+            <div className={`flex flex-wrap gap-1.5 mb-1 ${filterCollapsed ? "" : "mt-2"}`}>
+              {/* Logic expression summary (shown when collapsed and expression is non-trivial) */}
+              {filterCollapsed && filters.logic && filters.logic !== "AND" && filters.logic !== "OR" && (
+                <span className="self-center text-xs text-gray-400 font-mono mr-1">
+                  Logic: <code className="bg-blue-50 text-blue-700 border border-blue-100 rounded px-1">{filters.logic}</code>
+                </span>
+              )}
               {filters.rules.map((r, i) => {
                 const isRule = r && typeof (r as any).field === "string";
                 const rule = r as any;
@@ -2760,6 +2793,7 @@ export default function ExplorerView() {
                     key={i}
                     className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs px-2.5 py-0.5"
                   >
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-200 text-blue-700 text-[10px] font-bold flex-shrink-0">{i + 1}</span>
                     <span className="max-w-[240px] truncate" title={chipLabel}>{chipLabel}</span>
                     <button
                       className="ml-0.5 rounded-full hover:bg-blue-200 p-0.5 text-blue-600 flex-shrink-0"
@@ -3098,17 +3132,17 @@ showPresets={false}
                           return base;
                         });
                       }}
-                      className="px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap select-none align-bottom"
-                      title="Drag to reorder"
+                      className="px-3 py-2 text-left font-semibold text-gray-700 select-none align-bottom max-w-[180px]"
+                      title={String(header.column.columnDef.header ?? "")}
                     >
                       <button
-                        className={`inline-flex items-center gap-1 ${canSort ? "cursor-pointer" : "cursor-default"}`}
+                        className={`inline-flex items-center gap-1 w-full min-w-0 ${canSort ? "cursor-pointer" : "cursor-default"}`}
                         onClick={header.column.getToggleSortingHandler()}
                         disabled={!canSort}
-                        title={canSort ? "Click to sort" : undefined}
+                        title={canSort ? `${String(header.column.columnDef.header ?? "")} — click to sort` : String(header.column.columnDef.header ?? "")}
                       >
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                        {dir ? (dir === "asc" ? " ▲" : " ▼") : ""}
+                        <span className="truncate">{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                        {dir ? <span className="flex-shrink-0">{dir === "asc" ? " ▲" : " ▼"}</span> : ""}
                       </button>
                       {header.column.getCanFilter() ? (
                         <div className="mt-1">
@@ -3169,14 +3203,22 @@ showPresets={false}
                       }}
                     />
                   </td>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} data-testid="explorer-table-cell" className="px-3 py-2 whitespace-nowrap">
-                      {flexRender(
-                        cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
-                        cell.getContext()
-                      )}
+                  {row.getVisibleCells().map((cell) => {
+                    const raw = cell.getValue();
+                    const strVal = raw == null ? "" : String(raw);
+                    return (
+                    <td key={cell.id} data-testid="explorer-table-cell"
+                        className="px-3 py-2 max-w-[260px]"
+                        title={strVal.length > 40 ? strVal : undefined}>
+                      <div className="truncate">
+                        {flexRender(
+                          cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
+                          cell.getContext()
+                        )}
+                      </div>
                     </td>
-                  ))}
+                    );
+                  })}
                 </tr>
                 );
               })
