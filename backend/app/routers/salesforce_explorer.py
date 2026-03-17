@@ -1037,6 +1037,54 @@ def _flatten_filter_rules(group: Dict[str, Any]) -> List[Dict[str, Any]]:
     return result
 
 
+def _filter_group_to_expr(fg: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a nested FilterGroup (sub-groups inside rules) to expression format.
+
+    Nested sub-groups lose their inner logic when flattened.  This function
+    converts the tree into a numbered expression string so the existing
+    ``_eval_logic_expr_be`` evaluator can honour every AND/OR correctly.
+
+    Example::
+
+        {logic:"AND", rules:[{logic:"OR", rules:[ruleA, ruleB]}, ruleC]}
+        → {logic:"(1 OR 2) AND 3", rules:[ruleA, ruleB, ruleC]}
+
+    If the group has no nested sub-groups, or is already in expression format
+    (logic contains a digit), it is returned unchanged.
+    """
+    rules = fg.get("rules") or []
+    logic = fg.get("logic") or "AND"
+
+    # Already an expression string — leave as-is
+    if _is_logic_expr(logic):
+        return fg
+
+    # No nested sub-groups — nothing to convert
+    has_sub_groups = any("rules" in r and not r.get("field") for r in rules)
+    if not has_sub_groups:
+        return fg
+
+    flat_rules: List[Dict[str, Any]] = []
+
+    def _build_expr(node: Dict[str, Any]) -> str:
+        node_logic = node.get("logic") or "AND"
+        node_rules = node.get("rules") or []
+        parts = []
+        for rule in node_rules:
+            if "rules" in rule and not rule.get("field"):  # sub-group
+                sub_expr = _build_expr(rule)
+                parts.append(f"({sub_expr})")
+            else:
+                flat_rules.append(rule)
+                parts.append(str(len(flat_rules)))
+        if not parts:
+            return "1"  # degenerate empty group
+        return f" {node_logic} ".join(parts)
+
+    expr = _build_expr(fg)
+    return {"logic": expr, "rules": flat_rules}
+
+
 def _is_logic_expr(logic: str) -> bool:
     """Returns True if logic is a Salesforce-style expression like '1 AND (2 OR 3)'
     rather than a simple 'AND' or 'OR'."""
@@ -2721,6 +2769,10 @@ async def explorer_search(
         except Exception:
             return k
 
+    # Convert nested sub-groups to expression format BEFORE flattening,
+    # so inner AND/OR logic is preserved in the expression evaluator.
+    filters = _filter_group_to_expr(filters)
+
     _flat_rules_raw = _flatten_filter_rules(filters)
     site_rule_indices: List[int] = []
     sf_rule_indices: List[int] = []
@@ -3799,7 +3851,47 @@ async def explorer_search(
             },
         })
 
-    resp = {"points": points, "rows": rows}
+    # Build columns metadata from requested_cols (or auto-detect from first row)
+    def _col_label(key: str) -> str:
+        """Generate a human-readable label from a field key."""
+        s = key
+        for pfx in ("sf.Account.", "sf.", "qual.", "site.", "extra.", "account_"):
+            if s.startswith(pfx):
+                s = s[len(pfx):]
+                break
+        # Strip trailing __c
+        s = re.sub(r"__c$", "", s)
+        # Strip section prefixes like "3_6__"
+        s = re.sub(r"^\d+_\d+_*\d*__", "", s)
+        return s.replace("_", " ").strip().title()
+
+    if requested_cols:
+        _always = [
+            {"key": "account_name", "label": "Site", "type": "text"},
+            {"key": "country",      "label": "Country", "type": "text"},
+            {"key": "city",         "label": "City", "type": "text"},
+        ]
+        _req_meta = [
+            {"key": k, "label": _col_label(k), "type": "text"}
+            for k in requested_cols
+            if k not in {"account_name", "country", "city"}
+        ]
+        _col_meta = _always + _req_meta
+    elif rows:
+        # Auto-detect from first row's data keys
+        _always = [
+            {"key": "account_name", "label": "Site", "type": "text"},
+            {"key": "country",      "label": "Country", "type": "text"},
+            {"key": "city",         "label": "City", "type": "text"},
+        ]
+        _data_keys = list((rows[0].get("data") or {}).keys())
+        _col_meta = _always + [
+            {"key": k, "label": _col_label(k), "type": "text"} for k in _data_keys
+        ]
+    else:
+        _col_meta = []
+
+    resp = {"points": points, "rows": rows, "columns": _col_meta}
     if debug:
         # Muestras no sensibles para diagnóstico
         resp["_debug"] = {

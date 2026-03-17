@@ -7,7 +7,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from app.routers.salesforce_explorer import _is_logic_expr, _eval_logic_expr_be
+from app.routers.salesforce_explorer import _is_logic_expr, _eval_logic_expr_be, _filter_group_to_expr
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -132,3 +132,59 @@ class TestEvalLogicExprEdge:
     def test_lowercase_operators(self):
         assert _eval_logic_expr_be("1 and 2", {1: True, 2: True}) is True
         assert _eval_logic_expr_be("1 or 2", {1: False, 2: True}) is True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _filter_group_to_expr — nested group → expression conversion
+# ──────────────────────────────────────────────────────────────────────────────
+
+_R = lambda field: {"field": field, "operator": "equals", "value": "x"}
+
+
+class TestFilterGroupToExpr:
+    def test_flat_and_unchanged(self):
+        """Simple AND with no sub-groups: returns as-is."""
+        fg = {"logic": "AND", "rules": [_R("site.country"), _R("qual.overnight")]}
+        result = _filter_group_to_expr(fg)
+        assert result is fg  # same object, no conversion
+
+    def test_flat_or_unchanged(self):
+        fg = {"logic": "OR", "rules": [_R("site.country"), _R("site.country")]}
+        result = _filter_group_to_expr(fg)
+        assert result is fg
+
+    def test_already_expression_unchanged(self):
+        fg = {"logic": "1 AND 2", "rules": [_R("site.country"), _R("qual.overnight")]}
+        result = _filter_group_to_expr(fg)
+        assert result is fg
+
+    def test_nested_or_inside_and(self):
+        """(ES OR IT) AND overnight → (1 OR 2) AND 3"""
+        or_group = {"logic": "OR", "rules": [_R("site.country"), _R("site.country")]}
+        overnight = _R("qual.overnight")
+        fg = {"logic": "AND", "rules": [or_group, overnight]}
+        result = _filter_group_to_expr(fg)
+        assert result["logic"] == "(1 OR 2) AND 3"
+        assert len(result["rules"]) == 3
+        assert result["rules"][2] is overnight
+
+    def test_or_of_ands(self):
+        """(DE AND overnight) OR (FR AND overnight) → (1 AND 2) OR (3 AND 4)"""
+        de_and = {"logic": "AND", "rules": [_R("site.country"), _R("qual.overnight")]}
+        fr_and = {"logic": "AND", "rules": [_R("site.country"), _R("qual.overnight")]}
+        fg = {"logic": "OR", "rules": [de_and, fr_and]}
+        result = _filter_group_to_expr(fg)
+        assert result["logic"] == "(1 AND 2) OR (3 AND 4)"
+        assert len(result["rules"]) == 4
+
+    def test_mixed_leaf_and_subgroup(self):
+        """leaf AND (sub1 OR sub2) AND leaf2 → 1 AND (2 OR 3) AND 4"""
+        leaf1 = _R("sf.SomeField")
+        or_group = {"logic": "OR", "rules": [_R("site.country"), _R("site.country")]}
+        leaf2 = _R("qual.overnight")
+        fg = {"logic": "AND", "rules": [leaf1, or_group, leaf2]}
+        result = _filter_group_to_expr(fg)
+        assert result["logic"] == "1 AND (2 OR 3) AND 4"
+        assert len(result["rules"]) == 4
+        assert result["rules"][0] is leaf1
+        assert result["rules"][3] is leaf2
