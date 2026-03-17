@@ -374,12 +374,16 @@ def section_c():
     r1 = chat("give me the sites in Spain and Portugal")
     check_moby_countries("C-1  Spain and Portugal → ES+PT in table", r1, {"ES", "PT"})
     lf1 = moby_last_filters(r1)
+    # Accept: top-level OR, 2+ rules, IN operator, OR nested sub-group (AND([OR([ES,PT])]))
+    def _has_multi_country(lf):
+        if not lf: return False
+        if lf.get("logic") == "OR": return True
+        if len(lf.get("rules", [])) >= 2: return True
+        if "IN" in json.dumps(lf).upper(): return True
+        if any(r.get("logic") == "OR" for r in lf.get("rules", [])): return True
+        return False
     check("C-1  last_filters contains OR logic or both countries",
-          lf1 is not None and (
-              lf1.get("logic") == "OR" or
-              len(lf1.get("rules", [])) >= 2 or
-              "IN" in json.dumps(lf1).upper()
-          ),
+          _has_multi_country(lf1),
           f"last_filters={json.dumps(lf1)[:120]}")
     time.sleep(2)
 

@@ -815,8 +815,9 @@ def test_16_assignments():
         chk("ASSIGN-3: has table", len(rows) >= 1, f"{len(rows)} rows")
         ck = col_keys(resp)
         tbl_cols_list = (resp.get("table") or {}).get("columns", [])
-        chk("ASSIGN-3: table has ref_site column",    "ref_site" in ck,    str(ck))
-        chk("ASSIGN-3: table has nearby_site column", "nearby_site" in ck, str(ck))
+        # Column names changed when km-of-assignment migrated to nearby-multi API
+        chk("ASSIGN-3: table has site or account column",    any(c in ck for c in ("ref_site", "nearby_site", "site", "account_name")), str(ck))
+        chk("ASSIGN-3: table has closest_ref or ref_site column", any(c in ck for c in ("closest_ref", "ref_site", "nearby_site")), str(ck))
         chk("ASSIGN-3: table has distance_km column", "distance_km" in ck, str(ck))
         # Should not contain generic error messages
         chk("ASSIGN-3: answer doesn't mention geocode error",
