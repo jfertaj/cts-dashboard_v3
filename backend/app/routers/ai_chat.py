@@ -5355,12 +5355,17 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         # INTENCIÓN DIRECTA: Newly Diagnosed (ND) ranking or aggregation → direct SF query
         try:
             _nd_intent = bool(re.search(r"\b(newly\s+diagnosed|new\s+diagnos|nd\b|newly\s*dx|newly\s*t1d)\b", s))
-            _nd_by_country = bool(re.search(r"\b(per\s+country|by\s+country|por\s+pa[ií]s|por\s+pais|by\s+region)\b", s))
+            _nd_by_country = bool(re.search(
+                r"\b(per\s+country|by\s+country|por\s+pa[ií]s|por\s+pais|by\s+region"
+                r"|which\s+country|country\s+has|country\s+with\s+the\s+most|most.*country|country.*most)\b", s))
             _nd_top = bool(re.search(r"\b(top|highest|most|mayor|más|mas|ranking|rank)\b", s))
+            _nd_under18 = bool(re.search(r"\bunder\s*18\b|<\s*18|\bu18\b|\bni[ñn]os?|\bpediatr", s, re.I))
+            _nd_thresh_m = re.search(r"\b(?:more\s+than|over|greater\s+than|at\s+least|>\s*)(\d+)", s, re.I)
+            _nd_threshold = int(_nd_thresh_m.group(1)) if _nd_thresh_m else None
             if _nd_intent and not sf:
                 return {"answer": "<p>⚠️ Newly Diagnosed T1D data is stored in Salesforce and requires an active session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
-            if _nd_intent and sf and (_nd_top or _nd_by_country):
+            if _nd_intent and sf and (_nd_top or _nd_by_country or _nd_threshold is not None):
                 # Extract top N (default 10)
                 _m_topn = re.search(r"\b(top\s+)?(\d+)\b", s)
                 _nd_topn = int(_m_topn.group(2)) if _m_topn else 10
@@ -5388,12 +5393,13 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             _nd_country_totals[_c] = {"o18": 0.0, "u18": 0.0}
                         _nd_country_totals[_c]["o18"] += _o18
                         _nd_country_totals[_c]["u18"] += _u18
+                    _nd_sort_key = "sf.C_Number_of_new_T1D_diagnosed_U_18__c" if _nd_under18 else "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
                     rows_nd_agg = sorted(
                         [{"country": c,
                           "sf.C_Number_of_new_T1D_diagnosed_O_18__c": v["o18"],
                           "sf.C_Number_of_new_T1D_diagnosed_U_18__c": v["u18"]}
                          for c, v in _nd_country_totals.items()],
-                        key=lambda x: x["sf.C_Number_of_new_T1D_diagnosed_O_18__c"], reverse=True
+                        key=lambda x: x[_nd_sort_key], reverse=True
                     )
                     cols_nd_agg = [
                         {"key": "country", "label": "Country"},
@@ -5414,15 +5420,18 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         nd_out["visualization"] = _nd_viz.get("visualization")
                     return nd_out
                 else:
-                    # Top N sites by ND ≥18
+                    # Top N sites by ND ≥18 or <18 depending on query
+                    _nd_sf_field = "C_Number_of_new_T1D_diagnosed_U_18__c" if _nd_under18 else "C_Number_of_new_T1D_diagnosed_O_18__c"
+                    _nd_age_label = "<18" if _nd_under18 else "≥18"
+                    _nd_min_val = _nd_threshold if _nd_threshold is not None else 0
                     soql_nd = (
                         "SELECT Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity, "
                         "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c "
                         "FROM Opportunity "
                         "WHERE Account.RecordType.DeveloperName='SubAccount' "
                         "AND Account.C_Type__c='Clinical' "
-                        "AND C_Number_of_new_T1D_diagnosed_O_18__c > 0 "
-                        "ORDER BY C_Number_of_new_T1D_diagnosed_O_18__c DESC NULLS LAST "
+                        f"AND {_nd_sf_field} > {_nd_min_val} "
+                        f"ORDER BY {_nd_sf_field} DESC NULLS LAST "
                         f"LIMIT {_nd_topn}"
                     )
                     raw_nd = tool_salesforce_query(sf, soql_nd)
@@ -5453,7 +5462,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     tbl_nd = _normalize_table_for_ui({"columns": cols_nd, "rows": rows_nd})
                     _dbg("Planner ND top %d: %d sites", _nd_topn, len(rows_nd))
                     return {
-                        "answer": f"<p>Top <strong>{len(rows_nd)}</strong> sites by newly diagnosed adult T1D patients (≥18).</p>",
+                        "answer": f"<p>Top <strong>{len(rows_nd)}</strong> sites by newly diagnosed T1D patients ({_nd_age_label}).</p>",
                         "table": tbl_nd,
                     }
         except Exception as _e:
@@ -5530,7 +5539,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 re.search(r"\b(t1d|type\s*1|diabetes).{0,30}patient.{0,60}(highest|top|most|ranking|rank)", s, re.I) or
                 re.search(r"(t1d|type\s*1|diabetes).{0,30}patient.{0,30}(seen|per\s+year|yearly|annual)", s, re.I)
             )
-            if _t1d_rank_intent:
+            # Skip if qual fields are also present — let qual handler combine T1D + qual filters
+            _t1d_rank_has_qual = bool(re.search(
+                r"\bhla\b|\bovernight\b|\bpharmac|\bznt8\b|\bautoantibod|\bnewly.diagnos", s, re.I))
+            if _t1d_rank_intent and not _t1d_rank_has_qual:
                 if not sf:
                     return {"answer": "<p>⚠️ T1D patient data requires an active Salesforce session.</p>"}
                 _t1dr_field_o18 = "sf.C_Number_of_T1D_Patients_currently_O_18__c"
@@ -5577,7 +5589,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         try:
             _bc_has_s1 = bool(re.search(r"\bstage\s*1\b", s))
             _bc_has_s2 = bool(re.search(r"\bstage\s*2\b", s))
-            _bc_by_country = bool(re.search(r"\b(per\s+country|by\s+country|por\s+pa[ií]s|por\s+pais|by\s+region|total|totals?)\b", s))
+            _bc_by_country = bool(re.search(
+                r"\b(per\s+country|by\s+country|por\s+pa[ií]s|por\s+pais|by\s+region|total|totals?"
+                r"|which\s+countr|country\s+has|country\s+with|most.*countr|countr.*most"
+                r"|highest.*countr|countr.*highest|breakdown\s+of\s+stage)\b", s))
             _bc_has_nearest = bool(re.search(r"\bnearest\b|\bclosest\b|\bnear\b|\bcerca\b|\bpróximo[s]?\b", s))
             if (_bc_has_s1 or _bc_has_s2) and _bc_by_country and not _bc_has_nearest:
                 if not sf:
@@ -5656,13 +5671,36 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             if (has_s1 or has_s2) and not _has_nearest and not sf:
                 return {"answer": "<p>⚠️ Stage 1/2 patient data is stored in Salesforce and requires an active session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
-            if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest and not _s12_has_country:
-                stage_cond_parts = []
-                if has_s1:
-                    stage_cond_parts.append("C_Number_of_Stage1_Individuals_followed__c > 0")
-                if has_s2:
-                    stage_cond_parts.append("C_Number_of_Stage2_Individuals_followed__c > 0")
-                stage_cond = " OR ".join(stage_cond_parts)
+            # Skip if qual fields also present — let qual handler combine Stage+qual via Explorer
+            _s12_has_qual = bool(re.search(
+                r"\bovernight\b|\bpharmac|\bhla\b|\bznt8\b|\bautoantibod|\binsulin.*autoantibod"
+                r"|\blong.*visit\b|\bdocument.*retain|\bemergency.*personnel", s, re.I))
+            # Detect "both ... AND" → requires both Stage 1 AND Stage 2 at same site
+            _s12_both_and = bool(has_s1 and has_s2 and re.search(r"\bboth\b", s))
+            # Detect threshold: "more than 50", "at least 30", "over 20", "> 10"
+            _s12_thresh_m = re.search(
+                r"\b(?:more\s+than|over|greater\s+than|at\s+least|>\s*)(\d+)", s, re.I)
+            _s12_threshold = int(_s12_thresh_m.group(1)) if _s12_thresh_m else 0
+            # Detect top-N: "top 10"
+            _s12_topn_m = re.search(r"\btop\s+(\d+)\b", s, re.I)
+            _s12_topn = int(_s12_topn_m.group(1)) if _s12_topn_m else None
+
+            if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest and not _s12_has_country and not _s12_has_qual:
+                if _s12_both_and:
+                    # Must have BOTH Stage 1 AND Stage 2
+                    stage_cond = ("C_Number_of_Stage1_Individuals_followed__c > 0 "
+                                  "AND C_Number_of_Stage2_Individuals_followed__c > 0")
+                    sort_field = "C_Number_of_Stage1_Individuals_followed__c"
+                else:
+                    stage_cond_parts = []
+                    thresh = _s12_threshold
+                    if has_s1:
+                        stage_cond_parts.append(f"C_Number_of_Stage1_Individuals_followed__c > {thresh}")
+                    if has_s2:
+                        stage_cond_parts.append(f"C_Number_of_Stage2_Individuals_followed__c > {thresh}")
+                    stage_cond = " OR ".join(stage_cond_parts)
+                    sort_field = ("C_Number_of_Stage2_Individuals_followed__c"
+                                  if (has_s2 and not has_s1) else "C_Number_of_Stage1_Individuals_followed__c")
                 soql_s12 = (
                     "SELECT Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity, "
                     "C_Number_of_Stage1_Individuals_followed__c, C_Number_of_Stage2_Individuals_followed__c "
@@ -5670,7 +5708,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     "WHERE Account.RecordType.DeveloperName='SubAccount' "
                     "AND Account.C_Type__c='Clinical' "
                     f"AND ({stage_cond}) "
-                    "ORDER BY C_Number_of_Stage1_Individuals_followed__c DESC NULLS LAST "
+                    f"ORDER BY {sort_field} DESC NULLS LAST "
                     "LIMIT 2000"
                 )
                 raw_s12 = tool_salesforce_query(sf, soql_s12)
@@ -5687,6 +5725,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             "sf.C_Number_of_Stage1_Individuals_followed__c": r.get("C_Number_of_Stage1_Individuals_followed__c"),
                             "sf.C_Number_of_Stage2_Individuals_followed__c": r.get("C_Number_of_Stage2_Individuals_followed__c"),
                         })
+                    # Apply top-N limit after sorting
+                    if _s12_topn:
+                        rows_s12 = rows_s12[:_s12_topn]
                     cols_s12 = [
                         {"key":"account_name","label":"Site"},
                         {"key":"country","label":"Country"},
@@ -5697,10 +5738,21 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     tbl12 = _normalize_table_for_ui({"columns": cols_s12, "rows": rows_s12})
                     n1 = sum(1 for r in rows_s12 if (r.get("sf.C_Number_of_Stage1_Individuals_followed__c") or 0) > 0)
                     n2 = sum(1 for r in rows_s12 if (r.get("sf.C_Number_of_Stage2_Individuals_followed__c") or 0) > 0)
-                    label = "Stage 1" if (has_s1 and not has_s2) else ("Stage 2" if (has_s2 and not has_s1) else "Stage 1 or Stage 2")
-                    _dbg("Planner Stage1/2 deterministic (SF query): %d sites found", len(rows_s12))
+                    if _s12_both_and:
+                        label = "Stage 1 AND Stage 2"
+                        _thresh_suffix = ""
+                    elif _s12_threshold > 0:
+                        label = ("Stage 1" if (has_s1 and not has_s2) else
+                                 "Stage 2" if (has_s2 and not has_s1) else "Stage 1 or Stage 2")
+                        _thresh_suffix = f" (threshold: > {_s12_threshold})"
+                    else:
+                        label = ("Stage 1" if (has_s1 and not has_s2) else
+                                 "Stage 2" if (has_s2 and not has_s1) else "Stage 1 or Stage 2")
+                        _thresh_suffix = ""
+                    _topn_suffix = f" (top {_s12_topn})" if _s12_topn else ""
+                    _dbg("Planner Stage1/2: %d sites (both=%s, thresh=%s, top=%s)", len(rows_s12), _s12_both_and, _s12_threshold, _s12_topn)
                     return {
-                        "answer": f"<p>Found <strong>{len(rows_s12)}</strong> sites with {label} individuals followed "
+                        "answer": f"<p>Found <strong>{len(rows_s12)}</strong> sites{_topn_suffix} with {label} individuals followed{_thresh_suffix} "
                                   f"({n1} with Stage 1, {n2} with Stage 2).</p>",
                         "table": tbl12,
                     }
@@ -5886,7 +5938,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             asks_sites2 = bool(re.search(
                 r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b"
                 r"|show\b|find\b|list\b|which\b|those\b|offer\b|have\b|with\b|do\b", s))
-            if asks_qual and asks_sites2:
+            # Skip qual handler if nearest/within-km is the primary intent (let nearest handler fire)
+            _qual_has_nearest = bool(re.search(
+                r"\bnearest\b|\bclosest\b|\bwithin\s+\d+\s*km\b|\bdriving\s+distance\b", s))
+            if asks_qual and asks_sites2 and not _qual_has_nearest:
                 # Build Explorer filter rules for detected qual intents
                 _qual_rules: list = []
                 _qual_cols: list = ["sf.Account.Name"]
@@ -5933,6 +5988,29 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         if _sf_qn not in _qual_seen_sf:
                             _qual_countries.append((_sf_qn, _iso_q))
                             _qual_seen_sf.add(_sf_qn)
+                # Also add Stage 1/2 SF filter rules when detected alongside qual fields
+                _q_has_s1 = bool(re.search(r"\bstage\s*1\b", s))
+                _q_has_s2 = bool(re.search(r"\bstage\s*2\b", s))
+                _q_both_stages = bool(_q_has_s1 and _q_has_s2 and re.search(r"\bboth\b", s))
+                _q_stage_thresh_m = re.search(r"\b(?:more\s+than|over|greater\s+than|>)\s*(\d+)", s, re.I)
+                _q_stage_thresh = int(_q_stage_thresh_m.group(1)) if _q_stage_thresh_m else 0
+                if _q_has_s1 or _q_has_s2:
+                    _s1f = "sf.C_Number_of_Stage1_Individuals_followed__c"
+                    _s2f = "sf.C_Number_of_Stage2_Individuals_followed__c"
+                    _sq_thresh = _q_stage_thresh
+                    if _q_both_stages:
+                        _qual_rules.append({"field": _s1f, "operator": "gt", "value": _sq_thresh})
+                        _qual_rules.append({"field": _s2f, "operator": "gt", "value": _sq_thresh})
+                    else:
+                        if _q_has_s1:
+                            _qual_rules.append({"field": _s1f, "operator": "gt", "value": _sq_thresh})
+                        if _q_has_s2:
+                            _qual_rules.append({"field": _s2f, "operator": "gt", "value": _sq_thresh})
+                    # Add Stage columns to display
+                    if _q_has_s1 and _s1f not in _qual_cols:
+                        _qual_cols.append(_s1f)
+                    if _q_has_s2 and _s2f not in _qual_cols:
+                        _qual_cols.append(_s2f)
                 all_rules: list = list(_qual_rules)
                 if _qual_countries:
                     if len(_qual_countries) > 1:
@@ -5980,6 +6058,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 if has_longday:    cols_qual.append({"key": _K_LONGDAY, "label": "Max Day (hrs)"})
                 if has_documents:  cols_qual.append({"key": _K_DOCS,    "label": "Doc Retention (yrs)"})
                 if has_emergency:  cols_qual.append({"key": _K_EMERG,   "label": "Emergency Process"})
+                if _q_has_s1:      cols_qual.append({"key": "sf.C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1"})
+                if _q_has_s2:      cols_qual.append({"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2"})
                 tbl_qual = _normalize_table_for_ui({"columns": cols_qual, "rows": rows_qual})
                 _cond_parts = []
                 if has_pharmacy:   _cond_parts.append("on-site pharmacy")
@@ -5990,6 +6070,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 if has_longday:    _cond_parts.append("long single-day visits")
                 if has_documents:  _cond_parts.append("document retention data")
                 if has_emergency:  _cond_parts.append("emergency personnel process")
+                if _q_has_s1:      _cond_parts.append("Stage 1 patients")
+                if _q_has_s2:      _cond_parts.append("Stage 2 patients")
                 _cond_txt = " and ".join(_cond_parts)
                 _loc_str = (f" in {', '.join(n for n, _ in _qual_countries)}"
                             if _qual_countries else "")
@@ -6013,6 +6095,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             _pl_prof_sent    = bool(re.search(r"\bprofiling.*\bsent\b|\bquestionnaire.*\bsent\b", s, re.I))
             _pl_early_diag   = bool(re.search(r"\bearly.diagnos|\bscreening\b.*\bdiagnos|\bdiagnos.*\bscreening\b", s, re.I))
             _pl_asks_sites   = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bwhich\b|\bshow\b|\bfind\b|\blist\b|\ball\b|\bmany\b|\bhow\b", s))
+            # NOT modifier: "have NOT yet", "haven't", "not yet", "without"
+            _pl_not = bool(re.search(r"\bnot\s+yet\b|\bhaven.?t\b|\bnot\s+complete|\bwithout\s+profiling\b|\bunprofiled\b", s, re.I))
             # Map detected intent → Explorer filter
             _pl_intent = (_pl_cts_valid or _pl_profiling_c or _pl_profiling_up
                           or _pl_referral_p or _pl_no_meeting or _pl_prof_sent or _pl_early_diag)
@@ -6025,9 +6109,11 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _pl_cols.append("sf.Account.INNODIA_Clinical_Trial_Site__c")
                     _pl_desc_parts.append("INNODIA CTS flag")
                 if _pl_profiling_c:
-                    _pl_rules.append({"field": "sf.C_Profiling_Complete__c", "operator": "is_not_null"})
+                    # "NOT yet completed" → use is_null; "completed" → use is_not_null
+                    _pc_op = "is_null" if _pl_not else "is_not_null"
+                    _pl_rules.append({"field": "sf.C_Profiling_Complete__c", "operator": _pc_op})
                     _pl_cols.append("sf.C_Profiling_Complete__c")
-                    _pl_desc_parts.append("profiling complete")
+                    _pl_desc_parts.append("profiling NOT complete" if _pl_not else "profiling complete")
                 if _pl_profiling_up:
                     _pl_rules.append({"field": "sf.Profiling_form_uploaded_to_DB__c", "operator": "is_not_null"})
                     _pl_cols.append("sf.Profiling_form_uploaded_to_DB__c")
