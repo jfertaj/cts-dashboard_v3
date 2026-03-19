@@ -12,10 +12,30 @@ from collections import defaultdict, Counter
 import hashlib
 from dataclasses import dataclass
 
-from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAuthenticationFailed
+from simple_salesforce.exceptions import (
+    SalesforceExpiredSession, SalesforceAuthenticationFailed,
+    SalesforceMalformedRequest, SalesforceGeneralError,
+    SalesforceRefusedRequest, SalesforceResourceNotFound,
+)
 
 from app.routers.salesforce_extras_batch import batch_fetch_account_extras
 from app.utils.country_norms import norm_to_iso2, iso2_to_display, ISO2_TO_DISPLAY as _ISO2_TO_DISPLAY
+
+from app.routers.filter_engine import (
+    Rule, FilterQuery,
+    _OP_SYNONYM, _OP_MAP,
+    _DATE_FMTS, _NUM_RE,
+    _parse_date_any, _coerce_scalar, _cmp, _normalize_list,
+    _eval_qual_rule, _qual_get,
+    _flatten_filter_rules, _filter_group_to_expr,
+    _is_logic_expr, _eval_logic_expr_be,
+    _norm_label_to_key,
+)
+from app.utils.geo_cache import (
+    _GEO_CACHE, _geo_key, _save_geo_cache_file,
+    _geo_cache_get, _geo_cache_put,
+    _extract_result_country_iso, _haversine_km,
+)
 
 # DB
 from sqlalchemy.orm import Session
@@ -66,166 +86,8 @@ ALLOWED_FIELDS: Set[str] = CURATED_ALLOWED | MIN_ALLOWED
 
 NUMERIC_TYPES = {"double","number","int","integer","long","currency","percent"}
 
-_DATE_FMTS = (
-    "%Y-%m-%d",
-    "%Y-%m-%dT%H:%M:%S.%fZ",
-    "%Y-%m-%dT%H:%M:%S.%f",
-    "%Y-%m-%dT%H:%M:%S",
-)
-
-def _parse_date_any(x: Any) -> Optional[datetime]:
-    if x is None:
-        return None
-    if isinstance(x, datetime):
-        return x
-    s = str(x).strip()
-    if not s:
-        return None
-    # Primero intenta ISO completo (no recortar la cadena)
-    try:
-        return datetime.fromisoformat(s)
-    except Exception:
-        pass  # <- NECESARIO: sin esto, el 'except' queda vacío y da IndentationError
-
-    # Luego intenta los formatos conocidos (sin slicing)
-    for fmt in _DATE_FMTS:
-        try:
-            return datetime.strptime(s, fmt)
-        except Exception:
-            continue
-    return None
-
-_NUM_RE = re.compile(r"^-?\d+(\.\d+)?$")
-
-def _coerce_scalar(x: Any) -> Tuple[Any, str]:
-    """ Devuelve (valor, tipo) con tipo in {'none','bool','num','date','str'} """
-    if x is None:
-        return None, "none"
-    if isinstance(x, bool):
-        return x, "bool"
-    if isinstance(x, (int, float)) and not isinstance(x, bool):
-        return x, "num"
-    s = str(x).strip()
-    if s.lower() in ("true", "false"):
-        return (s.lower() == "true"), "bool"
-    if _NUM_RE.match(s or ""):
-        try:
-            return (float(s) if "." in s else int(s)), "num"
-        except Exception:
-            pass
-    d = _parse_date_any(s)
-    if d is not None:
-        return d, "date"
-    return s, "str"
-
-def _cmp(a: Any, b: Any) -> int:
-    if type(a) is type(b):
-        return 0 if a == b else (-1 if a < b else 1)
-    sa, sb = str(a), str(b)
-    return 0 if sa == sb else (-1 if sa < sb else 1)
-
-def _normalize_list(v: Any) -> Iterable[Any]:
-    if v is None:
-        return []
-    if isinstance(v, (list, tuple, set)):
-        return v
-    s = str(v)
-    return [p.strip() for p in s.split(",")] if "," in s else [v]
-
-def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
-    op = (op or "").lower()
-    v, tv = _coerce_scalar(value)
-
-    # Null checks
-    if op in ("is_null","isnull"):
-        return v is None or (tv == "str" and str(v).strip() == "")
-    if op in ("is_not_null","notnull"):
-        return not (v is None or (tv == "str" and str(v).strip() == ""))
-
-    # BETWEEN
-    if op == "between":
-        lo, hi = None, None
-        if isinstance(raw, (list, tuple)) and len(raw) == 2:
-            lo, hi = raw
-        else:
-            s = str(raw or "")
-            lo, hi = (s.split("..",1) + [None])[:2] if ".." in s else (s.split(",",1) + [None])[:2]
-        lo_v, _ = _coerce_scalar(lo); hi_v, _ = _coerce_scalar(hi)
-        if v is None or lo_v is None or hi_v is None:
-            return False
-        return _cmp(lo_v, v) <= 0 and _cmp(v, hi_v) <= 0
-
-    # IN / NOT IN
-    if op in ("in","not_in"):
-        items = [_coerce_scalar(x)[0] for x in _normalize_list(raw)]
-        present = any(_cmp(v, it) == 0 for it in items)
-        return present if op == "in" else (not present)
-
-    # Binarios escalares
-    tgt, _ = _coerce_scalar(raw)
-    if op in ("equals","=","eq"):
-        return _cmp(v, tgt) == 0
-    if op in ("not_equals","!=","ne"):
-        return _cmp(v, tgt) != 0
-    if op in ("gt",">"):
-        return _cmp(v, tgt) > 0
-    if op in ("gte",">="):
-        return _cmp(v, tgt) >= 0
-    if op in ("lt","<"):
-        return _cmp(v, tgt) < 0
-    if op in ("lte","<="):
-        return _cmp(v, tgt) <= 0
-
-    # Empty / not-empty
-    if op in ("is_empty",):
-        return v is None or (isinstance(v, str) and v.strip() == "")
-    if op in ("is_not_empty",):
-        return not (v is None or (isinstance(v, str) and v.strip() == ""))
-
-    # Strings
-    vs = "" if v is None else str(v)
-    ts = "" if tgt is None else str(tgt)
-    if op == "contains":       return ts.lower() in vs.lower()
-    if op == "not_contains":   return ts.lower() not in vs.lower()
-    if op == "starts_with":    return vs.lower().startswith(ts.lower())
-    if op == "ends_with":      return vs.lower().endswith(ts.lower())
-
-    return True
-
-def _qual_get(qual_data: Dict[str, Any], key: str) -> Any:
-    """
-    Lookup de una clave qual en el JSONB con 5 fallbacks, para manejar
-    los distintos formatos históricos de almacenamiento:
-      1. Clave exacta:          "3_5_4__fridge__device_available"
-      2. Primer _ → punto:      "3.5_4__fridge__device_available"  (compat. legacy)
-      3. Todos los _ del prefijo de sección → puntos:
-                                "3.5.4__fridge__device_available"
-         Cubre uploads recientes donde el subsection code usa puntos (3.5.4) en lugar de
-         guiones bajos (3_5_4). Crítico para secciones 3.5.x y 3.7.x.
-      4. Clave base sin prefijo: "fridge__device_available"
-      5. Base sin prefijo y sin último sufijo _word:
-         "3_8__autoantibodies_aab" -> "autoantibodies"
-         "3_3__estimate_arrival_time_of_emergency_personnel_min" -> "estimate_arrival_time_of_emergency_personnel"
-    """
-    v = qual_data.get(key)
-    if v is None and "_" in key:
-        # Fallback 2: replace only first underscore with dot
-        v = qual_data.get(key.replace("_", ".", 1))
-    if v is None and "__" in key:
-        # Fallback 3: replace ALL underscores in the section prefix with dots
-        section_part, _, rest = key.partition("__")
-        section_dotted = section_part.replace("_", ".")
-        if section_dotted != section_part:
-            v = qual_data.get(f"{section_dotted}__{rest}")
-        # Fallback 4: strip section prefix entirely → base slug
-        if v is None:
-            v = qual_data.get(rest)
-        # Fallback 5: strip last underscore-word suffix from base slug
-        if v is None:
-            last_sep = rest.rfind("_")
-            if last_sep > 0:
-                v = qual_data.get(rest[:last_sep])
-    return v
+# _DATE_FMTS, _NUM_RE, _parse_date_any, _coerce_scalar, _cmp, _normalize_list,
+# _eval_qual_rule, _qual_get — moved to filter_engine.py
 
 
 def is_numeric_field(sf_field_no_prefix: str) -> bool:
@@ -940,15 +802,7 @@ def _needs_extras(payload: dict) -> bool:
 
 # ======================= MODELOS Pydantic (request) =======================
 
-class Rule(BaseModel):
-    field: str
-    operator: str
-    value: Any
-
-class FilterQuery(BaseModel):
-    logic: str = "AND"  # "AND", "OR", or expression like "1 AND (2 OR 3)"
-    rules: List[Rule] = Field(default_factory=list)
-    columns: List[str] = Field(default_factory=list)
+# Rule, FilterQuery — moved to filter_engine.py
 
 # ======================= HELPERS SF =======================
 
@@ -958,16 +812,29 @@ def _sf_query_all(sf, soql: str):
         return res.get("records", [])
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
         raise HTTPException(status_code=401, detail="Salesforce session expired")
+    except SalesforceMalformedRequest as e:
+        # Invalid SOQL (field doesn't exist, syntax error, etc.) — log detail internally
+        log.error("SF malformed request: %s | soql snippet: %.200s", e, soql)
+        raise HTTPException(status_code=400, detail="Salesforce query error: invalid field or filter. Check the filter configuration.")
+    except (SalesforceGeneralError, SalesforceRefusedRequest) as e:
+        log.error("SF general/refused error: %s", e)
+        raise HTTPException(status_code=500, detail="Salesforce returned an error. Please try again.")
+    except SalesforceResourceNotFound:
+        raise HTTPException(status_code=404, detail="Salesforce resource not found.")
     except Exception as e:
-        log.exception("SF query failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Salesforce query failed: {e}")
+        log.exception("SF query unexpected failure")
+        raise HTTPException(status_code=500, detail="Salesforce query failed. Please try again.")
 
 def _get_sf(request: Request):
     signed = request.cookies.get(COOKIE_NAME)
-    session_id = unsign_value(signed) if signed else None
-    sf = get_salesforce_from_session_id(session_id) if session_id else None
+    if not signed:
+        raise HTTPException(401, "Not logged in to Salesforce. Please connect via the Salesforce menu.")
+    session_id = unsign_value(signed)
+    if not session_id:
+        raise HTTPException(401, "Salesforce session invalid or expired. Please log in again.")
+    sf = get_salesforce_from_session_id(session_id)
     if not sf:
-        raise HTTPException(403, "No autenticado en Salesforce")
+        raise HTTPException(401, "Salesforce session expired. Please log in again.")
     return sf
 
 
@@ -1005,180 +872,8 @@ def _exists_on_account(field_name: str) -> bool:
     return field_name in (_ACC_FIELD_SET or set())
 
 # ======================= WHERE BUILDER (SOQL) =======================
-
-_OP_SYNONYM = {
-    "eq": "equals",
-    "neq": "not_equals",
-    "icontains": "contains",
-    "≥": ">=",
-    "≤": "<=",
-}
-
-_OP_MAP = {
-    "equals": "=", "not_equals": "!=",
-    ">": ">", ">=": ">=", "<": "<", "<=": "<=",
-}
-
-def _flatten_filter_rules(group: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Recursively flatten nested FilterGroup sub-groups into a single list of leaf rules.
-
-    FilterBuilder can produce nested groups like:
-        {logic:AND, rules:[{logic:OR, rules:[{site.country=Spain}, {site.country=PT}]}, ...]}
-    The classification loops only handle flat rules. This helper extracts all leaf rules
-    so nested groups are not silently ignored during classification.
-    Note: nested group logic is not preserved — the parent's logic applies after flattening.
-    For site.country rules this is fine because the multi-country AND→OR fix handles them.
-    """
-    result: List[Dict[str, Any]] = []
-    for item in (group.get("rules") or []):
-        if "rules" in item and not item.get("field"):  # sub-group
-            result.extend(_flatten_filter_rules(item))
-        else:
-            result.append(item)
-    return result
-
-
-def _filter_group_to_expr(fg: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert a nested FilterGroup (sub-groups inside rules) to expression format.
-
-    Nested sub-groups lose their inner logic when flattened.  This function
-    converts the tree into a numbered expression string so the existing
-    ``_eval_logic_expr_be`` evaluator can honour every AND/OR correctly.
-
-    Example::
-
-        {logic:"AND", rules:[{logic:"OR", rules:[ruleA, ruleB]}, ruleC]}
-        → {logic:"(1 OR 2) AND 3", rules:[ruleA, ruleB, ruleC]}
-
-    If the group has no nested sub-groups, or is already in expression format
-    (logic contains a digit), it is returned unchanged.
-    """
-    rules = fg.get("rules") or []
-    logic = fg.get("logic") or "AND"
-
-    # Already an expression string — leave as-is
-    if _is_logic_expr(logic):
-        return fg
-
-    # No nested sub-groups — nothing to convert
-    has_sub_groups = any("rules" in r and not r.get("field") for r in rules)
-    if not has_sub_groups:
-        return fg
-
-    flat_rules: List[Dict[str, Any]] = []
-
-    def _build_expr(node: Dict[str, Any]) -> str:
-        node_logic = node.get("logic") or "AND"
-        node_rules = node.get("rules") or []
-        parts = []
-        for rule in node_rules:
-            if "rules" in rule and not rule.get("field"):  # sub-group
-                sub_expr = _build_expr(rule)
-                parts.append(f"({sub_expr})")
-            else:
-                flat_rules.append(rule)
-                parts.append(str(len(flat_rules)))
-        if not parts:
-            return "1"  # degenerate empty group
-        return f" {node_logic} ".join(parts)
-
-    expr = _build_expr(fg)
-    return {"logic": expr, "rules": flat_rules}
-
-
-def _is_logic_expr(logic: str) -> bool:
-    """Returns True if logic is a Salesforce-style expression like '1 AND (2 OR 3)'
-    rather than a simple 'AND' or 'OR'."""
-    return bool(re.search(r"\d", logic or ""))
-
-
-def _eval_logic_expr_be(expr: str, results: Dict[int, bool]) -> bool:
-    """Evaluate a Salesforce-style logic expression like '1 AND (2 OR 3)'.
-
-    results: dict mapping 1-indexed rule numbers to bool.
-             Unknown indices (rules in other categories or SF-filtered rules) default to True.
-
-    Operator precedence: AND binds tighter than OR (standard logic).
-    """
-    tokens: List[Any] = []
-    i = 0
-    s = expr.strip()
-    while i < len(s):
-        c = s[i]
-        if c in " \t\n\r":
-            i += 1; continue
-        if c == "(":
-            tokens.append("LPAREN"); i += 1; continue
-        if c == ")":
-            tokens.append("RPAREN"); i += 1; continue
-        if c.isdigit():
-            n = ""
-            while i < len(s) and s[i].isdigit():
-                n += s[i]; i += 1
-            tokens.append(("NUM", int(n))); continue
-        if s[i:i+3].upper() == "AND" and (i+3 >= len(s) or not s[i+3].isalnum()):
-            tokens.append("AND"); i += 3; continue
-        if s[i:i+2].upper() == "OR" and (i+2 >= len(s) or not s[i+2].isalnum()):
-            tokens.append("OR"); i += 2; continue
-        i += 1  # skip unexpected chars gracefully
-
-    tokens.append("EOF")
-    pos = [0]
-
-    def peek():
-        return tokens[pos[0]] if pos[0] < len(tokens) else "EOF"
-
-    def consume():
-        t = tokens[pos[0]]
-        pos[0] += 1
-        return t
-
-    def parse_expr():
-        left = parse_term()
-        while peek() == "OR":
-            consume()
-            right = parse_term()
-            left = left or right
-        return left
-
-    def parse_term():
-        left = parse_factor()
-        while peek() == "AND":
-            consume()
-            right = parse_factor()
-            left = left and right
-        return left
-
-    def parse_factor():
-        t = peek()
-        if t == "LPAREN":
-            consume()
-            v = parse_expr()
-            if peek() == "RPAREN":
-                consume()
-            return v
-        if isinstance(t, tuple) and t[0] == "NUM":
-            consume()
-            return results.get(t[1], True)  # unknown rule → True (don't exclude)
-        if t == "EOF":
-            return True
-        consume()
-        return True
-
-    try:
-        return bool(parse_expr())
-    except Exception:
-        return True  # fail open: don't exclude rows if expression fails
-
-
-def _norm_label_to_key(x: Any) -> str:
-    if isinstance(x, dict):
-        x = x.get("key") or x.get("value") or x.get("id") or ""
-    s = str(x or "").strip()
-    if s.startswith("[sf] "):   s = s[5:]
-    if s.startswith("[site] "): s = s[8:]
-    if s.startswith("[qual] "): s = s[7:]
-    return s
+# _OP_SYNONYM, _OP_MAP, _flatten_filter_rules, _filter_group_to_expr,
+# _is_logic_expr, _eval_logic_expr_be, _norm_label_to_key — moved to filter_engine.py
 
 
 def _strip_account_prefix(field: str) -> str:
@@ -1524,77 +1219,8 @@ def _build_account_map(sf, acc_ids: List[str]) -> Dict[str, Dict]:
     return out
 
 # =============== GEOCODING (con cache + persistencia) ===============
-
-# Cache en memoria (address -> (lat, lng, expires_at)) + persistencia en JSON
-_GEO_CACHE: Dict[str, Tuple[Optional[float], Optional[float], float]] = {}
-# Persist across restarts; expiración muy larga para evitar llamadas repetidas
-_GEO_TTL_SECONDS = 60 * 60 * 24 * 365 * 10  # 10 años
-_CACHE_LOCK = threading.RLock()
-from pathlib import Path
-_GEO_CACHE_FILE = (Path(__file__).parent.parent / "cache" / "geocode_cache.json").resolve()
-_GEO_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-def _geo_key(city: Optional[str], country: Optional[str]) -> str:
-    parts = [(city or "").strip().lower(), (country or "").strip().lower()]
-    return "|".join(parts)
-
-# Carga inicial desde disco
-try:
-    if _GEO_CACHE_FILE.exists():
-        import json as _json
-        with _GEO_CACHE_FILE.open("r", encoding="utf-8") as fh:
-            raw = _json.load(fh) or {}
-        with _CACHE_LOCK:
-            now_ts = time.time()
-            for k, pair in raw.items():
-                # pair = [lat, lng]
-                lat, lng = (pair or [None, None])[:2]
-                _GEO_CACHE[k] = (lat, lng, now_ts + _GEO_TTL_SECONDS)
-except Exception:
-    pass
-
-def _save_geo_cache_file() -> None:
-    try:
-        import json as _json
-        with _CACHE_LOCK:
-            blob = {k: [lat, lng] for k, (lat, lng, _exp) in _GEO_CACHE.items()}
-        tmp = _GEO_CACHE_FILE.with_suffix(".tmp")
-        with tmp.open("w", encoding="utf-8") as fh:
-            _json.dump(blob, fh)
-        tmp.replace(_GEO_CACHE_FILE)
-    except Exception:
-        # no romper por IO
-        pass
-
-def _geo_cache_get(city: Optional[str], country: Optional[str]) -> Tuple[Optional[float], Optional[float]] | None:
-    k = _geo_key(city, country)
-    with _CACHE_LOCK:
-        tup = _GEO_CACHE.get(k)
-    if not tup:
-        return None
-    lat, lng, exp = tup
-    if time.time() > exp:
-        with _CACHE_LOCK:
-            _GEO_CACHE.pop(k, None)
-        _save_geo_cache_file()
-        return None
-    return (lat, lng)
-
-def _geo_cache_put(city: Optional[str], country: Optional[str], lat: Optional[float], lng: Optional[float]) -> None:
-    k = _geo_key(city, country)
-    with _CACHE_LOCK:
-        _GEO_CACHE[k] = (lat, lng, time.time() + _GEO_TTL_SECONDS)
-    _save_geo_cache_file()
-
-def _extract_result_country_iso(result: dict) -> Optional[str]:
-    try:
-        for comp in result.get("address_components", []):
-            if "country" in comp.get("types", []):
-                code = comp.get("short_name")
-                return code
-    except Exception:
-        return None
-    return None
+# _GEO_CACHE, _GEO_TTL_SECONDS, _geo_key, _save_geo_cache_file,
+# _geo_cache_get, _geo_cache_put, _extract_result_country_iso — moved to geo_cache.py
 
 async def _geocode_city_country(
     city: Optional[str],
@@ -2852,7 +2478,8 @@ async def explorer_search(
     select_fields = ", ".join(select_parts)
     soql_opps = f"SELECT {select_fields} FROM Opportunity {where_sql}"
     if debug: print("[/search][SOQL opps]", soql_opps)
-    opps = _sf_query_all(sf, soql_opps) or []
+    # Run blocking SF HTTP call in a thread so other async tasks aren't starved
+    opps = await asyncio.to_thread(_sf_query_all, sf, soql_opps) or []
 
     # ===========================================================
     # 2) Activities + Assignments -> subcuentas
@@ -2888,7 +2515,7 @@ async def explorer_search(
         "FROM Opportunity " + act_where
     )
     if debug: print("[/search][SOQL activities]", soql_acts)
-    activities = _sf_query_all(sf, soql_acts) or []
+    activities = await asyncio.to_thread(_sf_query_all, sf, soql_acts) or []
 
     # Mapa de nombres de Activity por subcuenta (aunque no existan Assignment__c)
     activities_names_by_acc: Dict[str, List[str]] = defaultdict(list)
@@ -3064,7 +2691,7 @@ async def explorer_search(
             }
         return out
 
-    acc_map = _build_account_map(sf, acc_ids)
+    acc_map = await asyncio.to_thread(_build_account_map, sf, acc_ids)
     # Lista de cuentas activas (IDs) usada en pasos posteriores. Se declara
     # aquí para garantizar que la variable exista en todos los bloques
     # posteriores que la referencian (evita UnboundLocalError si no se
@@ -3124,7 +2751,7 @@ async def explorer_search(
 
     extras_map: Dict[str, Dict[str, Any]] = {}
     if need_batch_extras and acc_ids:
-        extras_map = batch_fetch_account_extras(sf, list({x for x in acc_ids if x}))
+        extras_map = await asyncio.to_thread(batch_fetch_account_extras, sf, list({x for x in acc_ids if x}))
     if assignments_names_by_acc:
         for acc_id, names in assignments_names_by_acc.items():
             if not names:
@@ -3284,11 +2911,12 @@ async def explorer_search(
         vals.setdefault("Id", str(aid))  # sf.Account.Id filter — always available
         if need_member:
             vals["MemberName"] = member_by_acc.get(str(aid))
-        glue_and = (filters.get("logic") or "AND") == "AND"
-        res = []
-        for ar in account_rules:
-            actual = vals.get(ar.field)
-            res.append(_eval_qual_rule(actual, ar.operator, ar.value))
+        res = [_eval_qual_rule(vals.get(ar.field), ar.operator, ar.value) for ar in account_rules]
+        logic_str = filters.get("logic") or "AND"
+        if _is_logic_expr(logic_str):
+            expr_results = {account_rule_indices[i]: res[i] for i in range(len(account_rules))}
+            return _eval_logic_expr_be(logic_str, expr_results)
+        glue_and = logic_str == "AND"
         return all(res) if glue_and else any(res)
 
     # Helper: applies all Python-side pass_* checks respecting root AND/OR logic.
@@ -4300,7 +3928,13 @@ def search_accounts(body: AccountSearchBody, request: Request):
 
 # === Endpoint: vecinos por distancia de conducción (km) con Google Matrix ===
 # Cache simple en memoria para resultados de Distance Matrix (puedes migrarlo a Redis)
+# NOTE: _dm_cache is process-local (one dict per uvicorn worker).
+# With workers=4, Distance Matrix results are not shared across processes.
+# Each worker fills its own cache independently, so the same route may be
+# fetched up to 4 times before all workers warm up.
+# If Google DM quota becomes a bottleneck, replace with a shared Redis cache.
 _dm_cache: Dict[str, Tuple[Any, float, int]] = {}  # key -> (val, created_ts, ttl)
+_CACHE_LOCK = threading.RLock()  # lock for _dm_cache (thread-safe within a process)
 
 def _cache_get(k: str):
     with _CACHE_LOCK:
@@ -4321,6 +3955,7 @@ async def _drive_km_matrix(origin: Tuple[float,float], dests: List[Tuple[float,f
     """
     Distancia de conducción (km) por destino usando Google Distance Matrix.
     Devuelve None si un destino falla.
+    Reintenta hasta 3 veces con backoff exponencial en errores 429/5xx.
     """
     if not GOOGLE_API_KEY:
         raise HTTPException(status_code=500, detail="Missing GOOGLE_MAPS_API_KEY")
@@ -4347,9 +3982,33 @@ async def _drive_km_matrix(origin: Tuple[float,float], dests: List[Tuple[float,f
                     "key": GOOGLE_API_KEY,
                 }
                 log.debug("DistanceMatrix request: origins=%s, dest_count=%s", o_str, len(chunk))
-                r = await client.get("https://maps.googleapis.com/maps/api/distancematrix/json", params=params)
-                r.raise_for_status()
-                mx = r.json()
+                # Retry with exponential backoff for transient errors (429, 5xx)
+                _dm_response = None
+                for _attempt in range(3):
+                    try:
+                        r = await client.get(
+                            "https://maps.googleapis.com/maps/api/distancematrix/json",
+                            params=params,
+                        )
+                        if r.status_code == 429 or r.status_code >= 500:
+                            wait = 2 ** _attempt  # 1s, 2s, 4s
+                            log.warning(
+                                "DistanceMatrix HTTP %s, retrying in %ss (attempt %s/3)",
+                                r.status_code, wait, _attempt + 1,
+                            )
+                            await asyncio.sleep(wait)
+                            continue
+                        r.raise_for_status()
+                        _dm_response = r.json()
+                        break
+                    except httpx.TimeoutException:
+                        wait = 2 ** _attempt
+                        log.warning("DistanceMatrix timeout, retrying in %ss (attempt %s/3)", wait, _attempt + 1)
+                        await asyncio.sleep(wait)
+                if _dm_response is None:
+                    log.error("DistanceMatrix failed after 3 attempts for origin=%s chunk_size=%s", o_str, len(chunk))
+                    continue
+                mx = _dm_response
                 _cache_set(ck, mx, ttl=3600)
             status = mx.get("status") if isinstance(mx, dict) else None
             if status != "OK":
@@ -4424,6 +4083,8 @@ async def explorer_search_within_drive_km(
         except Exception:
             return k
 
+    # Convert nested sub-groups to expression format before flattening (same as explorer_search)
+    filters = _filter_group_to_expr(filters)
     # Clasificación de reglas (nested sub-groups are flattened first)
     for r in _flatten_filter_rules(filters):
         f = _norm_label_to_key_safe(r.get("field") or "")
@@ -5130,14 +4791,7 @@ async def explorer_search_within_drive_km(
 # minimum over all bases.
 # ============================================================
 
-def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """Straight-line Haversine distance in km."""
-    R = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlng = math.radians(lng2 - lng1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
-    return R * 2 * math.asin(math.sqrt(a))
-
+# _haversine_km — moved to geo_cache.py
 
 @explorer_router.post("/search/nearby-multi")
 async def explorer_search_nearby_multi(
@@ -5181,7 +4835,9 @@ async def explorer_search_nearby_multi(
         try: return _norm_label_to_key(k)
         except Exception: return k
 
-    for r in (filters.get("rules") or []):
+    # Convert nested sub-groups to expression format before flattening (same as explorer_search)
+    filters = _filter_group_to_expr(filters)
+    for r in _flatten_filter_rules(filters):
         f  = _norm_safe(r.get("field") or "")
         op = r.get("op") or r.get("operator") or "equals"
         val = r.get("value")

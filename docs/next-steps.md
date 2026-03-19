@@ -124,6 +124,28 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
+## 14. Remaining `_try_planner` handlers — extract to `moby_handlers.py` (Option B, deferred)
+
+**Observation (2026-03-18):** Phase 3 extracted the activity/assignment handlers (3 functions, 62 direct unit tests). The remaining handlers in `_try_planner` (ND, T1D, Stage 1/2, CT3, country sites, nearest sites, pharmacy/overnight, HLA, group count, math) were NOT extracted because they close over `kindex`, `db`, `payload`, `request`, and ~15 tool functions — significantly more complex than the activity handlers. A `PlannerTools` dataclass with 15+ injected callables + expanded `HandlerContext` (adding `kindex`, `db`) would be needed.
+
+**Why it matters:** These handlers are still harder to unit-test in isolation. A regression in, e.g., the ND handler requires tracing through the full `chat_api()` call.
+
+**Files:** `backend/app/routers/ai_chat.py` (`_try_planner` closure), `backend/app/routers/moby_handlers.py` (would receive new handlers).
+
+**Decision:** Deferred. Start with extracting the math handler (pure Python, no SF/httpx) and ND/T1D handlers (use only `sf` + simple SOQL). The km-of-assignment handler (currently at `chat_api` level) should also eventually move to `moby_handlers.py`.
+
+---
+
+## 15. Country-only Moby fast-path — evaluated, not implemented (2026-03-18)
+
+**Observation:** For queries like "sites in Germany" (no extra filters), the existing `_try_planner` country handler already bypasses Claude and runs a direct SOQL query. The `moby_planner.py` `can_short_circuit()` and `can_followup_merge()` cover filter-bearing country queries. The bottleneck is the Salesforce SOQL round-trip (~1–2 s), not Python routing overhead.
+
+**Why not implemented:** A server-side result cache (e.g., 5-min TTL per country) would reduce repeated-query latency but introduces cache invalidation risk and state management complexity. Not justified by observed latency. If Salesforce CDN-level caching or a local replica were available, the equation would change.
+
+**Files:** No change. If implemented later: `backend/app/routers/ai_chat.py` `_try_planner` country handler, using `_cache_get`/`_cache_set` from `salesforce_explorer.py`.
+
+---
+
 ## 12. Commit or discard the untracked root-level deploy script before merging `dev` → `main`
 
 **Observation:** `git status` on `dev` shows `builld_push_ECR_and_deploy_images_in_ECS_sso_profile_juan.sh` (note the typo: "builld") as untracked in the repository root. The tracked deploy scripts are `scripts/deploy.sh` (legacy) and `scripts/deploy_build_push_and_migrate.sh` (current, used per MEMORY.md). The untracked root file appears to be a personal one-off variant.

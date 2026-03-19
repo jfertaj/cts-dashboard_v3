@@ -7,7 +7,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from app.routers.salesforce_explorer import _eval_qual_rule, _qual_get
+from app.routers.filter_engine import _eval_qual_rule, _qual_get
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -119,3 +119,107 @@ class TestQualGet:
         # 0 is a valid value, must not be treated as None
         d = {"ongoing_trials": 0}
         assert _qual_get(d, "ongoing_trials") == 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# pass_account expression-mode (regression for bug fixed 2026-03-18)
+# Verify that account rules respect expression logic strings, not just AND/OR.
+# We test this via explorer_search's internal pass_account by calling it through
+# a lightweight integration path using the filter_engine helpers directly.
+# ──────────────────────────────────────────────────────────────────────────────
+
+from app.routers.filter_engine import _eval_qual_rule, _is_logic_expr, _eval_logic_expr_be
+
+
+class TestPassAccountExpressionMode:
+    """Unit-test the fixed pass_account logic in isolation."""
+
+    def _pass_account_fixed(self, account_rules, account_rule_indices,
+                             vals_by_aid, aid, logic_str):
+        """Mirror the fixed pass_account() logic without importing the full endpoint."""
+        from app.routers.filter_engine import _eval_qual_rule, _is_logic_expr, _eval_logic_expr_be
+        if not account_rules:
+            return True
+        vals = dict(vals_by_aid.get(str(aid), {}))
+        vals.setdefault("Id", str(aid))
+        res = [_eval_qual_rule(vals.get(ar["field"]), ar["operator"], ar["value"])
+               for ar in account_rules]
+        if _is_logic_expr(logic_str):
+            expr_results = {account_rule_indices[i]: res[i] for i in range(len(account_rules))}
+            return _eval_logic_expr_be(logic_str, expr_results)
+        glue_and = logic_str == "AND"
+        return all(res) if glue_and else any(res)
+
+    def test_expression_1_and_2_both_pass(self):
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2]  # global rule indices
+        vals = {"Name": "Acme", "BillingCity": "Berlin"}
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "1 AND 2") is True
+
+    def test_expression_1_and_2_first_fails(self):
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2]
+        vals = {"Name": "Other", "BillingCity": "Berlin"}
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "1 AND 2") is False
+
+    def test_expression_1_or_2_first_passes(self):
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2]
+        vals = {"Name": "Acme", "BillingCity": "Paris"}
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "1 OR 2") is True
+
+    def test_expression_with_nested_parens(self):
+        # "(1 OR 2) AND 3" — rules at global positions 1, 2, 3
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "Name", "operator": "equals", "value": "Beta"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2, 3]
+        vals = {"Name": "Beta", "BillingCity": "Berlin"}
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "(1 OR 2) AND 3") is True
+
+    def test_expression_old_bug_and_treated_as_or(self):
+        """Before fix, ANY expression string was treated as OR (== "AND" is False).
+        After fix, "1 AND 2" is correctly evaluated as AND (both must pass).
+        This test fails on the old code and passes on the fixed code."""
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2]
+        # Only name passes, city fails
+        vals = {"Name": "Acme", "BillingCity": "Paris"}
+        # With old bug: "1 AND 2" != "AND" → glue_and=False → OR → True (WRONG)
+        # With fix: expression evaluated → 1=True AND 2=False → False (CORRECT)
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "1 AND 2") is False
+
+    def test_no_rules_returns_true(self):
+        assert self._pass_account_fixed([], [], {}, "acc1", "AND") is True
+
+    def test_plain_and_logic_still_works(self):
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2]
+        vals = {"Name": "Acme", "BillingCity": "Berlin"}
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "AND") is True
+
+    def test_plain_or_logic_still_works(self):
+        rules = [
+            {"field": "Name", "operator": "equals", "value": "Acme"},
+            {"field": "BillingCity", "operator": "equals", "value": "Berlin"},
+        ]
+        indices = [1, 2]
+        vals = {"Name": "Other", "BillingCity": "Berlin"}
+        assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "OR") is True

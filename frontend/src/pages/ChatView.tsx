@@ -246,6 +246,13 @@ export default function ChatView() {
     } catch {}
   }, [input]);
 
+  // Abort any in-flight SSE stream when the component unmounts
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   // --------- Componente interno: tabla con botones para Explorer ----------
   function ActionableTable({
     columns,

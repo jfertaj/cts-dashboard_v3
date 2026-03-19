@@ -272,10 +272,18 @@ def resolve_countries(text: str) -> List[str]:
 
     Uses longest-match-first strategy.  Returns a de-duplicated list in
     the order each country is first matched.
+
+    For 2-letter ISO codes (e.g. "me", "no", "it"), requires the alias to
+    appear in UPPERCASE in the original text to avoid matching common English
+    words like "me" → Montenegro, "no" → Norway, "at" → Austria.
     """
     s = text.lower()
     found: List[str] = []
     for phrase in SORTED_ALIASES:
+        # Short ISO codes: only match if typed in uppercase in original text
+        if len(phrase) <= 2:
+            if not re.search(r"(?<![A-Za-z])" + re.escape(phrase.upper()) + r"(?![A-Za-z])", text):
+                continue
         if re.search(r"(?<![a-z])" + re.escape(phrase) + r"(?![a-z])", s):
             iso2 = _ALIAS_TO_ISO2[phrase]
             if iso2 not in found:

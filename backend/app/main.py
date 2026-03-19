@@ -120,22 +120,22 @@ async def on_startup():
         init_db()
         logger.info("init_db OK")
     except Exception as e:
-        logger.critical("init_db failed: %s", e)
-        # We might want to raise here depending on strictness, but for now we log critical.
-        # raise e 
+        logger.critical("init_db failed — cannot start without database: %s", e, exc_info=True)
+        raise RuntimeError(f"Database initialisation failed: {e}") from e
 
     async def _bg_tasks():
+        # Background tasks are optional — failures are logged but do not affect app operation.
         if initial_geocoding:
             try:
                 await initial_geocoding()
             except Exception:
-                logger.exception("Error in initial_geocoding")
+                logger.exception("initial_geocoding failed (non-fatal — geocoding will run lazily per request)")
 
         if sync_salesforce_subaccounts:
             try:
                 await anyio.to_thread.run_sync(sync_salesforce_subaccounts)
             except Exception:
-                logger.exception("Error in sync_salesforce_subaccounts")
+                logger.exception("sync_salesforce_subaccounts failed (non-fatal)")
 
     try:
         asyncio.create_task(_bg_tasks())
@@ -173,12 +173,6 @@ app.include_router(members_explorer.router)  # /api/members/...
 # OpenAI
 app.include_router(ai_chat.router)
 app.include_router(explorer_bridge.router)
-
-# --- Simple Health ---
-@app.get("/healthz")
-async def healthz():
-    return {"ok": True}
-
 
 # --- Catch-all for SPA (if serving front from /static) ---
 @app.get("/{full_path:path}")

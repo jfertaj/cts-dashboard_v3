@@ -34,6 +34,13 @@ from app.routers.moby_planner import (
     build_clarification,
     validate_filter_group,
 )
+from app.routers.moby_handlers import (
+    HandlerContext as _HandlerContext,
+    ActivityTools as _ActivityTools,
+    handle_followup_activity_sponsor,
+    handle_assignment_sites,
+    handle_activity,
+)
 
 DEBUG = os.environ.get("AI_CHAT_DEBUG", "0") == "1"
 INDEX_REFRESH_SEC = int(os.environ.get("AI_INDEX_REFRESH_SEC", "600"))
@@ -1193,7 +1200,7 @@ def tool_nearest_filtered_sites(
         _geo_cache_get_fn = None
         _country_norm_fn = None
         try:
-            from app.routers.salesforce_explorer import _geo_cache_get as _geo_cache_get_fn  # noqa: F401
+            from app.utils.geo_cache import _geo_cache_get as _geo_cache_get_fn  # noqa: F401
             from app.routers.salesforce_explorer import _country_norm as _country_norm_fn  # noqa: F401
         except Exception as _imp_err:
             _dbg("NEAREST: could not import geocache helpers: %s", _imp_err)
@@ -3131,7 +3138,10 @@ def tool_study_coordinators_with_activities(
     for r in sc_contacts:
         aid = r.get("AccountId")
         cid = r.get("Id")
-        if _is_sc(None, r.get("Title")):
+        _ctitle = r.get("Title") or ""
+        # Include if: explicitly matched by title_contains (e.g. "Investigator"), or passes coordinator check
+        _explicit_match = bool(title_contains and title_contains.lower() in _ctitle.lower())
+        if _explicit_match or _is_sc(None, _ctitle):
             key = (aid, cid)
             if key not in _seen_cids:
                 _seen_cids.add(key)
@@ -4949,7 +4959,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older"
                                    r"|\badulto?s?\b|\badults?\b|\bpediatri[ck]|paediatri[ck]|\bni[ñn]os?\b)\b", s) is not None
         # Queries sobre agregaciones (average, total, sum) con edad especificada son suficientemente claras
-        has_aggregation = re.search(r"\b(average|avg|total|sum|count|how\s+many)\b", s) is not None
+        has_aggregation = re.search(r"\b(average|avg|total|sum|count|how\s+many|highest|most|top|best|ranking|rank)\b", s) is not None
         # Si especifica la edad, no pedir clarificación
         if specified_age:
             return None
@@ -4959,8 +4969,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         # Si especifica stage, tampoco pedir clarificación
         if specified_stage:
             return None
-        # Si es una agregación con edad, no pedir clarificación
-        if has_aggregation and specified_age:
+        # Si es una agregación o ranking, no pedir clarificación (usuario quiere datos, no opciones)
+        if has_aggregation:
             return None
         # Construye objeto clarify
         question = "Which type of patients are you referring to?"
@@ -5219,6 +5229,33 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner EARLY HLA %% per country failed: %s", _e)
 
+        # INTENCIÓN DIRECTA: Member institutions → route to tool_members_search
+        try:
+            _mem_inst_intent = bool(re.search(
+                r"\bmember\s+institution[s]?\b|\bmember\s+universit|\binstitution[s]?\s+(?:in|from|of)\b"
+                r"|\bnetwork\s+member[s]?\b|\binnodia\s+member[s]?\b",
+                s, re.I
+            ))
+            if _mem_inst_intent:
+                from app.utils.country_norms import resolve_countries as _rc_mem, iso2_to_sf_name as _iso2sf_mem
+                _mem_iso2s = _rc_mem(user_text)  # pass original text so uppercase ISO2 codes (e.g. "UK") are matched
+                _mem_rules = [
+                    {"field": "site.country", "operator": "equals", "value": iso2}
+                    for iso2 in _mem_iso2s
+                ]
+                _mem_filters = {"logic": "AND", "rules": _mem_rules} if _mem_rules else {"logic": "AND", "rules": []}
+                _mem_result = tool_members_search(request, filters=_mem_filters, include_detail=False)
+                _mem_rows = (_mem_result.get("rows") or []) if isinstance(_mem_result, dict) else []
+                _country_str = ", ".join(_iso2sf_mem(c) for c in _mem_iso2s) if _mem_iso2s else "all countries"
+                _mem_ans = (
+                    f"<p>Found <strong>{len(_mem_rows)}</strong> INNODIA member institution(s)"
+                    + (f" in <strong>{_country_str}</strong>" if _mem_iso2s else "")
+                    + ".</p>"
+                )
+                return {"answer": _mem_ans, "table": _normalize_table_for_ui(_mem_result) if isinstance(_mem_result, dict) else {}}
+        except Exception as _e_mem:
+            _dbg("WARN: member institution planner failed: %s", _e_mem)
+
         # INTENCIÓN DIRECTA: Study Coordinator(s) → llamar determinísticamente a study_coordinators_with_activities
         try:
             sc_intent = re.search(r"\bstudy\s*coordinators?\b", s) is not None
@@ -5227,16 +5264,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 return {"answer": "<p>⚠️ Contact/coordinator data requires an active Salesforce session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
             if (sc_intent or pi_intent) and sf:
-                # Parse optional country list: "in Germany and Spain"
-                # Capture 'in <country>' anywhere, optionally followed by 'site(s)'
-                m_c = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+?)(?:\s+sites?\b|[?!.,;]|$)", s)
-                countries = []
-                if m_c:
-                    raw = m_c.group(1).strip()
-                    raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
-                    raw = raw.replace("/", ",").replace("&", ",")
-                    parts = [p.strip() for p in raw.split(",") if p.strip()]
-                    countries = [p.title() for p in parts]
+                # Use resolve_countries() for robust country extraction (avoids matching "in" inside "investigators")
+                from app.utils.country_norms import resolve_countries as _resolve_countries_sc
+                _sc_iso2s = _resolve_countries_sc(user_text)  # pass original text for uppercase ISO2 matching
+                countries = [_iso2_to_sf(c) for c in _sc_iso2s] if _sc_iso2s else []
                 # Fallback: carry country context from last table if none provided
                 try:
                     ltp = payload.last_table if hasattr(payload, 'last_table') else None
@@ -5256,18 +5287,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         include_subaccounts=True,
                     )
                 else:
-                    # PI intent: prefer ACR role 'PI' and also match title
-                    rows = tool_salesforce_account_contacts(
+                    # PI intent: use coordinator tool with broad "Investigator" title match
+                    table = tool_study_coordinators_with_activities(
                         sf,
-                        account_id="",
+                        account_ids=[],
+                        countries=countries,
+                        title_contains="Investigator",
+                        roles=[],
                         include_subaccounts=True,
-                        role_contains=None,
-                        roles=["PI"],
-                        title_contains="Principal Investigator",
-                        country=countries[0] if countries else None,
-                        city=None,
                     )
-                    table = rows
                 rows = table.get("rows") or []
                 accs = len({str(r.get("account_id")) for r in rows if isinstance(r, dict) and r.get("account_id")})
                 ans = f"Found {len(rows)} coordinator(s) across {accs} account(s)."
@@ -5275,385 +5303,36 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner study_coordinators failed: %s", _e)
 
-        # INTENCIÓN DIRECTA: Activities
+        # ── Activity / Assignment handlers (extracted to moby_handlers.py) ──────────
         try:
-            # 1c-pre) Follow-up sponsor swap — runs BEFORE _act_intent check so "the ones for Lilly"
-            # works even without the word "activit" in the query.
-            # Triggered when previous table was an activities table (has 'activity_name' column).
-            if sf:
-                _prev_cols_act = [c.get("key") if isinstance(c, dict) else str(c)
-                                  for c in (last_table_from_payload or {}).get("columns", [])]
-                if "activity_name" in _prev_cols_act:
-                    _m_fu = (
-                        re.search(r"\bfor\s+([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I) or
-                        re.search(r"\bnow\s+(?:for\s+|with\s+)?([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I) or
-                        re.search(r"\bwhat\s+about\s+([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I) or
-                        re.search(r"\bones?\s+(?:from|of|by)\s+([\w\s\-&']{2,40}?)(?:\s*\?|$|[.,;])", s, re.I)
-                    )
-                    if _m_fu:
-                        _cand_fu = _m_fu.group(1).strip().rstrip(".,;?")
-                        _stop_fu = {"the", "a", "an", "all", "any", "some", "this", "that",
-                                    "them", "it", "these", "those", "here", "there"}
-                        if _cand_fu.lower() not in _stop_fu and len(_cand_fu) >= 2:
-                            table = tool_list_all_activities(sf, account_name_like=_cand_fu)
-                            rows = table.get("rows") or []
-                            ans = (f"Found <strong>{len(rows)}</strong> activit{'y' if len(rows)==1 else 'ies'} "
-                                   f"where the sponsor / account matches <em>{_cand_fu}</em>.")
-                            return {"answer": f"<p>{ans}</p>", "table": table}
-
-            # ── "sites in/belonging to [NAME] assignment" handler ────────────────
-            # Covers queries like "show all sites that belong to Barricade Delay assignment"
-            # These contain "assignment" but NOT "activ..." so _act_intent misses them.
-            # The km-of-assignment handler only fires when "X km" is present.
-            _assign_name_m = None
-            if (sf
-                    and re.search(r"\bassignment\b", s, re.I)
-                    and not re.search(r"\d+\s*km\b", s)
-                    and re.search(r"\b(sites?|sitios?|centros?|all|show|ver|todos?|see|get|which)\b", s, re.I)):
-                _assign_name_m = (
-                    re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
-                    re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
-                    re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
-                    re.search(r"(?:assignment|estudio|actividad)\s+(?:called\s+|named\s+)?['\"]?([\w\s'\-\(\)]{2,60}?)['\"]?\s*(?:\?|$)", s, re.I)
-                )
-            if sf and _assign_name_m:
-                _asgn_name = _assign_name_m.group(1).strip().rstrip(".,;?")
-                _stop = {"the", "a", "an", "all", "any", "some", "this", "that", "named", "called"}
-                if _asgn_name.lower() not in _stop and len(_asgn_name) >= 2:
-                    _dbg("assignment-sites handler: name=%r", _asgn_name)
-                    try:
-                        tbl = tool_sites_by_activity(sf, name=_asgn_name)
-                        rows = tbl.get("rows") or []
-                        if rows:
-                            ans = (f"Found <strong>{len(rows)}</strong> site(s) participating in "
-                                   f"<em>{_asgn_name}</em>.")
-                        else:
-                            ans = (f"No sites found for assignment <em>{_asgn_name}</em>. "
-                                   f"Check the exact name in Salesforce.")
-                        return {"answer": f"<p>{ans}</p>", "table": tbl}
-                    except Exception as _e_asgn:
-                        _dbg("assignment-sites handler error: %s", _e_asgn)
-                        # Fall through to LLM
-
-            # Acepta 'activities', 'activity' y typos frecuentes como 'activites'
-            _act_intent = bool(re.search(r"\bactivit(?:y|ies)\b", s) or re.search(r"\bactivites\b", s) or ("activit" in s))
-            # Skip activity handler if this is a "within N km of [activity/assignment] [name]" query
-            # e.g. "a 100 km de la actividad Safeguard" — handled by assignment-km handler below
-            # Also covers English "in a 120 km of any BetaPreserve activity"
-            if _act_intent and re.search(r"\d+\s*km\b", s) and re.search(r"actividad|within\s+\d+\s*km|\bin\s+a?\s*\d+\s*km", s):
-                _act_intent = False
-            if _act_intent and not sf:
-                return {"answer": "<p>⚠️ Activity/enrollment data requires an active Salesforce session. "
-                                  "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
-            if sf and _act_intent:
-                # 0) Prioridad: frases sobre ASSIGNMENTS (evita que 'list activities' intercepte)
-                if re.search(r"activities?\s+with\s+assignments?", s):
-                    # Parse filters (país, nombre quoted, fechas)
-                    m_c = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+)$", s)
-                    countries = []
-                    if m_c:
-                        raw = m_c.group(1).strip()
-                        raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
-                        raw = raw.replace("/", ",").replace("&", ",")
-                        countries = [p.strip() for p in raw.split(",") if p.strip()]
-                    m_q = re.search(r"['\"]([^'\"]{3,})['\"]", s)
-                    name_like = m_q.group(1).strip() if m_q else None
-                    m_last = re.search(r"last\s+(\d{1,3})\s*(days|day|months|month)", s)
-                    last_days = last_months = None
-                    if m_last:
-                        n = int(m_last.group(1)); unit = m_last.group(2)
-                        last_days = n if unit.startswith("day") else None
-                        last_months = n if unit.startswith("month") else last_months
-                    m_since = re.search(r"since\s+(\d{4}-\d{2}-\d{2})", s)
-                    m_until = re.search(r"(until|to)\s+(\d{4}-\d{2}-\d{2})", s)
-                    since_d = m_since.group(1) if m_since else None
-                    until_d = (m_until.group(2) if m_until else None)
-                    # Regla: detalle sólo si se pide explícitamente 'assignments list' o 'detailed'
-                    wants_detail = bool(re.search(r"(with\s+assignments?\s+list|assignments?\s+list|\bdetailed\b|\bdetalle\b)", s))
-                    if wants_detail:
-                        tbl = tool_activity_assignments_detailed(
-                            sf,
-                            countries or None,
-                            name_like,
-                            last_n_days=last_days,
-                            last_n_months=last_months,
-                            since=since_d,
-                            until=until_d,
-                        )
-                        return {"answer": "<p>Assignments per activity.</p>", "table": tbl}
-                    else:
-                        tbl = tool_activities_with_assignments_counts(
-                            sf,
-                            last_n_days=last_days,
-                            last_n_months=last_months,
-                            since=since_d,
-                            until=until_d,
-                        )
-                        return {"answer": "<p>Activities with assignment counts.</p>", "table": tbl}
-                # 1) Resto de intenciones con activities
-                # Distinguish: "list activities" vs "sites with activities" or "activities by country"
-                # Robust detection: tolerate typos like "acitvites"/"activties"
-                # 1b) Sponsor / account filter on activities
-                # "activities where Sanofi is the sponsor"
-                # "activities sponsored by Novo Nordisk"
-                # "activities with Sanofi as sponsor/account"
-                _sponsor_name: str | None = None
-                if re.search(r"\bsponsor\b", s, re.I):
-                    _m_sp = (
-                        re.search(r"where\s+([\w\s\-&']{2,40}?)\s+is\s+(?:the\s+)?sponsor", s, re.I) or
-                        re.search(r"sponsor(?:ed)?\s+by\s+([\w\s\-&']{2,40})", s, re.I) or
-                        re.search(r"with\s+([\w\s\-&']{2,40}?)\s+as\s+(?:the\s+)?sponsor", s, re.I) or
-                        re.search(r"([\w\s\-&']{2,40}?)\s+(?:is|as)\s+(?:the\s+)?sponsor", s, re.I)
-                    )
-                    if _m_sp:
-                        _cand_sp = _m_sp.group(1).strip().rstrip(".,;")
-                        _stop_sp = {"the", "a", "an", "all", "any", "some", "this", "that", "their"}
-                        if _cand_sp.lower() not in _stop_sp and len(_cand_sp) >= 2:
-                            _sponsor_name = _cand_sp
-                if _sponsor_name:
-                    table = tool_list_all_activities(sf, account_name_like=_sponsor_name)
-                    rows = table.get("rows") or []
-                    ans = (f"Found <strong>{len(rows)}</strong> activit{'y' if len(rows)==1 else 'ies'} "
-                           f"where the sponsor / account matches <em>{_sponsor_name}</em>.")
-                    return {"answer": f"<p>{ans}</p>", "table": table}
-
-                has_list_word = bool(re.search(r"\b(list|show|all|what|which|lista|listar|mostrar|muestra)\b", s))
-                has_activity_token = ("activ" in s) or bool(re.search(r"\bactivit(?:y|ies)\b|\bactividades\b", s))
-                mentions_group_or_location = bool(re.search(r"\b(site|sites|sitio|sitios|country|countries|ciudad|ciudades|pa[ií]s|pa[ií]ses|by|per|por)\b", s))
-                is_list_activities = has_list_word and has_activity_token and not mentions_group_or_location
-
-                if is_list_activities:
-                    # Extract optional name filter: "all Fabulinus activities" → "Fabulinus"
-                    _act_name_m = re.search(r"\ball\s+([\w\s'\-]{2,40}?)\s+activit", qtxt, re.IGNORECASE)
-                    _act_name_filter: str = ""
-                    if _act_name_m:
-                        _cand = _act_name_m.group(1).strip()
-                        if _cand.lower() not in {"the", "any", "of", "some", "existing", "current", "available"}:
-                            _act_name_filter = _cand
-                    table = tool_list_all_activities(sf, name_like=_act_name_filter or None)
-                    rows = table.get("rows") or []
-                    _filter_txt = f' matching "{_act_name_filter}"' if _act_name_filter else ""
-                    ans = f"Found {len(rows)} activit{'y' if len(rows)==1 else 'ies'}{_filter_txt}."
-                    return {"answer": f"<p>{ans}</p>", "table": table}
-                else:
-                    # Summary of activities (by activity name) → aggregated table (sites_total, countries)
-                    if re.search(r"\b(summary|resumen|overview)\b", s) and re.search(r"activit", s):
-                        tbl = tool_activity_country_matrix(sf, stacked=False)
-                        rows = tbl.get("rows") or []
-                        top = sorted(rows, key=lambda x: int(x.get("sites_total") or 0), reverse=True)[:3]
-                        top_txt = ", ".join([f"{t.get('activity_name')}: {t.get('sites_total')}" for t in top]) if rows else ""
-                        ans = f"{len(rows)} activities. Top: {top_txt}." if rows else "Activities summary."
-                        return {"answer": f"<p>{ans}</p>", "table": tbl}
-                    # Join: assignments + count of sites per activity
-                    if re.search(r"assignments?", s) and re.search(r"\bcount", s) and re.search(r"sites?", s):
-                        t_assign = tool_activities_with_assignments_counts(sf)
-                        t_sites = tool_activity_country_matrix(sf, stacked=False)
-                        a_rows = t_assign.get("rows") or []
-                        s_rows = t_sites.get("rows") or []
-                        amap = {str(r.get("activity_id") or r.get("activity_name")): r for r in a_rows if r.get("activity_id") or r.get("activity_name")}
-                        out_rows = []
-                        for r in s_rows:
-                            k = str(r.get("activity_id") or r.get("activity_name"))
-                            a = amap.get(k) or {}
-                            out_rows.append({
-                                "activity_name": r.get("activity_name") or a.get("activity_name"),
-                                "assignments": a.get("assignments") or 0,
-                                "sites_total": r.get("sites_total") or 0,
-                                "countries": r.get("countries") or a.get("countries"),
-                                "activity_id": r.get("activity_id") or a.get("activity_id"),
-                            })
-                        out = {"columns":[
-                            {"key":"activity_name","label":"Activity"},
-                            {"key":"assignments","label":"Assignments"},
-                            {"key":"sites_total","label":"Sites"},
-                            {"key":"countries","label":"Countries"},
-                            {"key":"activity_id","label":"Activity Id"},
-                        ], "rows": out_rows}
-                        return {"answer": "<p>Assignments and site counts per activity.</p>", "table": out}
-                    # Explicit: 'countries involved' or 'country breakdown' → detailed per-activity countries + summary + chart
-                    if re.search(r"countries?\s+involv(ed|idos)|countries?\s+in\b|country\s+breakdown", s):
-                        tbl = tool_activities_with_countries(sf)
-                        rows_tbl = tbl.get("rows") or []
-                        top = sorted(rows_tbl, key=lambda x: int(x.get("site_count") or 0), reverse=True)[:3]
-                        top_txt = ", ".join([f"{t.get('opportunity_name')}: {t.get('site_count')}" for t in top])
-                        ans = f"{len(rows_tbl)} activities. Top: {top_txt}." if rows_tbl else "Activities with participating countries."
-                        # Also stacked viz
-                        rows_s = tool_activity_country_matrix(sf, stacked=True).get("rows") or []
-                        countries = sorted(set(r.get("country") for r in rows_s if r.get("country")))
-                        stacked_data = []
-                        activities = sorted(set(r.get("activity_name") for r in rows_s if r.get("activity_name")))
-                        for act in activities:
-                            rowd = {"activity_name": act}
-                            for c in countries:
-                                rowd[c] = sum(r.get("sites",0) for r in rows_s if r.get("activity_name")==act and r.get("country")==c)
-                            stacked_data.append(rowd)
-                        viz = tool_render_chart("bar", stacked_data, "activity_name", countries[:8], {"title":"Countries per Activity (Stacked)"}, {})
-                        viz_cols = [{"key":"activity_name","label":"Activity"}] + [{"key": c, "label": _pretty_label(c)} for c in countries[:8]]
-                        viz_tbl = {"columns": viz_cols, "rows": stacked_data}
-                        return {"answer": f"<p>{ans}</p>", "table": tbl, "visualization": viz.get("visualization")}
-                    # If the intent mentions country grouping → aggregate by country
-                    if re.search(r"\b(by|per|por)\s+(country|pa[ií]s|pa[ií]ses)\b", s):
-                        tbl = tool_activity_counts_by_country(sf)
-                        rows = tbl.get("rows") or []
-                        total = sum(int(r.get("activities") or 0) for r in rows)
-                        top = sorted(rows, key=lambda x: int(x.get("activities") or 0), reverse=True)[:3]
-                        top_txt = ", ".join([f"{t.get('country')}: {t.get('activities')}" for t in top])
-                        viz = tool_render_chart("bar", rows, "country", ["activities"], {"title": "Activities by Country"}, {})
-                        return {"answer": f"<p>Total {total}. Top: {top_txt}.</p>", "table": tbl, "visualization": viz.get("visualization")}
-                    # 'activities with assignments' →
-                    if re.search(r"activities?\s+with\s+assignments?", s):
-                        # Parse optional filters: countries ("in ...") and activity name (quoted)
-                        m_c = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+)$", s)
-                        countries = []
-                        if m_c:
-                            raw = m_c.group(1).strip()
-                            raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
-                            raw = raw.replace("/", ",").replace("&", ",")
-                            countries = [p.strip() for p in raw.split(",") if p.strip()]
-                        m_q = re.search(r"['\"]([^'\"]{3,})['\"]", s)
-                        name_like = m_q.group(1).strip() if m_q else None
-                        # Parse date filters
-                        m_last = re.search(r"last\s+(\d{1,3})\s*(days|day|months|month)", s)
-                        last_days = last_months = None
-                        if m_last:
-                            n = int(m_last.group(1))
-                            unit = m_last.group(2)
-                            if unit.startswith("day"):
-                                last_days = n
-                            else:
-                                last_months = n
-                        m_since = re.search(r"since\s+(\d{4}-\d{2}-\d{2})", s)
-                        m_until = re.search(r"until\s+(\d{4}-\d{2}-\d{2})|to\s+(\d{4}-\d{2}-\d{2})", s)
-                        since_d = m_since.group(1) if m_since else None
-                        until_d = (m_until.group(1) or m_until.group(2)) if m_until else None
-                        # Only detailed when 'assignments list' or 'detailed' is present
-                        wants_detail = bool(re.search(r"(with\s+assignments?\s+list|assignments?\s+list|\bdetailed\b|\bdetalle\b)", s))
-                        if wants_detail:
-                            tbl = tool_activity_assignments_detailed(
-                                sf,
-                                countries or None,
-                                name_like,
-                                last_n_days=last_days,
-                                last_n_months=last_months,
-                                since=since_d,
-                                until=until_d,
-                            )
-                            return {"answer": "<p>Assignments per activity.</p>", "table": tbl}
-                        else:
-                            tbl = tool_activities_with_assignments_counts(
-                                sf,
-                                last_n_days=last_days,
-                                last_n_months=last_months,
-                                since=since_d,
-                                until=until_d,
-                            )
-                            return {"answer": "<p>Activities with assignment counts.</p>", "table": tbl}
-                    # Group countries by Opportunity/Activity → stacked chart preferred
-                    if re.search(r"\b(group|by|per|por)\b[\s\S]*\b(opportunity\s*name|activity|activit(?:y|ies))\b", s) and re.search(r"\bcountr|pa[ií]s", s):
-                        # Check if user wants stacked visualization
-                        wants_stack = bool(re.search(r"\b(stack|stacked|segment|breakdown)\b", s))
-                        if wants_stack or re.search(r"\b(chart|graph|bar|pie)\b", s):
-                            # Stacked data format based on assignment counts per country
-                            tbl = tool_activity_country_matrix(sf, stacked=True)
-                            rows = tbl.get("rows") or []
-                            countries = sorted(set(r.get("country") for r in rows if r.get("country")))
-                            stacked_data = []
-                            activities = sorted(set(r.get("activity_name") for r in rows if r.get("activity_name")))
-                            for activity in activities:
-                                row_data = {"activity_name": activity}
-                                for country in countries:
-                                    sites = sum(r.get("sites", 0) for r in rows if r.get("activity_name") == activity and r.get("country") == country)
-                                    row_data[country] = sites
-                                stacked_data.append(row_data)
-                            viz = tool_render_chart("bar", stacked_data, "activity_name", countries[:8], {"title": "Countries per Activity (Stacked)"}, {})
-                            # Devuelve la tabla exacta utilizada para el gráfico (pivot por activity × countries mostradas)
-                            viz_cols = [{"key":"activity_name","label":"Activity"}] + [{"key": c, "label": _pretty_label(c)} for c in countries[:8]]
-                            viz_tbl = {"columns": viz_cols, "rows": stacked_data}
-                            return {"answer": f"<p>{len(activities)} activities with country breakdown.</p>", "table": viz_tbl, "visualization": viz.get("visualization")}
-                        else:
-                            # Aggregated view (also returns table)
-                            tbl = tool_activity_country_matrix(sf, stacked=False)
-                            rows = tbl.get("rows") or []
-                            viz = tool_render_chart("bar", rows, "activity_name", ["sites_total"], {"title": "Sites per Activity"}, {})
-                            return {"answer": f"<p>{len(rows)} activities found.</p>", "table": tbl, "visualization": viz.get("visualization")}
-                    # Explicit phrasing: "activities by country"
-                    # Tolerate typos like "activites" when matching this intent
-                    if (("activ" in s) and re.search(r"\bby\s+country\b", s)) or re.search(r"\b(activities?|activity|activites)\b[^\n]*\bby\s+country\b", s):
-                        tbl_agg = tool_activity_country_matrix(sf, stacked=False)
-                        # Build stacked viz from counts per country
-                        tbl_stack = tool_activity_country_matrix(sf, stacked=True)
-                        rows_s = tbl_stack.get("rows") or []
-                        countries = sorted(set(r.get("country") for r in rows_s if r.get("country")))
-                        stacked_data = []
-                        activities = sorted(set(r.get("activity_name") for r in rows_s if r.get("activity_name")))
-                        for act in activities:
-                            rowd = {"activity_name": act}
-                            for c in countries:
-                                rowd[c] = sum(r.get("sites",0) for r in rows_s if r.get("activity_name")==act and r.get("country")==c)
-                            stacked_data.append(rowd)
-                        viz = tool_render_chart("bar", stacked_data, "activity_name", countries[:8], {"title":"Countries per Activity (Stacked)"}, {})
-                        return {"answer": f"<p>{len(activities)} activities with country breakdown.</p>", "table": tbl_agg, "visualization": viz.get("visualization")}
-                    # Follow-up like: "make it a stacked barchart by activity name"
-                    if re.search(r"\bstacked\b", s) and re.search(r"\bbar\b|\bbarchart\b|\bbar\s*chart\b", s) and re.search(r"activit", s):
-                        tbl = tool_activity_country_matrix(sf, stacked=True)
-                        rows = tbl.get("rows") or []
-                        countries = sorted(set(r.get("country") for r in rows if r.get("country")))
-                        stacked_data = []
-                        activities = sorted(set(r.get("activity_name") for r in rows if r.get("activity_name")))
-                        for activity in activities:
-                            row_data = {"activity_name": activity}
-                            for country in countries:
-                                row_data[country] = sum(r.get("sites", 0) for r in rows if r.get("activity_name") == activity and r.get("country") == country)
-                            stacked_data.append(row_data)
-                        viz = tool_render_chart("bar", stacked_data, "activity_name", countries[:8], {"title": "Countries per Activity (Stacked)"}, {})
-                        viz_cols = [{"key":"activity_name","label":"Activity"}] + [{"key": c, "label": _pretty_label(c)} for c in countries[:8]]
-                        viz_tbl = {"columns": viz_cols, "rows": stacked_data}
-                        return {"answer": f"<p>{len(activities)} activities with country breakdown.</p>", "table": viz_tbl, "visualization": viz.get("visualization")}
-                    # Specific: 'participating in activity "X" in Y' → by-name resolver
-                    # Also capture variants like "sites in Y participating in 'X'"
-                    m_qname = re.search(r"participat\w*\s+.*?activity\s+['\"]([^'\"]{3,})['\"]|['\"]([^'\"]{3,})['\"]\s+activit", s)
-                    m_c2 = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+)$", s)
-                    countries2 = []
-                    if m_c2:
-                        raw = m_c2.group(1).strip()
-                        raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
-                        raw = raw.replace("/", ",").replace("&", ",")
-                        parts = [p.strip() for p in raw.split(",") if p.strip()]
-                        countries2 = [p.title() for p in parts]
-                    if m_qname:
-                        name = m_qname.group(1).strip()
-                        byname = tool_sites_by_activity(sf, name=name, countries=countries2 or None, exact=False)
-                        return {"answer": "<p>Sites by activity name.</p>", "table": byname}
-                    # "sites per activity" + chart keyword → bar chart by activity
-                    if re.search(r"\b(chart|bar|graph|pie|visuali[sz]e)\b", s):
-                        tbl_act = tool_activity_country_matrix(sf, stacked=False)
-                        rows_act = tbl_act.get("rows") or []
-                        viz_act = tool_render_chart("bar", rows_act, "activity_name", ["sites_total"],
-                                                   {"title": "Sites per Activity"}, {})
-                        return {"answer": f"<p>{len(rows_act)} activities found.</p>",
-                                "table": tbl_act, "visualization": viz_act.get("visualization")}
-                    # Catch unquoted "sites that belong to X activity" / "sites in X activity"
-                    _act_belong_m = (
-                        re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
-                        re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
-                        re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
-                        re.search(r"for\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I)
-                    )
-                    _stop_act = {"the", "a", "an", "all", "any", "some", "this", "that"}
-                    if _act_belong_m:
-                        _act_nm = _act_belong_m.group(1).strip().rstrip(".,;?")
-                        if _act_nm.lower() not in _stop_act and len(_act_nm) >= 2:
-                            byname = tool_sites_by_activity(sf, name=_act_nm, countries=countries2 or None, exact=False)
-                            rows_bn = byname.get("rows") or []
-                            if rows_bn:
-                                return {"answer": f"<p>Found <strong>{len(rows_bn)}</strong> site(s) participating in <em>{_act_nm}</em>.</p>", "table": byname}
-
-                    # Otherwise list sites with activities (with optional country filter)
-                    table = tool_sites_with_any_activity(sf, countries=countries2 or None)
-                    rows = table.get("rows") or []
-                    accs = len({str(r.get("account_id")) for r in rows if isinstance(r, dict) and r.get("account_id")})
-                    ans = f"Found activities in {accs} account(s)."
-                    return {"answer": f"<p>{ans}</p>", "table": table}
+            _act_ctx = _HandlerContext(
+                query=user_text, s=s, sf=sf,
+                last_table=last_table_from_payload,
+                last_filters=last_filters, has_table=has_table,
+                is_followup_prefix=_is_followup_prefix,
+            )
+            _act_tools = _ActivityTools(
+                tool_sites_by_activity=tool_sites_by_activity,
+                tool_sites_with_any_activity=tool_sites_with_any_activity,
+                tool_list_all_activities=tool_list_all_activities,
+                tool_activity_country_matrix=tool_activity_country_matrix,
+                tool_activity_counts_by_country=tool_activity_counts_by_country,
+                tool_activities_with_countries=tool_activities_with_countries,
+                tool_activities_with_assignments_counts=tool_activities_with_assignments_counts,
+                tool_activity_assignments_detailed=tool_activity_assignments_detailed,
+                tool_render_chart=tool_render_chart,
+                pretty_label=_pretty_label,
+                dbg=_dbg,
+            )
+            _r = handle_followup_activity_sponsor(_act_ctx, _act_tools)
+            if _r is not None:
+                return _r
+            _r = handle_assignment_sites(_act_ctx, _act_tools)
+            if _r is not None:
+                return _r
+            _r = handle_activity(_act_ctx, _act_tools)
+            if _r is not None:
+                return _r
         except Exception as _e:
             _dbg("WARN: planner activities failed: %s", _e)
 
@@ -5828,6 +5507,56 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner T1D currently handler failed: %s", _e)
 
+        # INTENCIÓN DIRECTA: T1D patients ranking/top sites → list sites sorted by T1D count desc
+        try:
+            _t1d_rank_intent = bool(
+                re.search(r"(highest|top|most|ranking|rank)\b.{0,60}(t1d|type\s*1|diabetes).{0,30}patient", s, re.I) or
+                re.search(r"\b(t1d|type\s*1|diabetes).{0,30}patient.{0,60}(highest|top|most|ranking|rank)", s, re.I) or
+                re.search(r"(t1d|type\s*1|diabetes).{0,30}patient.{0,30}(seen|per\s+year|yearly|annual)", s, re.I)
+            )
+            if _t1d_rank_intent:
+                if not sf:
+                    return {"answer": "<p>⚠️ T1D patient data requires an active Salesforce session.</p>"}
+                _t1dr_field_o18 = "sf.C_Number_of_T1D_Patients_currently_O_18__c"
+                _t1dr_field_u18 = "sf.C_Number_of_T1D_Patients_currently_U_18__c"
+                _t1dr_url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
+                _t1dr_ck = request.headers.get("cookie") if request else None
+                _t1dr_hdrs = {"cookie": _t1dr_ck} if _t1dr_ck else {}
+                _t1dr_cols = ["sf.Account.Id", "sf.Account.Name", "sf.Account.ShippingCountry",
+                              "sf.Account.ShippingCity", _t1dr_field_o18, _t1dr_field_u18]
+                with httpx.Client(timeout=60.0) as _t1dr_cli:
+                    _t1dr_resp = _t1dr_cli.post(
+                        _t1dr_url,
+                        json={"filters": {"logic": "OR", "rules": [
+                            {"field": _t1dr_field_o18, "operator": ">", "value": 0},
+                            {"field": _t1dr_field_u18, "operator": ">", "value": 0},
+                        ]}, "columns": _t1dr_cols},
+                        headers=_t1dr_hdrs,
+                    )
+                _t1dr_rows = _t1dr_resp.json().get("rows") or []
+                if _t1dr_rows:
+                    _t1dr_rows.sort(
+                        key=lambda r: float((r.get("data") or {}).get(_t1dr_field_o18) or 0) +
+                                      float((r.get("data") or {}).get(_t1dr_field_u18) or 0),
+                        reverse=True,
+                    )
+                    _t1dr_tbl = _normalize_table_for_ui({
+                        "columns": [
+                            {"key": "account_name", "label": "Site"},
+                            {"key": "country", "label": "Country"},
+                            {"key": _t1dr_field_o18, "label": "T1D ≥18"},
+                            {"key": _t1dr_field_u18, "label": "T1D <18"},
+                        ],
+                        "rows": _t1dr_rows,
+                    })
+                    _dbg("Planner T1D ranking: %d sites", len(_t1dr_rows))
+                    return {
+                        "answer": f"<p>Found <strong>{len(_t1dr_rows)}</strong> sites with T1D patient data, sorted by highest count.</p>",
+                        "table": _t1dr_tbl,
+                    }
+        except Exception as _e:
+            _dbg("WARN: planner T1D ranking handler failed: %s", _e)
+
         # INTENCIÓN DIRECTA: Stage 1/2 by country (aggregation) → like ND by country
         try:
             _bc_has_s1 = bool(re.search(r"\bstage\s*1\b", s))
@@ -5902,7 +5631,12 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             # If query asks for nearest/closest, skip deterministic handler → let Gemini use nearest_filtered_sites tool
             _has_nearest = bool(re.search(r"\bnearest\b|\bclosest\b|\bnear\b|\bcerca\b|\bpróximo[s]?\b|\bproximite\b|\bvicino\b|\bnähe\b|\bnahe\b", s))
             # If query references specific countries, skip → let Phase 1 planner build the correct country+stage FilterGroup
-            _s12_has_country = any(k in s for k in _COUNTRY_MAP)
+            # For 2-letter ISO codes, require UPPERCASE in original text (avoids "me"→Montenegro, "no"→Norway, etc.)
+            _s12_has_country = any(
+                (re.search(rf"\b{re.escape(k.upper())}\b", user_text) if len(k) <= 2
+                 else re.search(rf"\b{re.escape(k)}\b", s))
+                for k in _COUNTRY_MAP
+            )
             if (has_s1 or has_s2) and not _has_nearest and not sf:
                 return {"answer": "<p>⚠️ Stage 1/2 patient data is stored in Salesforce and requires an active session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
@@ -6022,141 +5756,284 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner CT handler failed: %s", _e)
 
-        # INTENCIÓN DIRECTA: pharmacy + overnight stay → direct DB + SF query (no internal HTTP)
+        # INTENCIÓN DIRECTA: assignment queries → Explorer API (extra.AssignmentsNames / AssignmentsCount)
         try:
-            has_pharmacy = bool(re.search(r"\bpharmac", s))
-            has_overnight = bool(re.search(r"\bovernight\b", s))
+            _has_asn = bool(re.search(r"\bassignment[s]?\b|\binvolved\s+in\b|\bparticipating\s+in\b", s))
+            _asks_sites_asn = bool(re.search(
+                r"\bsite[s]?\b|\bcenter[s]?\b|\bwhich\b|\bshow\b|\bfind\b|\blist\b|\bactive\b|\binvolved\b", s))
+            _is_phase_query = bool(re.search(r"\bphase\s*[i1]|\bphase\s*(?:ii|2)|\bphase\s*(?:iii|3)\b", s, re.I))
+            if _has_asn and _asks_sites_asn and not _is_phase_query:
+                # Detect NOT modifier
+                _asn_not = bool(re.search(r"\bnot\b|\bno\b|\bexcluding\b|\bexclude\b|\bwithout\b", s))
+                # Extract assignment name: look for Title-Cased words near "assignment"
+                # e.g. "in the Beta Preserve assignment" → "Beta Preserve"
+                _asn_name: Optional[str] = None
+                _asn_name_m = re.search(
+                    r'\bin\s+(?:the\s+)?([A-Z][A-Za-z0-9\s\-]{2,40}?)\s+assignment'
+                    r'|\bthe\s+([A-Z][A-Za-z0-9\s\-]{2,40}?)\s+assignment',
+                    user_text)
+                if _asn_name_m:
+                    _asn_name = (_asn_name_m.group(1) or _asn_name_m.group(2) or "").strip()
+                # Also try: "involved in Beta Preserve" without "assignment" suffix
+                if not _asn_name:
+                    _asn_name_m2 = re.search(r'\binvolved\s+in\s+(?:the\s+)?([A-Z][A-Za-z0-9\s\-]{2,40})', user_text)
+                    if _asn_name_m2:
+                        _asn_name = _asn_name_m2.group(1).strip()
+                # Build Explorer filter
+                if _asn_name:
+                    _asn_op = "not_contains" if _asn_not else "contains"
+                    _asn_filter = {"logic": "AND", "rules": [
+                        {"field": "extra.AssignmentsNames", "operator": _asn_op, "value": _asn_name}
+                    ]}
+                else:
+                    # No specific name: NOT → count=0 (no assignments), else → count>0 (any assignment)
+                    _asn_filter = {"logic": "AND", "rules": [
+                        {"field": "extra.AssignmentsCount",
+                         "operator": "equals" if _asn_not else "gt",
+                         "value": 0}
+                    ]}
+                _asn_url = "http://127.0.0.1:8000/api/explorer/search"
+                _asn_ck = request.headers.get("cookie") if request else None
+                _asn_cols = ["sf.Account.Name", "extra.AssignmentsNames"]
+                with httpx.Client(timeout=90.0) as _ac:
+                    _ar = _ac.post(_asn_url, json={"filters": _asn_filter, "columns": _asn_cols},
+                                   headers={"cookie": _asn_ck} if _asn_ck else {})
+                if _ar.status_code < 400:
+                    rows_asn: list = []
+                    for _er in (_ar.json().get("rows") or []):
+                        _aid = _er.get("account_id", "")
+                        if not _aid:
+                            continue
+                        _ed = _er.get("data") or {}
+                        rows_asn.append({
+                            "account_id": _aid,
+                            "account_name": _er.get("account_name", ""),
+                            "country": _er.get("country", ""),
+                            "city": _er.get("city", ""),
+                            "extra.AssignmentsNames": _ed.get("extra.AssignmentsNames", ""),
+                        })
+                    cols_asn = [
+                        {"key": "account_name", "label": "Site"},
+                        {"key": "city", "label": "City"},
+                        {"key": "country", "label": "Country"},
+                        {"key": "extra.AssignmentsNames", "label": "Assignments"},
+                    ]
+                    tbl_asn = _normalize_table_for_ui({"columns": cols_asn, "rows": rows_asn})
+                    if _asn_name:
+                        _op_str = "not in" if _asn_not else "in"
+                        _ans_str = f"<p>Found <strong>{len(rows_asn)}</strong> site(s) {_op_str} the <em>{_asn_name}</em> assignment.</p>"
+                    else:
+                        _ans_str = f"<p>Found <strong>{len(rows_asn)}</strong> site(s) active in at least one assignment.</p>"
+                    _dbg("Planner assignment Explorer: %d sites (name=%s, not=%s)", len(rows_asn), _asn_name, _asn_not)
+                    return {"answer": _ans_str, "table": tbl_asn, "last_filters": _asn_filter}
+        except Exception as _e:
+            _dbg("WARN: planner assignment handler failed: %s", _e)
+
+        # INTENCIÓN DIRECTA: qual field queries → Explorer API (pharmacy, overnight, ZnT8, HLA, etc.)
+        try:
+            has_pharmacy   = bool(re.search(r"\bpharmac", s))
+            has_overnight  = bool(re.search(r"\bovernight\b", s))
+            has_znt8       = bool(re.search(r"\bznt8\b|\bzn[-\u2010]?t8\b", s, re.I))
+            has_hla        = bool(re.search(r"\bhla\b", s, re.I))
+            has_insulin_ab = bool(re.search(r"\binsulin\b.*\bautoantibod|\bautoantibod.*\binsulin", s, re.I))
+            has_longday    = bool(re.search(r"\bsingle.day\b.*\bvisit|\bday.*visit.*\bhour|\b8.hour.*visit|\bvisit.*\b8.hour", s, re.I))
+            has_documents  = bool(re.search(r"\bdocument[s]?.*\bretain|\bretain.*\bdocument", s, re.I))
+            has_emergency  = bool(re.search(r"\bemergency\b.*\bpersonnel|\bemergency\b.*\barrive|\b30.minut", s, re.I))
+            asks_qual = (has_pharmacy or has_overnight or has_znt8 or has_hla
+                         or has_insulin_ab or has_longday or has_documents or has_emergency)
             asks_sites2 = bool(re.search(
                 r"\bsite[s]?\b|\bcenter[s]?\b|\bcentro[s]?\b"
                 r"|show\b|find\b|list\b|which\b|those\b|offer\b|have\b|with\b|do\b", s))
-            if (has_pharmacy or has_overnight) and asks_sites2:
-                # Step 1: find account IDs from local DB (site_qual)
-                ph_conds = []
-                ph_params: dict = {}
-                # Extract country filter: first from query text, then from last_filters (multi-turn context)
-                _lf_country = None
-                # Try to extract country from the query text directly (e.g. "in France with pharmacy")
-                try:
-                    for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
-                        if _cn in s:
-                            _lf_country = _COUNTRY_MAP[_cn][0]  # full SF name
-                            break
-                except Exception:
-                    pass
-                # Fall back to last_filters if no country found in text
-                if not _lf_country:
-                    try:
-                        _lf = getattr(payload, 'last_filters', None)
-                        if _lf and isinstance(_lf.get("rules"), list):
-                            for _r in _lf["rules"]:
-                                if str(_r.get("field","")).lower() in ("site.country", "sf.account.shippingcountry") and _r.get("value"):
-                                    _lf_country = str(_r["value"])
-                                    break
-                    except Exception:
-                        pass
-                if _lf_country:
-                    ph_conds.append("LOWER(s.country) = :lf_country")
-                    ph_params["lf_country"] = _lf_country.lower()
+            if asks_qual and asks_sites2:
+                # Build Explorer filter rules for detected qual intents
+                _qual_rules: list = []
+                _qual_cols: list = ["sf.Account.Name"]
+                _K_PHARM    = "qual.3_6__is_your_pharmacy_on_site_or_off_campus"
+                _K_OVER     = "qual.3_5_2__overnight_stay"
+                _K_ZNT8     = "qual.3_8__znt8"
+                _K_HLA      = "qual.3_8__can_you_do_hla_typing"
+                _K_INS      = "qual.3_8__insulin"
+                _K_LONGDAY  = "qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours"
+                _K_DOCS     = "qual.3_5_1__how_long_are_documents_retained_years"
+                _K_EMERG    = "qual.3_3__acceptable_process"
                 if has_pharmacy:
-                    # Match 'On-site' in pharmacy field (various key formats: prefixed and bare)
-                    ph_conds.append(
-                        "(COALESCE("
-                        " sq.data->>'3_6__is_your_pharmacy_on_site_or_off_campus',"
-                        " sq.data->>'3.6__is_your_pharmacy_on_site_or_off_campus',"
-                        " sq.data->>'is_your_pharmacy_on_site_or_off_campus',"
-                        " '') ILIKE '%On-site%')"
-                    )
+                    _qual_rules.append({"field": _K_PHARM, "operator": "equals", "value": "On-site"})
+                    _qual_cols.append(_K_PHARM)
                 if has_overnight:
-                    ph_conds.append(
-                        "(COALESCE("
-                        " sq.data->>'3_5_2__overnight_stay',"
-                        " sq.data->>'3.5.2__overnight_stay',"
-                        " sq.data->>'overnight_stay',"
-                        " '') = 'Yes')"
-                    )
-                db_q = text(
-                    "SELECT s.salesforce_account_id, s.name, s.city, s.country, "
-                    "COALESCE(sq.data->>'3_6__is_your_pharmacy_on_site_or_off_campus',"
-                    "  sq.data->>'3.6__is_your_pharmacy_on_site_or_off_campus',"
-                    "  sq.data->>'is_your_pharmacy_on_site_or_off_campus') AS pharm, "
-                    "COALESCE(sq.data->>'3_5_2__overnight_stay',"
-                    "  sq.data->>'3.5.2__overnight_stay',"
-                    "  sq.data->>'overnight_stay') AS overnight "
-                    "FROM public.sites s JOIN public.site_qual sq ON sq.site_id = s.id "
-                    f"WHERE {' AND '.join(ph_conds)}"
-                )
-                db_result = db.execute(db_q, ph_params)
-                db_rows = db_result.fetchall()
-                if not db_rows and _lf_country:
-                    # Country filter applied but no results → return clear 0-result response
-                    cond_txt0 = " and ".join(filter(None, [
-                        "onsite pharmacy" if has_pharmacy else "",
-                        "overnight stay" if has_overnight else "",
-                    ]))
-                    _dbg("Planner pharmacy/overnight: 0 results in %s", _lf_country)
-                    return {
-                        "answer": f"<p>No sites in <strong>{_lf_country.title()}</strong> with {cond_txt0} were found "
-                                  f"in the local qualification database.</p>",
-                        "table": _normalize_table_for_ui({"columns": [], "rows": []}),
-                    }
-                if db_rows:
-                    acc_ids_ph = [row[0] for row in db_rows if row[0]]
-                    site_meta = {row[0]: {"name": row[1], "city": row[2], "country": row[3],
-                                          "pharm": row[4], "overnight": row[5]} for row in db_rows if row[0]}
-                    # Step 2: get SF patient metrics for these accounts
-                    ids_in = ", ".join([f"'{aid}'" for aid in acc_ids_ph])
-                    soql_ph = (
-                        "SELECT Account.Id, "
-                        "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
-                        "C_Number_of_T1D_Patients_currently_O_18__c, C_Number_of_T1D_Patients_currently_U_18__c "
-                        f"FROM Opportunity WHERE AccountId IN ({ids_in})"
-                    )
-                    sf_ph_data: dict = {}
-                    if sf:
-                        raw_ph = tool_salesforce_query(sf, soql_ph)
-                        for r in (raw_ph.get("records", []) if isinstance(raw_ph, dict) else []):
-                            acc_id = (r.get("Account") or {}).get("Id") or r.get("AccountId")
-                            if acc_id:
-                                sf_ph_data[acc_id] = r
-                    rows_ph = []
-                    for aid in acc_ids_ph:
-                        meta = site_meta.get(aid, {})
-                        sfr = sf_ph_data.get(aid, {})
-                        rows_ph.append({
-                            "account_id": aid,
-                            "account_name": meta.get("name",""),
-                            "country": meta.get("country",""),
-                            "city": meta.get("city",""),
-                            "qual.3_6__is_your_pharmacy_on_site_or_off_campus": meta.get("pharm",""),
-                            "qual.3_5_2__overnight_stay": meta.get("overnight",""),
-                            "sf.C_Number_of_new_T1D_diagnosed_O_18__c": sfr.get("C_Number_of_new_T1D_diagnosed_O_18__c"),
-                            "sf.C_Number_of_new_T1D_diagnosed_U_18__c": sfr.get("C_Number_of_new_T1D_diagnosed_U_18__c"),
-                            "sf.C_Number_of_T1D_Patients_currently_O_18__c": sfr.get("C_Number_of_T1D_Patients_currently_O_18__c"),
-                            "sf.C_Number_of_T1D_Patients_currently_U_18__c": sfr.get("C_Number_of_T1D_Patients_currently_U_18__c"),
-                        })
-                    cols_ph = [
-                        {"key":"account_name","label":"Site"},
-                        {"key":"country","label":"Country"},
-                        {"key":"city","label":"City"},
-                        {"key":"sf.C_Number_of_new_T1D_diagnosed_O_18__c","label":"ND ≥18"},
-                        {"key":"sf.C_Number_of_new_T1D_diagnosed_U_18__c","label":"ND <18"},
-                        {"key":"sf.C_Number_of_T1D_Patients_currently_O_18__c","label":"T1D ≥18"},
-                        {"key":"sf.C_Number_of_T1D_Patients_currently_U_18__c","label":"T1D <18"},
-                        {"key":"qual.3_6__is_your_pharmacy_on_site_or_off_campus","label":"Pharmacy"},
-                        {"key":"qual.3_5_2__overnight_stay","label":"Overnight"},
-                    ]
-                    tbl_ph = _normalize_table_for_ui({"columns": cols_ph, "rows": rows_ph})
-                    cond_txt = " and ".join(filter(None, [
-                        "onsite pharmacy" if has_pharmacy else "",
-                        "overnight stay" if has_overnight else "",
-                    ]))
-                    _dbg("Planner pharmacy/overnight deterministic (DB+SF): %d sites found", len(rows_ph))
-                    return {
-                        "answer": f"<p>Found <strong>{len(rows_ph)}</strong> site(s) with {cond_txt}.</p>",
-                        "table": tbl_ph,
-                    }
+                    _qual_rules.append({"field": _K_OVER, "operator": "is_not_null"})
+                    _qual_cols.append(_K_OVER)
+                if has_znt8:
+                    _qual_rules.append({"field": _K_ZNT8, "operator": "is_not_null"})
+                    _qual_cols.append(_K_ZNT8)
+                if has_hla:
+                    _qual_rules.append({"field": _K_HLA, "operator": "is_not_null"})
+                    _qual_cols.append(_K_HLA)
+                if has_insulin_ab:
+                    _qual_rules.append({"field": _K_INS, "operator": "is_not_null"})
+                    _qual_cols.append(_K_INS)
+                if has_longday:
+                    _qual_rules.append({"field": _K_LONGDAY, "operator": "is_not_null"})
+                    _qual_cols.append(_K_LONGDAY)
+                if has_documents:
+                    _qual_rules.append({"field": _K_DOCS, "operator": "is_not_null"})
+                    _qual_cols.append(_K_DOCS)
+                if has_emergency:
+                    _qual_rules.append({"field": _K_EMERG, "operator": "is_not_null"})
+                    _qual_cols.append(_K_EMERG)
+                # Extract country filter from query text (multi-country support)
+                _qual_countries: list = []  # [(sf_name, iso2), ...]
+                _qual_seen_sf: set = set()
+                for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
+                    _cm = (re.search(rf"\b{re.escape(_cn.upper())}\b", user_text) if len(_cn) <= 2
+                           else re.search(rf"\b{re.escape(_cn)}\b", s))
+                    if _cm:
+                        _sf_qn, _iso_q = _COUNTRY_MAP[_cn]
+                        if _sf_qn not in _qual_seen_sf:
+                            _qual_countries.append((_sf_qn, _iso_q))
+                            _qual_seen_sf.add(_sf_qn)
+                all_rules: list = list(_qual_rules)
+                if _qual_countries:
+                    if len(_qual_countries) > 1:
+                        all_rules = [{"logic": "OR", "rules": [
+                            {"field": "site.country", "operator": "equals", "value": _iso_q}
+                            for _, _iso_q in _qual_countries
+                        ]}] + _qual_rules
+                    else:
+                        all_rules = [{"field": "site.country", "operator": "equals",
+                                      "value": _qual_countries[0][1]}] + _qual_rules
+                _qual_filter = {"logic": "AND", "rules": all_rules}
+                # Call Explorer API internally (same source-of-truth as ground truth)
+                _qual_url = "http://127.0.0.1:8000/api/explorer/search"
+                _qual_ck = request.headers.get("cookie") if request else None
+                _qual_hdrs = {"cookie": _qual_ck} if _qual_ck else {}
+                with httpx.Client(timeout=90.0) as _qc:
+                    _qr = _qc.post(_qual_url, json={"filters": _qual_filter, "columns": _qual_cols},
+                                   headers=_qual_hdrs)
+                rows_qual: list = []
+                if _qr.status_code < 400:
+                    for _er in (_qr.json().get("rows") or []):
+                        _aid = _er.get("account_id", "")
+                        if not _aid:
+                            continue
+                        _ed = _er.get("data") or {}
+                        _row = {
+                            "account_id": _aid,
+                            "account_name": _er.get("account_name", ""),
+                            "country": _er.get("country", ""),
+                            "city": _er.get("city", ""),
+                        }
+                        for _ck in _qual_cols[1:]:
+                            _row[_ck] = _ed.get(_ck)
+                        rows_qual.append(_row)
+                cols_qual = [
+                    {"key": "account_name", "label": "Site"},
+                    {"key": "city", "label": "City"},
+                    {"key": "country", "label": "Country"},
+                ]
+                if has_pharmacy:   cols_qual.append({"key": _K_PHARM,   "label": "Pharmacy"})
+                if has_overnight:  cols_qual.append({"key": _K_OVER,    "label": "Overnight Stay"})
+                if has_znt8:       cols_qual.append({"key": _K_ZNT8,    "label": "ZnT8"})
+                if has_hla:        cols_qual.append({"key": _K_HLA,     "label": "HLA Typing"})
+                if has_insulin_ab: cols_qual.append({"key": _K_INS,     "label": "Insulin Ab"})
+                if has_longday:    cols_qual.append({"key": _K_LONGDAY, "label": "Max Day (hrs)"})
+                if has_documents:  cols_qual.append({"key": _K_DOCS,    "label": "Doc Retention (yrs)"})
+                if has_emergency:  cols_qual.append({"key": _K_EMERG,   "label": "Emergency Process"})
+                tbl_qual = _normalize_table_for_ui({"columns": cols_qual, "rows": rows_qual})
+                _cond_parts = []
+                if has_pharmacy:   _cond_parts.append("on-site pharmacy")
+                if has_overnight:  _cond_parts.append("overnight stay")
+                if has_znt8:       _cond_parts.append("ZnT8 testing")
+                if has_hla:        _cond_parts.append("HLA typing")
+                if has_insulin_ab: _cond_parts.append("insulin autoantibody testing")
+                if has_longday:    _cond_parts.append("long single-day visits")
+                if has_documents:  _cond_parts.append("document retention data")
+                if has_emergency:  _cond_parts.append("emergency personnel process")
+                _cond_txt = " and ".join(_cond_parts)
+                _loc_str = (f" in {', '.join(n for n, _ in _qual_countries)}"
+                            if _qual_countries else "")
+                _dbg("Planner qual Explorer: %d sites with %s%s", len(rows_qual), _cond_txt, _loc_str)
+                return {
+                    "answer": f"<p>Found <strong>{len(rows_qual)}</strong> site(s){_loc_str} with {_cond_txt}.</p>",
+                    "table": tbl_qual,
+                    "last_filters": _qual_filter,
+                }
         except Exception as _e:
-            _dbg("WARN: planner pharmacy/overnight failed: %s", _e)
+            _dbg("WARN: planner qual handler failed: %s", _e)
+
+        # INTENCIÓN DIRECTA: SF pipeline/status field queries → Explorer API
+        # Handles: CTS-validated, profiling complete, profiling uploaded, referral partner, meeting dates
+        try:
+            _pl_cts_valid    = bool(re.search(r"\bcts.validat|\bvalidat.*\bcts\b|\binnodia\s+cts\b", s, re.I))
+            _pl_profiling_c  = bool(re.search(r"\bprofiling\b.*\bcomplete[d]?\b|\bcomplete[d]?\b.*\bprofiling\b", s, re.I))
+            _pl_profiling_up = bool(re.search(r"\bprofiling.*\bupload|\bupload.*\bprofiling|\bprofiling.*\bdatabase\b|\bprofiling.*\bdb\b", s, re.I))
+            _pl_referral_p   = bool(re.search(r"\breferral\b.*\bpartner|\bpartner\b.*\breferral|\breferral.clinical", s, re.I))
+            _pl_no_meeting   = bool(re.search(r"\bno.meeting\b|\bno.meeting.date|\bmeeting.*\bnot.set|\bfirst.contact.*meeting", s, re.I))
+            _pl_prof_sent    = bool(re.search(r"\bprofiling.*\bsent\b|\bquestionnaire.*\bsent\b", s, re.I))
+            _pl_early_diag   = bool(re.search(r"\bearly.diagnos|\bscreening\b.*\bdiagnos|\bdiagnos.*\bscreening\b", s, re.I))
+            _pl_asks_sites   = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bwhich\b|\bshow\b|\bfind\b|\blist\b|\ball\b|\bmany\b|\bhow\b", s))
+            # Map detected intent → Explorer filter
+            _pl_intent = (_pl_cts_valid or _pl_profiling_c or _pl_profiling_up
+                          or _pl_referral_p or _pl_no_meeting or _pl_prof_sent or _pl_early_diag)
+            if _pl_intent and _pl_asks_sites:
+                _pl_rules: list = []
+                _pl_cols: list = ["sf.Account.Name"]
+                _pl_desc_parts: list = []
+                if _pl_cts_valid:
+                    _pl_rules.append({"field": "sf.Account.INNODIA_Clinical_Trial_Site__c", "operator": "equals", "value": True})
+                    _pl_cols.append("sf.Account.INNODIA_Clinical_Trial_Site__c")
+                    _pl_desc_parts.append("INNODIA CTS flag")
+                if _pl_profiling_c:
+                    _pl_rules.append({"field": "sf.C_Profiling_Complete__c", "operator": "is_not_null"})
+                    _pl_cols.append("sf.C_Profiling_Complete__c")
+                    _pl_desc_parts.append("profiling complete")
+                if _pl_profiling_up:
+                    _pl_rules.append({"field": "sf.Profiling_form_uploaded_to_DB__c", "operator": "is_not_null"})
+                    _pl_cols.append("sf.Profiling_form_uploaded_to_DB__c")
+                    _pl_desc_parts.append("profiling form uploaded")
+                if _pl_referral_p:
+                    _pl_rules.append({"field": "sf.Account.C_Referral_Clinical_Partner__c", "operator": "equals", "value": True})
+                    _pl_cols.append("sf.Account.C_Referral_Clinical_Partner__c")
+                    _pl_desc_parts.append("Referral Clinical Partner")
+                if _pl_no_meeting:
+                    _pl_rules.append({"field": "sf.C_Meeting_Date__c", "operator": "is_null"})
+                    _pl_cols.append("sf.C_Meeting_Date__c")
+                    _pl_desc_parts.append("no meeting date")
+                if _pl_prof_sent:
+                    _pl_rules.append({"field": "sf.C_Meeting_invitation_sent__c", "operator": "is_not_null"})
+                    _pl_cols.append("sf.C_Meeting_invitation_sent__c")
+                    _pl_desc_parts.append("meeting invitation sent")
+                _pl_filter = {"logic": "AND", "rules": _pl_rules}
+                _pl_url = "http://127.0.0.1:8000/api/explorer/search"
+                _pl_ck = request.headers.get("cookie") if request else None
+                with httpx.Client(timeout=90.0) as _pc:
+                    _pr = _pc.post(_pl_url, json={"filters": _pl_filter, "columns": _pl_cols},
+                                   headers={"cookie": _pl_ck} if _pl_ck else {})
+                rows_pl: list = []
+                if _pr.status_code < 400:
+                    for _er in (_pr.json().get("rows") or []):
+                        _aid = _er.get("account_id", "")
+                        if not _aid: continue
+                        _ed = _er.get("data") or {}
+                        _row = {"account_id": _aid, "account_name": _er.get("account_name", ""),
+                                "country": _er.get("country", ""), "city": _er.get("city", "")}
+                        for _ck in _pl_cols[1:]:
+                            _row[_ck] = _ed.get(_ck)
+                        rows_pl.append(_row)
+                cols_pl = [{"key": "account_name", "label": "Site"},
+                           {"key": "city", "label": "City"},
+                           {"key": "country", "label": "Country"}]
+                for _ck in _pl_cols[1:]:
+                    cols_pl.append({"key": _ck, "label": _ck.split(".")[-1].replace("_", " ").title()})
+                tbl_pl = _normalize_table_for_ui({"columns": cols_pl, "rows": rows_pl})
+                _pl_desc = " + ".join(_pl_desc_parts) if _pl_desc_parts else "status filter"
+                _dbg("Planner pipeline Explorer: %d sites (%s)", len(rows_pl), _pl_desc)
+                return {
+                    "answer": f"<p>Found <strong>{len(rows_pl)}</strong> site(s) matching: {_pl_desc}.</p>",
+                    "table": tbl_pl,
+                    "last_filters": _pl_filter,
+                }
+        except Exception as _e:
+            _dbg("WARN: planner pipeline handler failed: %s", _e)
 
         # INTENCIÓN DIRECTA: "sites in [country]" → direct SF query or DB fallback (no internal HTTP)
         try:
@@ -6167,12 +6044,40 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             # Skip if this is a followup query — Phase 2 merge handles "and also Germany" etc.
             if _is_followup_prefix:
                 asks_country_sites = False
+            # Skip if query is about Member institutions (not CTS sites) — let Claude route to members_search
+            if re.search(r"\b(member[s]?|institution[s]?)\b", s):
+                asks_country_sites = False
             if asks_country_sites:
                 # Match ALL countries in query (deduplicate by sf_name)
                 _matched_countries: List[Tuple[str, str]] = []  # [(sf_name, iso), ...]
                 _seen_sf_names: set = set()
+                # Region expansion: region name → multiple ISO2 codes (must run before individual country scan)
+                _REGION_EXPANSIONS: Dict[str, List[str]] = {
+                    "nordic countries": ["SE", "NO", "DK", "FI", "IS"],
+                    "northern europe":  ["SE", "NO", "DK", "FI"],
+                    "scandinavia":      ["SE", "NO", "DK"],
+                    "scandinavian":     ["SE", "NO", "DK"],
+                    "nordic":           ["SE", "NO", "DK", "FI", "IS"],
+                    "dach region":      ["DE", "AT", "CH"],
+                    "dach":             ["DE", "AT", "CH"],
+                    "benelux":          ["BE", "NL", "LU"],
+                    "iberian":          ["ES", "PT"],
+                    "iberia":           ["ES", "PT"],
+                    "baltic states":    ["EE", "LV", "LT"],
+                    "baltic":           ["EE", "LV", "LT"],
+                    "balkans":          ["HR", "BA", "RS", "ME", "MK", "AL", "SI", "BG", "GR", "RO"],
+                }
+                for _region_key in sorted(_REGION_EXPANSIONS.keys(), key=len, reverse=True):
+                    if re.search(rf"\b{re.escape(_region_key)}\b", s, re.I):
+                        for _r_iso2 in _REGION_EXPANSIONS[_region_key]:
+                            _r_sf_name = _iso2_to_sf(_r_iso2)
+                            if _r_sf_name not in _seen_sf_names:
+                                _matched_countries.append((_r_sf_name, _r_iso2))
+                                _seen_sf_names.add(_r_sf_name)
                 for _cn in sorted(_COUNTRY_MAP.keys(), key=len, reverse=True):
-                    if _cn in s:
+                    _cm = (re.search(rf"\b{re.escape(_cn.upper())}\b", user_text) if len(_cn) <= 2
+                           else re.search(rf"\b{re.escape(_cn)}\b", s))
+                    if _cm:
                         _sf_name_c, _iso_c = _COUNTRY_MAP[_cn]
                         if _sf_name_c not in _seen_sf_names:
                             _matched_countries.append((_sf_name_c, _iso_c))
@@ -6182,15 +6087,17 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 _matched_sf_name = _matched_countries[0][0] if _matched_countries else None
                 _matched_iso = _matched_countries[0][1] if _matched_countries else None
                 if _matched_country and _matched_sf_name and not sf:
-                    # SF session not available → fallback: query local sites table using full country name
-                    # (sites table stores full English names like "Italy", not ISO codes)
+                    # SF session not available → fallback: query local sites table using ISO2 code
+                    # (sites table stores ISO2 codes like "DE", not full names)
+                    _fb_isos = [iso2.upper() for _, iso2 in _matched_countries]
+                    _fb_placeholders = ", ".join(f":c{i}" for i in range(len(_fb_isos)))
                     db_country_q = text(
                         "SELECT s.salesforce_account_id, s.name, s.city, s.country "
                         "FROM public.sites s "
-                        "WHERE LOWER(s.country) = :cname "
+                        f"WHERE UPPER(s.country) IN ({_fb_placeholders}) "
                         "ORDER BY s.name ASC LIMIT 200"
                     )
-                    db_country_rows_fb = db.execute(db_country_q, {"cname": _matched_sf_name.lower()}).fetchall()
+                    db_country_rows_fb = db.execute(db_country_q, {f"c{i}": v for i, v in enumerate(_fb_isos)}).fetchall()
                     rows_country_fb = [
                         {"account_id": r[0] or "", "account_name": r[1] or "",
                          "city": r[2] or "", "country": r[3] or ""}
@@ -6202,62 +6109,81 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         {"key": "country", "label": "Country"},
                     ]
                     tbl_country_fb = _normalize_table_for_ui({"columns": cols_country_fb, "rows": rows_country_fb})
-                    _dbg("Planner country DB fallback (no SF): %d sites in %s", len(rows_country_fb), _matched_sf_name)
+                    _country_names_str_fb = ", ".join(n for n, _ in _matched_countries)
+                    _dbg("Planner country DB fallback (no SF): %d sites in %s", len(rows_country_fb), _country_names_str_fb)
                     # Include last_filters (ISO2) so Phase 2 followup merge works correctly
-                    _country_lf = {
-                        "logic": "AND",
-                        "rules": [{"field": "site.country", "operator": "equals", "value": _matched_iso}]
-                    }
+                    if len(_matched_countries) > 1:
+                        _country_lf = {
+                            "logic": "AND",
+                            "rules": [{"logic": "OR", "rules": [
+                                {"field": "site.country", "operator": "equals", "value": iso2}
+                                for _, iso2 in _matched_countries
+                            ]}],
+                        }
+                    else:
+                        _country_lf = {
+                            "logic": "AND",
+                            "rules": [{"field": "site.country", "operator": "equals", "value": _matched_iso}]
+                        }
                     return {
                         "answer": f"<p>Found <strong>{len(rows_country_fb)}</strong> clinical site(s) in "
-                                  f"<strong>{_matched_sf_name}</strong> (from local database; "
+                                  f"<strong>{_country_names_str_fb}</strong> (from local database; "
                                   f"some metrics require a fresh Salesforce session).</p>",
                         "table": tbl_country_fb,
                         "last_filters": _country_lf,
                     }
                 if _matched_country and _matched_sf_name and sf:
-                    # Use WHERE clause directly in SOQL (faster than fetching 2000+ records + Python filter)
-                    # Multi-country: use IN (...); single-country: use = '...'
+                    # Use Explorer API (site.country ISO2) instead of SOQL ShippingCountry filter.
+                    # ShippingCountry SOQL filtering is unreliable for some countries (DE, GB, Nordic)
+                    # because some SF accounts store ShippingCountry differently or it's blank.
+                    # The Explorer's site.country filter uses the local DB (reliable ISO2 codes).
+                    _expl_url = "http://127.0.0.1:8000/api/explorer/search"
+                    _expl_ck = request.headers.get("cookie") if request else None
+                    _expl_hdrs = {"cookie": _expl_ck} if _expl_ck else {}
                     if len(_matched_countries) > 1:
-                        _in_vals = ", ".join(f"'{_sf_escape_value(n)}'" for n, _ in _matched_countries)
-                        _country_clause = f"AND Account.ShippingCountry IN ({_in_vals}) "
+                        _expl_country_rules = [{"logic": "OR", "rules": [
+                            {"field": "site.country", "operator": "equals", "value": _iso2c}
+                            for _, _iso2c in _matched_countries
+                        ]}]
                     else:
-                        _esc_country_sf = _sf_escape_value(_matched_sf_name)
-                        _country_clause = f"AND Account.ShippingCountry = '{_esc_country_sf}' "
-                    soql_country = (
-                        "SELECT Account.Id, Account.Name, Account.ShippingCity, Account.ShippingCountry, "
-                        "C_Number_of_new_T1D_diagnosed_O_18__c, C_Number_of_new_T1D_diagnosed_U_18__c, "
-                        "C_Number_of_T1D_Patients_currently_O_18__c, C_Number_of_T1D_Patients_currently_U_18__c, "
-                        "C_Number_of_Stage1_Individuals_followed__c, C_Number_of_Stage2_Individuals_followed__c "
-                        "FROM Opportunity "
-                        "WHERE Account.RecordType.DeveloperName='SubAccount' "
-                        "AND Account.C_Type__c='Clinical' "
-                        + _country_clause +
-                        "ORDER BY Account.Name ASC "
-                        "LIMIT 300"
-                    )
-                    raw_country = tool_salesforce_query(sf, soql_country)
-                    recs_country = raw_country.get("records", []) if isinstance(raw_country, dict) else []
+                        _expl_country_rules = [
+                            {"field": "site.country", "operator": "equals", "value": _matched_iso}
+                        ]
+                    _expl_payload = {
+                        "filters": {"logic": "AND", "rules": _expl_country_rules},
+                        "columns": [
+                            "sf.C_Number_of_new_T1D_diagnosed_O_18__c",
+                            "sf.C_Number_of_new_T1D_diagnosed_U_18__c",
+                            "sf.C_Number_of_T1D_Patients_currently_O_18__c",
+                            "sf.C_Number_of_T1D_Patients_currently_U_18__c",
+                            "sf.C_Number_of_Stage1_Individuals_followed__c",
+                            "sf.C_Number_of_Stage2_Individuals_followed__c",
+                        ],
+                    }
+                    with httpx.Client(timeout=90.0) as _c_cli:
+                        _c_resp = _c_cli.post(_expl_url, json=_expl_payload, headers=_expl_hdrs)
                     rows_country = []
                     seen_cids: set = set()
-                    for r in recs_country:
-                        acc = r.get("Account") or {}
-                        aid = acc.get("Id") or r.get("AccountId", "")
-                        if not aid or aid in seen_cids:
-                            continue
-                        seen_cids.add(aid)
-                        rows_country.append({
-                            "account_id": aid,
-                            "account_name": acc.get("Name", ""),
-                            "country": acc.get("ShippingCountry", ""),
-                            "city": acc.get("ShippingCity", ""),
-                            "sf.C_Number_of_new_T1D_diagnosed_O_18__c": r.get("C_Number_of_new_T1D_diagnosed_O_18__c"),
-                            "sf.C_Number_of_new_T1D_diagnosed_U_18__c": r.get("C_Number_of_new_T1D_diagnosed_U_18__c"),
-                            "sf.C_Number_of_T1D_Patients_currently_O_18__c": r.get("C_Number_of_T1D_Patients_currently_O_18__c"),
-                            "sf.C_Number_of_T1D_Patients_currently_U_18__c": r.get("C_Number_of_T1D_Patients_currently_U_18__c"),
-                            "sf.C_Number_of_Stage1_Individuals_followed__c": r.get("C_Number_of_Stage1_Individuals_followed__c"),
-                            "sf.C_Number_of_Stage2_Individuals_followed__c": r.get("C_Number_of_Stage2_Individuals_followed__c"),
-                        })
+                    if _c_resp.status_code < 400:
+                        for _er in (_c_resp.json().get("rows") or []):
+                            aid = _er.get("account_id", "")
+                            if not aid or aid in seen_cids:
+                                continue
+                            seen_cids.add(aid)
+                            _ed = _er.get("data") or {}
+                            rows_country.append({
+                                "account_id": aid,
+                                "account_name": _er.get("account_name", ""),
+                                "country": _iso2_to_sf(_er.get("country", "")) or _er.get("country", ""),
+                                "city": _er.get("city", ""),
+                                "sf.C_Number_of_new_T1D_diagnosed_O_18__c": _ed.get("sf.C_Number_of_new_T1D_diagnosed_O_18__c"),
+                                "sf.C_Number_of_new_T1D_diagnosed_U_18__c": _ed.get("sf.C_Number_of_new_T1D_diagnosed_U_18__c"),
+                                "sf.C_Number_of_T1D_Patients_currently_O_18__c": _ed.get("sf.C_Number_of_T1D_Patients_currently_O_18__c"),
+                                "sf.C_Number_of_T1D_Patients_currently_U_18__c": _ed.get("sf.C_Number_of_T1D_Patients_currently_U_18__c"),
+                                "sf.C_Number_of_Stage1_Individuals_followed__c": _ed.get("sf.C_Number_of_Stage1_Individuals_followed__c"),
+                                "sf.C_Number_of_Stage2_Individuals_followed__c": _ed.get("sf.C_Number_of_Stage2_Individuals_followed__c"),
+                            })
+                    rows_country.sort(key=lambda r: r.get("account_name", ""))
                     cols_country = [
                         {"key": "account_name", "label": "Site"},
                         {"key": "city", "label": "City"},
@@ -7503,7 +7429,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             # Extract location: text after "to", "near", "of", "a" etc. (city must start with uppercase)
             m_loc = re.search(
                 r"\b(?:to|near|of|cerca\s+de|desde|from|\ba\b)\s+([A-ZÀ-Ö×Ø-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s'\-]{1,40})"
-                r"(?:\s+(?:with|where|que|con|having|and|that|which|who)\b|\s*[.,]|\s*$)",
+                r"(?:\s+(?:with|where|que|con|having|and|that|which|who)\b|\s*[.,?!]|\s*$)",
                 qtxt2,
             )
             city_det = m_loc.group(1).strip() if m_loc else None

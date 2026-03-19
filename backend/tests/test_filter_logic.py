@@ -7,7 +7,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from app.routers.salesforce_explorer import _is_logic_expr, _eval_logic_expr_be, _filter_group_to_expr
+from app.routers.filter_engine import _is_logic_expr, _eval_logic_expr_be, _filter_group_to_expr
 
 
 # ──────────────────────────────────────────────────────────────────────────────

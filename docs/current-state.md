@@ -38,6 +38,13 @@ Legend:
 - **Multi-country filter** — CONFIRMED (2026-03-16): `pass_site()` now treats multiple `site.country equals X` rules under AND as OR; `_flatten_filter_rules()` recursively extracts rules from nested FilterGroup sub-groups before classification. Tested: `scripts/test_multi_country.py` — 41/41 pass (20 unit + 14 API + 7 Moby).
 - **Nested FilterGroup logic preservation** — CONFIRMED (2026-03-17): `_filter_group_to_expr(fg)` added to `salesforce_explorer.py`. Called at the start of `explorer_search()` rule classification, BEFORE `_flatten_filter_rules()`. Converts nested sub-groups to expression format (`{logic: "(1 OR 2) AND 3", rules: [flat_leaf, ...]}`) so inner AND/OR logic is faithfully preserved instead of being discarded during flattening. Without this fix, `(ES OR IT) AND overnight` was incorrectly evaluated as `(ES OR IT OR overnight)` because flattening merged all leaf rules under the root logic. Short-circuits: if no sub-groups exist, or if logic is already an expression string, returns the group unchanged (zero overhead for normal queries). 6 new unit tests in `TestFilterGroupToExpr` (284 total).
 - **Multi-country Moby handler** — CONFIRMED (2026-03-16): country planner handler in `ai_chat.py` collects ALL `_COUNTRY_MAP` matches (removed `break`), builds `IN (...)` SOQL for multi-country, returns OR `last_filters`.
+- **Country handler → Explorer-based (2026-03-18)**: country planner handler now calls the Explorer internally (`site.country=ISO2`) instead of `Account.ShippingCountry` SOQL filter. The SOQL approach was unreliable for some countries (DE, GB, Nordic) where SF accounts have ShippingCountry blank or stored differently. Explorer `site.country` uses the local DB (reliable ISO2), then Stage1/Stage2/ND values are read from `row.data["sf.*"]` (already in Explorer response from curated fields). Country values in table use `_iso2_to_sf()` for full-name display.
+- **Country DB fallback bug fix (2026-03-18)**: when `sf=None` (expired session), DB fallback now queries by ISO2 (`UPPER(s.country) IN ('DE')`) instead of full name (`LOWER(s.country) = 'germany'`) — sites table stores ISO2, so the old query always returned 0 rows. Extended to support multi-country (`IN` clause with all matched ISOs).
+- **Activities handler scoping fix (2026-03-18)**: `_HandlerContext(query=qtxt, ...)` → `query=user_text` — `qtxt` was assigned after `_try_planner()` is called, causing `UnboundLocalError` logged as `[AI-CHAT] WARN: planner activities failed` on every query.
+- **ISO2 word-boundary country matching (2026-03-19)**: `_COUNTRY_MAP` was matched with `if _cn in s` (substring), causing 2-letter ISO codes to collide with common English words ("me"→Montenegro in "show me", "it"→Italy in "sites", "at"→Austria in "at"). Fixed three matching sites in `_try_planner` to use `re.search(rf"\b{re.escape(k)}\b", s)` for aliases >2 chars and `re.search(rf"\b{re.escape(k.upper())}\b", user_text)` for ≤2 chars (requires uppercase in original query). Same fix applied to `resolve_countries()` in `country_norms.py` and all callers that must pass `user_text` (not lowercased `s`).
+- **Members country handler fix (2026-03-19)**: Members institution planner (`_mem_inst_intent`) and SC planner now call `resolve_countries(user_text)` instead of `resolve_countries(s)` so uppercase ISO2 codes like "UK" are matched correctly. Country handler excludes Member queries (`\b(member[s]?|institution[s]?)\b`) to let Claude route to Members API instead of CTS Explorer.
+- **Ground truth generator fixes (2026-03-19)**: `members_search()` was using `.get("members", [])` but endpoint returns `"rows"` key → fixed. Pharmacy field lookup now correctly finds `qual.3_6__is_your_pharmacy_on_site_or_off_campus` (categorical "On-site"/"Off-campus") instead of the free-text description field. A08 Scandinavia query updated to "Nordic countries" to match `_REGION_EXPANSIONS` with FI included.
+- **Moby test suite results (2026-03-19)**: **92/92 — 100% pass rate.** All groups A–H fully passing. Final 3 failures fixed: H06 (T1D ranking handler added), H09 (PI search uses `title_contains="Investigator"` with `_is_sc` bypass for explicitly-matched contacts), H12 (new branch in `moby_handlers.py` step 12b for "how many sites per activity" → `tool_activity_country_matrix`). Previous session fixed pharmacy/overnight/qual handler, assignment handlers, SF pipeline handler, and patient clarifier.
 
 ### Qualification Upload & Link — CONFIRMED
 - Excel upload → parse → geocode → store in Questionnaire hierarchy + SiteQual JSONB
@@ -86,6 +93,7 @@ Legend:
 - Deterministic planner intercepts 15+ query patterns (country sites, ND top/by-country, Stage 1/2, HLA %, pharmacy/overnight, Study Coordinators/PI, activities, activity-country matrix, sites-per-country chart, nearest sites, km-of-assignment, assignment-sites)
 - **Assignment-sites planner handler** — CONFIRMED (2026-03-17): new deterministic handler in `_try_planner()` intercepts queries like "sites that belong to Barricade Delay assignment".
 - **Activity/assignment query robustness** — CONFIRMED (2026-03-17): Three bugs fixed in `ai_chat.py`: (1) "belong to X activity" without quotes now extracts the name via regex and calls `tool_sites_by_activity` before falling through to `tool_sites_with_any_activity` (was returning ALL sites instead of filtered ones); (2) `_assign_name_m` regex now allows `()` in the captured name (changed `[\w\s'\-]` → `[\w\s'\-\(\)]`) so "Barricade Delay (JAJJ) assignment" correctly extracts the name; (3) `tool_sites_by_activity` now adds a consonant-deduplication fuzzy variant when building LIKE patterns (e.g. "barricade" → "baricade") so user typos like double-r still match the Salesforce name.
+- **Phase 3: Activity handler extraction to `moby_handlers.py`** — CONFIRMED (2026-03-17): The ~380-line monolithic activity+assignment block in `_try_planner()` was extracted to `backend/app/routers/moby_handlers.py` as three standalone handler functions: `handle_followup_activity_sponsor`, `handle_assignment_sites`, `handle_activity`. Handler inputs are made explicit via `HandlerContext` dataclass; tool functions are injected via `ActivityTools` dataclass (avoids circular imports). `_try_planner()` becomes a clean 30-line dispatcher. Priority order preserved. 467 backend unit tests passing (405 pre-extraction + 62 new direct handler tests in `test_moby_handlers.py` covering all 13 sub-paths, both dataclasses, priority order, return contract, and negative cases). The new tests directly instantiate `HandlerContext` + mock `ActivityTools` — no Salesforce connection or `ai_chat.py` imports needed.
 - **Phase 1 + 2 Structured Planner** — CONFIRMED (2026-03-17): `backend/app/routers/moby_planner.py` — pure-function structured query parser. `parse_query_plan(text, kindex, last_filters, last_table)` → `MobyPlan` TypedDict with `intent`, `countries` (ISO2), `filters` (resolved field keys), `requested_columns`, `output_mode`, `needs_export`, `unresolved_terms`, `confidence` (0–1), `last_filters_reused`. Phase 1: (a) if `can_short_circuit()` (confidence ≥ 0.80, table_query, all resolved) → calls `tool_explorer_search` directly without LLM, with optional CSV when `needs_export=True`; (b) otherwise injects `plan_to_system_hint()` as a system message. Phase 2 additions: (c) `_extract_catalog_filters()` scans the full kindex for any field mention with "with/without/> N/is available" context (≥5-char aliases); (d) `can_followup_merge()` + `merge_with_last_filters()` combine new countries/filters into existing `last_filters` for followup intents — executed directly, no LLM; (e) `build_clarification()` returns a structured clarify dict for known ambiguities (e.g. bare "pharmacy") instead of calling Claude; (f) `CLARIFICATION_TEMPLATES` drives structured option buttons in the frontend. 76 unit tests in `test_moby_planner.py`, 255 total backend tests passing. Bug fixes (2026-03-17): (1) `_try_planner()` country handler now skips when query starts with followup prefix ("and", "also", "y", etc.) AND `last_filters` is present — passes through to Phase 2 merge instead; (2) country handler `last_filters` now uses ISO2 codes ("DE") instead of full SF names ("Germany") so Phase 2 merge can accumulate countries correctly; (3) `POST /api/explorer/search` now returns `columns` metadata array in response (was returning `{}`), built from `requested_cols` or auto-detected from first row's data keys.
 - **Option B: pre-planner followup merge** — CONFIRMED (2026-03-17): `parse_query_plan()` is now called BEFORE `_try_planner()` whenever `last_filters` is present in the payload. If `can_followup_merge()` fires, the merge is executed immediately and returned — `_try_planner` never runs. This catches followup phrasings that don't start with explicit prefix words ("Germany too", "add Portugal", "what about Belgium?", "y también Alemania") that the old `_is_followup_prefix` guard in `_try_planner` would miss. The pre-computed plan is reused in the Phase 1+2 block below to avoid double computation.
 - **Phase 4: Complex FilterGroup logic in Moby** — CONFIRMED (2026-03-17): Moby now understands and generates nested AND/OR FilterGroup structures end-to-end. Changes: (1) `validate_filter_group(fg, depth)` added to `moby_planner.py` — pure validation function checking field prefixes (site.*, sf.*, qual.*), operator validity, value presence, and recursive sub-groups (depth ≤ 5); exported and imported in `ai_chat.py`; (2) `tool_explorer_search()` calls `validate_filter_group()` before executing — if errors found, returns structured error dict to Claude so it can self-correct instead of silently misfiring; (3) TOOLS_SPEC `explorer_search` filter description updated with concrete nested group examples (multi-country OR sub-group, `(DE AND overnight) OR (FR AND overnight)`, expression string format); (4) SYSTEM_PROMPT BLOCK 9 updated: country values now ISO-2 (was full names like "Spain"), new BLOCK 9b with 4 complex grouped query examples covering all Phase 4 target patterns; (5) `scripts/test_moby_filter_logic.py` — integration test suite: 5 Explorer direct tests (nested groups, expression strings, 3-country OR, deep nesting) + 7 Moby tests + 1 validation — **29/29 pass**; (6) **Backend fix `_filter_group_to_expr()`**: in `salesforce_explorer.py`, converts nested sub-groups to expression format before rule classification so inner AND/OR logic is faithfully preserved (see Nested FilterGroup entry above); (7) **Stage 1/2 handler country guard**: Stage 1/2 site-list handler in `_try_planner()` now skips when query mentions specific countries — falls through to Phase 1 planner to build the correct country+stage FilterGroup (fix: `_s12_has_country = any(k in s for k in _COUNTRY_MAP)`); (8) **Option-B 0-rows fix**: when the followup merge produces 0 rows, the correctly-merged FilterGroup is now returned directly (was falling through to Claude which would generate a different/wrong filter). 284 unit tests passing (23 new in `TestValidateFilterGroup`, 6 new in `TestFilterGroupToExpr`).
@@ -96,6 +104,27 @@ Legend:
 - Math handler and conversational no-tools shortcut for follow-up efficiency
 - Backend unit tests: `test_ai_chat.py` (pure function tests for `_is_complex_query`, `_truncate_history`)
 - E2E coverage: `chat.spec.ts` (deterministic with SSE mock), `chat-live.smoke.spec.ts` (requires real SF session, skipped in CI)
+
+### Backend Module Structure — CONFIRMED (2026-03-18)
+
+**`salesforce_explorer.py` split (Fase 4 Task A):**
+- **`backend/app/routers/filter_engine.py`** (369 lines, NEW): Pure filter evaluation — no SF/DB/network dependencies. Contains `Rule`, `FilterQuery`, `_OP_SYNONYM`, `_OP_MAP`, all scalar comparison functions (`_parse_date_any`, `_coerce_scalar`, `_cmp`, `_normalize_list`), `_eval_qual_rule`, `_qual_get`, `_flatten_filter_rules`, `_filter_group_to_expr`, `_is_logic_expr`, `_eval_logic_expr_be`, `_norm_label_to_key`. Directly tested by `test_filter_logic.py` and `test_salesforce_explorer.py` (updated imports).
+- **`backend/app/utils/geo_cache.py`** (95 lines, NEW): Geocoding cache (disk-backed JSON, 10-year TTL) and `_haversine_km`. Contains `_GEO_CACHE`, `_GEO_LOCK`, `_geo_key`, `_save_geo_cache_file`, `_geo_cache_get`, `_geo_cache_put`, `_extract_result_country_iso`. Imported by `salesforce_explorer.py` and `ai_chat.py`.
+- **`salesforce_explorer.py`**: 5645 → 5252 lines (−393). Imports from `filter_engine` and `geo_cache`. Two distinct cache locks: `_GEO_LOCK` (in geo_cache.py) for geocode cache, `_CACHE_LOCK` (in salesforce_explorer.py) for drive-matrix cache.
+- **`backend/app/routers/explorer.py` DELETED (2026-03-18)**: Dead code — legacy `/api/explorer/fields` + `/api/explorer/search` stub that was never registered in `main.py`. The real explorer routes come from `salesforce_explorer.py`'s `explorer_router`. Never imported anywhere.
+- **6 correctness/ops bugs fixed (2026-03-18):**
+  1. `pass_account()` now supports expression-mode logic (`"1 AND (2 OR 3)"`): uses `account_rule_indices` + `_eval_logic_expr_be` — was treating any expression string as OR. 8 new unit tests in `TestPassAccountExpressionMode`.
+  2. `within_drive_km` and `nearby_multi` now call `_filter_group_to_expr(filters)` before rule classification — nested FilterGroup sub-groups are no longer silently skipped. `nearby_multi` also switched from raw `filters.get("rules")` to `_flatten_filter_rules()`.
+  3. `explorer_search` 4 main SF I/O calls wrapped in `asyncio.to_thread()` — prevents blocking the uvicorn event loop during Salesforce HTTP round-trips.
+  4. Dead `/healthz` route removed from `main.py` — the real healthz (with DB `SELECT 1`) in `health.py` is always used.
+  5. `geo_cache.py` load/save errors now emit `log.warning` instead of silent `pass`.
+  6. `ChatView.tsx` now aborts any in-flight SSE stream via `useEffect` cleanup on component unmount.
+- `_get_sf()` now returns HTTP 401 with actionable messages instead of generic 403: missing cookie → "Not logged in to Salesforce", invalid signature → "Session invalid or expired", DB session not found → "Session expired. Please log in again." (Fase 4 Task C)
+- Country-only Moby fast-path: evaluated and not implemented — the existing `_try_planner` country handler already bypasses Claude; SOQL round-trip is the bottleneck, not routing. Documented in `next-steps.md` item 15. (Fase 4 Task B)
+- **DB pool configured (2026-03-18)**: `database.py` now sets `pool_size=5`, `max_overflow=10`, `pool_timeout=10` (raises after 10s waiting for connection instead of blocking forever).
+- **`init_db()` failure is fatal (2026-03-18)**: `main.py` `on_startup()` now raises `RuntimeError` if `init_db()` fails — ECS task will crash and restart instead of silently starting without a DB connection.
+- **`_sf_query_all` exception isolation (2026-03-18)**: SF exceptions (`SalesforceMalformedRequest`, `SalesforceGeneralError`, `SalesforceRefusedRequest`, `SalesforceResourceNotFound`) are caught and returned as clean HTTP errors; raw SF exception text is never included in HTTP detail (only logged server-side).
+- **Distance Matrix retry/backoff (2026-03-18)**: `_drive_km_matrix()` now retries up to 3 times with exponential backoff (1s/2s/4s) on HTTP 429, 5xx, or timeout. `_dm_cache` process-local limitation documented with Redis upgrade path.
 
 ### Nearby / Within-KM Features — CONFIRMED
 - `POST /api/explorer/search/within-drive-km`: finds sites within N km of a base account (uses local Site DB coords + Google Maps Distance Matrix)
@@ -168,10 +197,16 @@ Legend:
 
 ## Test Coverage Summary
 
+**Backend unit tests: 475 passing** (2026-03-18)
+
 | Area | Backend unit | Frontend E2E |
 |------|-------------|-------------|
 | `_eval_qual_rule` + `_qual_get` | Yes (test_salesforce_explorer.py) | — |
+| `pass_account()` expression mode | Yes (test_salesforce_explorer.py — 8 new tests) | — |
+| Filter logic expressions | Yes (test_filter_logic.py — 27 tests) | Yes (filters.spec.ts FLOGIC-1–6) |
 | `_is_complex_query` + `_truncate_history` | Yes (test_ai_chat.py) | — |
+| Moby planner handlers | Yes (test_moby_planner.py — 76 tests) | — |
+| Activity/assignment handlers | Yes (test_moby_handlers.py — 62 tests) | — |
 | Members explorer logic | Yes (test_members_explorer.py) | Yes (members.spec.ts, fully mocked) |
 | Dashboard navigation | — | Yes (dashboard.spec.ts) |
 | Filter builder + search | — | Yes (filters.spec.ts) |
@@ -187,6 +222,45 @@ Legend:
 | `geo.py` regeocode endpoints | No | No |
 | `explorer_bridge.py` cross-tab highlight | No | No |
 | Within-drive-km full-filter path | No | No |
+
+### Moby Integration Test Suite — CONFIRMED (2026-03-18)
+
+Two-step integration test framework for validating Moby answers against 80+ real user questions. **Tier 1 + Tier 2 fixes applied (2026-03-18).**
+
+**Tier 1 — Moby bug fixes in `ai_chat.py` + `moby_handlers.py`:**
+1. **Region expansion**: `_REGION_EXPANSIONS` dict maps Scandinavia/Nordic/DACH/Benelux/Baltic/Iberian/Balkans → ISO2 list; fires before `_COUNTRY_MAP` scan in country planner handler
+2. **NL ShippingCountry variant**: `_SF_EXTRA_VARIANTS` dict (NL → "The Netherlands", GB → "Great Britain") expands SOQL IN clause for countries with multiple SF spellings
+3. **SC/PI handler country extraction**: Replaced broken `m_c` regex (matched "in" inside "investigators") with `resolve_countries(s)` from `country_norms.py`
+4. **Nearest handler city terminator**: Added `?!` to regex terminator so "Munich?" is correctly extracted (was returning None)
+5. **Members routing**: New planner handler detects "member institution(s)" queries → routes to `tool_members_search` instead of Explorer
+6. **D04 "participating in Safeguard"**: `moby_handlers.py` `handle_assignment_sites` now matches "participating in X" / "involved in X" without requiring "assignment" keyword
+7. **Country SOQL fix** (2026-03-18): Country planner SOQL had `Account.RecordType.DeveloperName='SubAccount'` and `Account.C_Type__c='Clinical'` — but both are Opportunity-level fields, not Account fields. This caused all Group A tests to return ~90-116 sites instead of the correct country subset. Fixed to `RecordType.DeveloperName='SubAccount'` and `C_Type__c='Clinical'` (without `Account.` prefix); only `Account.ShippingCountry` keeps the prefix.
+
+**Step 1 — `scripts/generate_ground_truth.py`**: Runs each test case against the Explorer/Members/Nearby API (not Moby) and records the expected `account_ids` as a JSON fixture (`fixtures/moby_ground_truth.json`). Discovers qual field keys dynamically from `/api/explorer/fields`. Covers 8 groups:
+- Group A (10): Country filters
+- Group B (17): SF field filters — **B01-B06** (Stage1/2/ND numeric), **B07/B09/B10/B15/B16** (Account fields) all converted to `moby_only` (Explorer returns HTTP 400 or wrong counts for these); **B08** (C_Phase_I_Type1__c) kept as `explorer_filter`; **B11-B17** moby_only
+- Group C (up to 19): Qualification data — pharmacy, overnight, ZnT8, HLA, autoantibodies, etc. (keys discovered at runtime); **C04** (overnight+Stage2) moby_only; pharmacy field discovery uses specific keyword priority ("available"/"on-site"/"service" before plain "pharmacy")
+- Group D (5): Activity/assignment filters; **D05** fixed (removed Account field, keeps only `extra_not_has`)
+- Group E (5–6): Complex multi-filter; **E01-E04/E06** moby_only (sf_gt or Account fields); **E05** (country+qual) kept as `explorer_filter`
+- Group F (6): Geographic/nearby baseline; all cases use `tolerance="ordered_top_n"` (precision ≥ 80%) — "subset" was too strict since Moby may return valid SF accounts not in the local Explorer DB
+- Group G (5): Members view
+- Group H (30): Moby natural language — structural checks only (has_table, min_rows, has_answer)
+
+**Step 2 — `scripts/test_moby_questions.py`**: Sends each natural language question to Moby, extracts `table.rows` account_ids, compares with expected using precision/recall. Supports `--groups`, `--id`, `--tags`, `--fast` (skip moby_only), `--precision-threshold`, `--recall-threshold` flags. Exit code 1 on any failure.
+
+```bash
+# Generate ground truth (once per SF data refresh, ~2 min)
+SF_SESSION_COOKIE="..." python scripts/generate_ground_truth.py
+
+# Run all tests (~15-20 min)
+SF_SESSION_COOKIE="..." python scripts/test_moby_questions.py
+
+# Run only exact-verifiable groups
+SF_SESSION_COOKIE="..." python scripts/test_moby_questions.py --groups A B C D E --fast
+
+# Re-run only failed cases
+SF_SESSION_COOKIE="..." python scripts/test_moby_questions.py --id B01 D03
+```
 
 ---
 

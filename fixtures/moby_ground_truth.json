@@ -1,0 +1,4229 @@
+{
+  "generated_at": "2026-03-18T23:30:19.236849+00:00",
+  "api_base": "http://localhost:8000",
+  "total_cases": 92,
+  "qual_fields_found": {
+    "pharmacy": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+    "overnight": "qual.3_5_2__overnight_stay",
+    "znt8": "qual.3_8__znt8",
+    "hla": "qual.3_8__can_you_do_hla_typing",
+    "islet_autoantibody": null,
+    "early_diag": null,
+    "ogtt": null,
+    "insulin_autoantibody": "qual.3_8__insulin",
+    "biobank": null,
+    "documents_retained": "qual.3_5_1__how_long_are_documents_retained_years",
+    "longest_single_day": "qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours",
+    "emergency_personnel": "qual.3_3__acceptable_process"
+  },
+  "errors": [],
+  "cases": {
+    "A01": {
+      "description": "CTS sites in Germany, Italy, Belgium",
+      "question": "Show me all CTS sites in Germany, Italy, and Belgium",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "OR",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "DE"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "IT"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "BE"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 79,
+      "expected_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000006ElrdIAC",
+        "001Vg000006GgfmIAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000007E2fRIAS",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000LgOukIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000avqJiIAI",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rovFuIAI",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A02": {
+      "description": "CTS sites in Spain or Portugal",
+      "question": "Show me all clinical sites in Spain or Portugal",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "OR",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "ES"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "PT"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 22,
+      "expected_account_ids": [
+        "001Vg000004UmT9IAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007P5oVIAS",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000L9amZIAR",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000SLctPIAT",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000UGORhIAP",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A03": {
+      "description": "CTS sites in Germany",
+      "question": "List all clinical sites in Germany",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "DE"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 9,
+      "expected_account_ids": [
+        "001Vg000000xUDNIA2",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000007E2fRIAS",
+        "001Vg00000nLvbmIAC"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A04": {
+      "description": "CTS sites in Italy",
+      "question": "Show me all clinical sites in Italy",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "IT"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 62,
+      "expected_account_ids": [
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000006ElrdIAC",
+        "001Vg000006GgfmIAC",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000LgOukIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000avqJiIAI",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A05": {
+      "description": "CTS sites in France",
+      "question": "Which sites do we have in France?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "FR"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 31,
+      "expected_account_ids": [
+        "001Vg000003fMtlIAE",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4tKUIAY"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A06": {
+      "description": "CTS sites in Poland",
+      "question": "Show me all sites in Poland",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "PL"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 9,
+      "expected_account_ids": [
+        "001Vg000001YNGBIA4",
+        "001Vg000004V3KIIA0",
+        "001Vg000007gGAqIAM",
+        "001Vg00000KkANUIA3",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000sMKR0IAO"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A07": {
+      "description": "Sites in Eastern Europe (PL CZ SK HU RO)",
+      "question": "What sites do we have in Eastern Europe \u2014 Poland, Czech Republic, Slovakia, Hungary, Romania?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "OR",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "PL"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "CZ"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "SK"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "HU"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "RO"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 16,
+      "expected_account_ids": [
+        "001Vg000001YNGBIA4",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004V3KIIA0",
+        "001Vg000007gGAqIAM",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A08": {
+      "description": "Sites in Nordic countries (SE NO DK FI)",
+      "question": "Are there any CTS sites in the Nordic countries? Show me all of them.",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "OR",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "SE"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "NO"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "DK"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "FI"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 8,
+      "expected_account_ids": [
+        "001Vg000001VDzjIAG",
+        "001Vg000001Z8jhIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000fNWPOIA4"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A09": {
+      "description": "Sites in UK",
+      "question": "What clinical sites do we have in the UK?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "GB"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 10,
+      "expected_account_ids": [
+        "001Vg000003fPyUIAU",
+        "001Vg000004UZUHIA4",
+        "001Vg000006El0TIAS",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000007PT7eIAG",
+        "001Vg00000MsT25IAF"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "A10": {
+      "description": "Sites in Belgium or Netherlands",
+      "question": "Show me all sites in Belgium and the Netherlands",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "OR",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "BE"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "NL"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name"
+      ],
+      "expected_count": 14,
+      "expected_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000003fMPXIA2",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PjhEIAS",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000rovFuIAI"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "country",
+        "explorer"
+      ]
+    },
+    "B01": {
+      "description": "Sites with Stage 1 > 50",
+      "question": "Which sites have more than 50 Stage 1 individuals currently followed?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "stage1",
+        "metrics"
+      ]
+    },
+    "B02": {
+      "description": "All sites with any Stage 1",
+      "question": "Show me all sites that have Stage 1 individuals followed",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_10"
+      ],
+      "tags": [
+        "stage1",
+        "metrics"
+      ]
+    },
+    "B03": {
+      "description": "Sites with any Stage 2",
+      "question": "Which sites have Stage 2 individuals currently followed?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_5"
+      ],
+      "tags": [
+        "stage2",
+        "metrics"
+      ]
+    },
+    "B04": {
+      "description": "Sites with Stage 1 AND Stage 2",
+      "question": "Show me sites that have both Stage 1 AND Stage 2 patients",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_3"
+      ],
+      "tags": [
+        "stage1",
+        "stage2",
+        "metrics"
+      ]
+    },
+    "B05": {
+      "description": "ND under-18 > 20 per year",
+      "question": "Which sites have more than 20 newly diagnosed T1D patients under 18 per year?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "nd",
+        "metrics"
+      ]
+    },
+    "B06": {
+      "description": "ND over-18 > 50 per year",
+      "question": "Which sites see more than 50 newly diagnosed adult T1D patients per year?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "nd",
+        "metrics"
+      ]
+    },
+    "B07": {
+      "description": "CTS-validated sites",
+      "question": "Show me all CTS-validated sites",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "status"
+      ]
+    },
+    "B08": {
+      "description": "CT-3 Phase I sites",
+      "question": "Which sites are participating in CT-3 Phase I trials?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "sf.C_Phase_I_Type1__c",
+            "operator": "equals",
+            "value": true
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "sf.C_Phase_I_Type1__c"
+      ],
+      "expected_count": 6,
+      "expected_account_ids": [
+        "001Vg000006En75IAC",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000eSqxVIAS"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "ct3",
+        "status"
+      ]
+    },
+    "B09": {
+      "description": "Sites where profiling is complete",
+      "question": "Show me all sites where profiling has been completed",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "profiling",
+        "status"
+      ]
+    },
+    "B10": {
+      "description": "Sites with Referral/Clinical Partner role",
+      "question": "Which sites have a Referral Clinical Partner role?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "status"
+      ]
+    },
+    "B11": {
+      "description": "German sites with Stage 1 > 0",
+      "question": "Show me German sites that have Stage 1 patients followed",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "country",
+        "stage1"
+      ]
+    },
+    "B12": {
+      "description": "Italian sites with Stage 1 > 30",
+      "question": "Show me Italian sites with more than 30 Stage 1 individuals followed",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "country",
+        "stage1"
+      ]
+    },
+    "B13": {
+      "description": "French sites with Stage 2 > 0",
+      "question": "Which French sites have Stage 2 patients?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "country",
+        "stage2"
+      ]
+    },
+    "B14": {
+      "description": "Sites with profiling form uploaded to DB",
+      "question": "Which sites have had the profiling form uploaded to the database?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "profiling",
+        "status"
+      ]
+    },
+    "B15": {
+      "description": "Sites with first contact but no meeting date",
+      "question": "Which sites have had a first contact date but no meeting date yet?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "profiling",
+        "pipeline"
+      ]
+    },
+    "B16": {
+      "description": "CTS-validated but no assignment",
+      "question": "Which sites are CTS-validated but not yet active in any assignment?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "status",
+        "assignment"
+      ]
+    },
+    "B17": {
+      "description": "Profiling form sent but not received",
+      "question": "Find sites where the profiling questionnaire was sent but not yet received",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "profiling",
+        "pipeline"
+      ]
+    },
+    "C01": {
+      "description": "Sites with pharmacy on-site",
+      "question": "Find all sites with pharmacy available on-site",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+            "operator": "equals",
+            "value": "On-site"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_6__is_your_pharmacy_on_site_or_off_campus"
+      ],
+      "expected_count": 36,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+      "tags": [
+        "qual",
+        "facilities"
+      ]
+    },
+    "C02": {
+      "description": "Sites with overnight stay capacity",
+      "question": "Which sites have overnight stay capacity?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_5_2__overnight_stay",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_5_2__overnight_stay"
+      ],
+      "expected_count": 40,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_5_2__overnight_stay",
+      "tags": [
+        "qual",
+        "facilities"
+      ]
+    },
+    "C03": {
+      "description": "Sites with pharmacy AND overnight",
+      "question": "Show me sites that have pharmacy on-site AND overnight stay capacity",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+            "operator": "equals",
+            "value": "On-site"
+          },
+          {
+            "field": "qual.3_5_2__overnight_stay",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+        "qual.3_5_2__overnight_stay"
+      ],
+      "expected_count": 35,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "qual",
+        "facilities"
+      ]
+    },
+    "C04": {
+      "description": "Sites Stage 2 AND overnight",
+      "question": "Which sites have overnight stay capacity AND Stage 2 patients?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "qual",
+        "stage2"
+      ]
+    },
+    "C05": {
+      "description": "Sites in ES/PT with pharmacy AND overnight",
+      "question": "Find sites in Spain or Portugal that have pharmacy on-site and overnight stay",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "1 AND 2 AND (3 OR 4)",
+        "rules": [
+          {
+            "field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+            "operator": "equals",
+            "value": "On-site"
+          },
+          {
+            "field": "qual.3_5_2__overnight_stay",
+            "operator": "is_not_null",
+            "value": null
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "ES"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "PT"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+        "qual.3_5_2__overnight_stay"
+      ],
+      "expected_count": 8,
+      "expected_account_ids": [
+        "001Vg000004UmT9IAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000UGORhIAP"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "qual",
+        "country",
+        "facilities"
+      ]
+    },
+    "C06": {
+      "description": "Sites in DE/AT with pharmacy AND overnight",
+      "question": "Show me sites in Germany or Austria that have pharmacy on-site and overnight stay",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "1 AND 2 AND (3 OR 4)",
+        "rules": [
+          {
+            "field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+            "operator": "equals",
+            "value": "On-site"
+          },
+          {
+            "field": "qual.3_5_2__overnight_stay",
+            "operator": "is_not_null",
+            "value": null
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "DE"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "AT"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+        "qual.3_5_2__overnight_stay"
+      ],
+      "expected_count": 6,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000004DlF2IAK",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S9zaIAC"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "qual",
+        "country",
+        "facilities"
+      ]
+    },
+    "C07": {
+      "description": "Sites with ZnT8 testing",
+      "question": "Which sites have ZnT8 autoantibody testing available?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_8__znt8",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_8__znt8"
+      ],
+      "expected_count": 39,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RLVuIAO",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000b4UobIAE"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_8__znt8",
+      "tags": [
+        "qual",
+        "autoantibody"
+      ]
+    },
+    "C08": {
+      "description": "Sites with HLA typing",
+      "question": "Which sites have HLA typing capability available?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_8__can_you_do_hla_typing",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_8__can_you_do_hla_typing"
+      ],
+      "expected_count": 35,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000b4UobIAE"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_8__can_you_do_hla_typing",
+      "tags": [
+        "qual",
+        "lab"
+      ]
+    },
+    "C13": {
+      "description": "Sites with insulin autoantibody testing",
+      "question": "Which sites have insulin autoantibody testing?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_8__insulin",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_8__insulin"
+      ],
+      "expected_count": 40,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000b4UobIAE"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_8__insulin",
+      "tags": [
+        "qual",
+        "autoantibody"
+      ]
+    },
+    "C15": {
+      "description": "Sites accommodating long single-day visits",
+      "question": "Which sites can accommodate a single-day visit longer than 8 hours?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours"
+      ],
+      "expected_count": 40,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_5_2__longest_single_day_visit_that_could_be_accommodated_hours",
+      "tags": [
+        "qual",
+        "logistics"
+      ]
+    },
+    "C16": {
+      "description": "Sites retaining documents long-term",
+      "question": "Which sites retain documents for more than 15 years?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_5_1__how_long_are_documents_retained_years",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_5_1__how_long_are_documents_retained_years"
+      ],
+      "expected_count": 41,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_5_1__how_long_are_documents_retained_years",
+      "tags": [
+        "qual",
+        "compliance"
+      ]
+    },
+    "C17": {
+      "description": "Sites with emergency personnel within 30 min",
+      "question": "Which sites confirmed emergency personnel can arrive within 30 minutes?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_3__acceptable_process",
+            "operator": "is_not_null",
+            "value": null
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_3__acceptable_process"
+      ],
+      "expected_count": 42,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000003fMPXIA2",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg0000089kdOIAQ",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000YTJwgIAH"
+      ],
+      "tolerance": "exact",
+      "notes": "qual: qual.3_3__acceptable_process",
+      "tags": [
+        "qual",
+        "safety"
+      ]
+    },
+    "C19": {
+      "description": "Sites HLA AND overnight AND pharmacy",
+      "question": "Which sites have HLA typing AND overnight stay AND pharmacy on-site?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "qual.3_8__can_you_do_hla_typing",
+            "operator": "is_not_null",
+            "value": null
+          },
+          {
+            "field": "qual.3_5_2__overnight_stay",
+            "operator": "is_not_null",
+            "value": null
+          },
+          {
+            "field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+            "operator": "equals",
+            "value": "On-site"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_8__can_you_do_hla_typing",
+        "qual.3_5_2__overnight_stay",
+        "qual.3_6__is_your_pharmacy_on_site_or_off_campus"
+      ],
+      "expected_count": 30,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000004DlF2IAK",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006ElrdIAC",
+        "001Vg000006ErLyIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GsU3IAK",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000TATOGIA5",
+        "001Vg00000UGORhIAP",
+        "001Vg00000W6gLXIAZ"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "qual",
+        "facilities",
+        "lab"
+      ]
+    },
+    "D01": {
+      "description": "Sites in any assignment",
+      "question": "Which sites are active in any current assignment?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "extra.AssignmentsCount",
+            "operator": "gt",
+            "value": 0
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "extra.AssignmentsNames",
+        "extra.AssignmentsCount"
+      ],
+      "expected_count": 195,
+      "expected_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "assignment"
+      ]
+    },
+    "D02": {
+      "description": "Sites with NO assignment",
+      "question": "List all sites that have no current assignment",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "extra.AssignmentsCount",
+            "operator": "equals",
+            "value": 0
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "extra.AssignmentsCount"
+      ],
+      "expected_count": 0,
+      "expected_account_ids": [],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "assignment"
+      ]
+    },
+    "D03": {
+      "description": "Sites in Beta Preserve assignment",
+      "question": "Show me all sites involved in the Beta Preserve assignment",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "extra.AssignmentsNames",
+            "operator": "contains",
+            "value": "Beta Preserve"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "extra.AssignmentsNames"
+      ],
+      "expected_count": 52,
+      "expected_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001YNGBIA4",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RcWkIAK",
+        "001Vg000004RouTIAS",
+        "001Vg000004S6D4IAK",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UmT9IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007P5oVIAS",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KkANUIA3",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000sMKR0IAO",
+        "001Vg000008kUzTIAU"
+      ],
+      "tolerance": "subset",
+      "notes": "",
+      "tags": [
+        "assignment",
+        "activity"
+      ]
+    },
+    "D04": {
+      "description": "Sites in Safeguard assignment",
+      "question": "Which sites are participating in Safeguard?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "extra.AssignmentsNames",
+            "operator": "contains",
+            "value": "Safeguard"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "extra.AssignmentsNames"
+      ],
+      "expected_count": 26,
+      "expected_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000003fMtlIAE",
+        "001Vg000004CCO9IAO",
+        "001Vg000004MFz1IAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004S6D4IAK",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000007HdowIAC",
+        "001Vg000007gGAqIAM",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000aus2fIAA",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000fNWPOIA4"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "assignment",
+        "activity"
+      ]
+    },
+    "D05": {
+      "description": "Sites NOT in Beta Preserve",
+      "question": "Show me CTS sites that are NOT involved in Beta Preserve",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "extra.AssignmentsNames",
+            "operator": "not_contains",
+            "value": "Beta Preserve"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "extra.AssignmentsNames"
+      ],
+      "expected_count": 144,
+      "expected_account_ids": [
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004OWizIAG",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004Ri14IAC",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UZUHIA4",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006W9fuIAC",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "assignment",
+        "activity"
+      ]
+    },
+    "E01": {
+      "description": "Sites in IT or ES with Stage 1 AND Stage 2",
+      "question": "Which Italian or Spanish sites have both Stage 1 and Stage 2 patients?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "country",
+        "stage1",
+        "stage2",
+        "complex"
+      ]
+    },
+    "E02": {
+      "description": "CTS-validated AND profiling complete",
+      "question": "Show me sites that are both CTS-validated and have completed profiling",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "status",
+        "complex"
+      ]
+    },
+    "E03": {
+      "description": "Stage 1 > 30 in DE, AT, CH",
+      "question": "Find sites in Germany, Austria, or Switzerland with more than 30 Stage 1 patients followed",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "country",
+        "stage1",
+        "complex"
+      ]
+    },
+    "E04": {
+      "description": "Stage 1 > 20 + pharmacy + overnight (feasibility)",
+      "question": "We need 20 sites for a study requiring overnight stay and pharmacy \u2014 which qualify?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "qual",
+        "stage1",
+        "feasibility",
+        "complex"
+      ]
+    },
+    "E05": {
+      "description": "HLA AND overnight AND pharmacy in FR or BE",
+      "question": "Which French or Belgian sites have HLA typing AND overnight stay AND pharmacy on-site?",
+      "category": "explorer_filter",
+      "filter_used": {
+        "logic": "(1 OR 2) AND 3 AND 4 AND 5",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "FR"
+          },
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "BE"
+          },
+          {
+            "field": "qual.3_8__can_you_do_hla_typing",
+            "operator": "is_not_null",
+            "value": null
+          },
+          {
+            "field": "qual.3_5_2__overnight_stay",
+            "operator": "is_not_null",
+            "value": null
+          },
+          {
+            "field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus",
+            "operator": "equals",
+            "value": "On-site"
+          }
+        ]
+      },
+      "columns": [
+        "sf.Account.Name",
+        "qual.3_8__can_you_do_hla_typing",
+        "qual.3_5_2__overnight_stay",
+        "qual.3_6__is_your_pharmacy_on_site_or_off_campus"
+      ],
+      "expected_count": 3,
+      "expected_account_ids": [
+        "001Vg000004R3qnIAC",
+        "001Vg000004Ri14IAC",
+        "001Vg00000TATOGIA5"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "qual",
+        "country",
+        "complex"
+      ]
+    },
+    "E06": {
+      "description": "ZnT8 AND profiling complete",
+      "question": "Show me all sites where profiling is complete AND they have ZnT8 testing",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "profiling",
+        "qual",
+        "complex"
+      ]
+    },
+    "F01": {
+      "description": "5 closest sites to Munich",
+      "question": "What are the 5 closest CTS sites to Munich?",
+      "category": "nearby",
+      "city": "Munich",
+      "country": "DE",
+      "max_km": 500,
+      "top_n": 5,
+      "all_known_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "ordered_top_n",
+      "tags": [
+        "geographic",
+        "nearby"
+      ],
+      "notes": "Moby results must be a subset of known CTS sites"
+    },
+    "F02": {
+      "description": "Sites within 200 km of Paris",
+      "question": "Show me all sites within 200 km of Paris",
+      "category": "nearby",
+      "city": "Paris",
+      "country": "FR",
+      "max_km": 200,
+      "top_n": null,
+      "all_known_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "ordered_top_n",
+      "tags": [
+        "geographic",
+        "nearby"
+      ],
+      "notes": "Moby results must be a subset of known CTS sites"
+    },
+    "F03": {
+      "description": "Sites within 300 km of Warsaw",
+      "question": "Which CTS sites are within 300 km of Warsaw?",
+      "category": "nearby",
+      "city": "Warsaw",
+      "country": "PL",
+      "max_km": 300,
+      "top_n": null,
+      "all_known_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "ordered_top_n",
+      "tags": [
+        "geographic",
+        "nearby"
+      ],
+      "notes": "Moby results must be a subset of known CTS sites"
+    },
+    "F04": {
+      "description": "Sites within 150 km of Brussels",
+      "question": "Find CTS sites within 150 km of Brussels",
+      "category": "nearby",
+      "city": "Brussels",
+      "country": "BE",
+      "max_km": 150,
+      "top_n": null,
+      "all_known_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "ordered_top_n",
+      "tags": [
+        "geographic",
+        "nearby"
+      ],
+      "notes": "Moby results must be a subset of known CTS sites"
+    },
+    "F05": {
+      "description": "Sites within 200 km of Barcelona",
+      "question": "What sites are within 200 km of Barcelona?",
+      "category": "nearby",
+      "city": "Barcelona",
+      "country": "ES",
+      "max_km": 200,
+      "top_n": null,
+      "all_known_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "ordered_top_n",
+      "tags": [
+        "geographic",
+        "nearby"
+      ],
+      "notes": "Moby results must be a subset of known CTS sites"
+    },
+    "F06": {
+      "description": "Nearest 3 sites to Leuven",
+      "question": "Which sites are nearest to Leuven, Belgium?",
+      "category": "nearby",
+      "city": "Leuven",
+      "country": "BE",
+      "max_km": 300,
+      "top_n": 3,
+      "all_known_account_ids": [
+        "001Vg000000tBvjIAE",
+        "001Vg000000tF9jIAE",
+        "001Vg000000xUDNIA2",
+        "001Vg000001UcnHIAS",
+        "001Vg000001UpsXIAS",
+        "001Vg000001VCMFIA4",
+        "001Vg000001VDzjIAG",
+        "001Vg000001YNGBIA4",
+        "001Vg000001Z8jhIAC",
+        "001Vg000001ZdAwIAK",
+        "001Vg000001Zi8vIAC",
+        "001Vg000001ZkDtIAK",
+        "001Vg000003ZhDFIA0",
+        "001Vg000003fMPXIA2",
+        "001Vg000003fMtlIAE",
+        "001Vg000003fMuJIAU",
+        "001Vg000003fPyUIAU",
+        "001Vg000004CCO9IAO",
+        "001Vg000004DlF2IAK",
+        "001Vg000004E35NIAS",
+        "001Vg000004Lv4LIAS",
+        "001Vg000004M8O4IAK",
+        "001Vg000004MFz1IAG",
+        "001Vg000004OJ2TIAW",
+        "001Vg000004OWizIAG",
+        "001Vg000004PcvuIAC",
+        "001Vg000004Pg3VIAS",
+        "001Vg000004PjhEIAS",
+        "001Vg000004Pk0XIAS",
+        "001Vg000004PlMQIA0",
+        "001Vg000004PnGFIA0",
+        "001Vg000004PnckIAC",
+        "001Vg000004PpuhIAC",
+        "001Vg000004R3qnIAC",
+        "001Vg000004RKmlIAG",
+        "001Vg000004RLVuIAO",
+        "001Vg000004RcWkIAK",
+        "001Vg000004Ri14IAC",
+        "001Vg000004RouTIAS",
+        "001Vg000004S4jEIAS",
+        "001Vg000004S5k3IAC",
+        "001Vg000004S6D4IAK",
+        "001Vg000004S9zaIAC",
+        "001Vg000004SOxxIAG",
+        "001Vg000004UFtpIAG",
+        "001Vg000004UPyEIAW",
+        "001Vg000004UZUHIA4",
+        "001Vg000004UmT9IAK",
+        "001Vg000004V3KIIA0",
+        "001Vg000006El0TIAS",
+        "001Vg000006ElrdIAC",
+        "001Vg000006En75IAC",
+        "001Vg000006EocdIAC",
+        "001Vg000006EqOJIA0",
+        "001Vg000006ErLyIAK",
+        "001Vg000006EsJeIAK",
+        "001Vg000006GbHyIAK",
+        "001Vg000006GgfmIAC",
+        "001Vg000006GsU3IAK",
+        "001Vg000006H7o1IAC",
+        "001Vg000006W9fuIAC",
+        "001Vg000006ZsIIIA0",
+        "001Vg000007E2fRIAS",
+        "001Vg000007HdowIAC",
+        "001Vg000007P5oVIAS",
+        "001Vg000007PT7eIAG",
+        "001Vg000007gGAqIAM",
+        "001Vg0000089kdOIAQ",
+        "001Vg000008YXWQIA4",
+        "001Vg00000CmvtAIAR",
+        "001Vg00000GxjZZIAZ",
+        "001Vg00000GxzaxIAB",
+        "001Vg00000Gy1rFIAR",
+        "001Vg00000Gy20vIAB",
+        "001Vg00000IFeFlIAL",
+        "001Vg00000KjyCeIAJ",
+        "001Vg00000KkANUIA3",
+        "001Vg00000KnDBxIAN",
+        "001Vg00000L9amZIAR",
+        "001Vg00000L9fRHIAZ",
+        "001Vg00000LgOukIAF",
+        "001Vg00000MqbYKIAZ",
+        "001Vg00000MsT25IAF",
+        "001Vg00000NhCwqIAF",
+        "001Vg00000NhHlAIAV",
+        "001Vg00000O7MsUIAV",
+        "001Vg00000OLmOrIAL",
+        "001Vg00000OLx0sIAD",
+        "001Vg00000OM0jXIAT",
+        "001Vg00000QWNkSIAX",
+        "001Vg00000QqFATIA3",
+        "001Vg00000Qv7YwIAJ",
+        "001Vg00000SLctPIAT",
+        "001Vg00000SWWZJIA5",
+        "001Vg00000SybfpIAB",
+        "001Vg00000Syf50IAB",
+        "001Vg00000Sykz1IAB",
+        "001Vg00000Syxl3IAB",
+        "001Vg00000Sz1iEIAR",
+        "001Vg00000TAHWpIAP",
+        "001Vg00000TANx8IAH",
+        "001Vg00000TAP9MIAX",
+        "001Vg00000TATOGIA5",
+        "001Vg00000TAV54IAH",
+        "001Vg00000TBCgLIAX",
+        "001Vg00000TBETqIAP",
+        "001Vg00000TBNdKIAX",
+        "001Vg00000TBNrqIAH",
+        "001Vg00000UGORhIAP",
+        "001Vg00000UGyoZIAT",
+        "001Vg00000UH0dUIAT",
+        "001Vg00000UH6EDIA1",
+        "001Vg00000UHOMRIA5",
+        "001Vg00000UO4UKIA1",
+        "001Vg00000UO9c1IAD",
+        "001Vg00000UOIycIAH",
+        "001Vg00000UpkVqIAJ",
+        "001Vg00000UqGyfIAF",
+        "001Vg00000UqHTJIA3",
+        "001Vg00000W01bCIAR",
+        "001Vg00000W0vLlIAJ",
+        "001Vg00000W0xlgIAB",
+        "001Vg00000W11UOIAZ",
+        "001Vg00000W11aoIAB",
+        "001Vg00000W13KsIAJ",
+        "001Vg00000W5xLEIAZ",
+        "001Vg00000W62OrIAJ",
+        "001Vg00000W6gLXIAZ",
+        "001Vg00000W6nhHIAR",
+        "001Vg00000W7ZmeIAF",
+        "001Vg00000W7aZ5IAJ",
+        "001Vg00000W7bwYIAR",
+        "001Vg00000W7h4DIAR",
+        "001Vg00000W8S9ZIAV",
+        "001Vg00000XbpJwIAJ",
+        "001Vg00000XmCFFIA3",
+        "001Vg00000YHWC5IAP",
+        "001Vg00000YTJwgIAH",
+        "001Vg00000YTNIcIAP",
+        "001Vg00000aEszvIAC",
+        "001Vg00000aFkIlIAK",
+        "001Vg00000aFtylIAC",
+        "001Vg00000aus2fIAA",
+        "001Vg00000avqJiIAI",
+        "001Vg00000avtpVIAQ",
+        "001Vg00000b37Z7IAI",
+        "001Vg00000b4MfoIAE",
+        "001Vg00000b4UobIAE",
+        "001Vg00000d7ykCIAQ",
+        "001Vg00000dTlYDIA0",
+        "001Vg00000dbCWrIAM",
+        "001Vg00000dwNHCIA2",
+        "001Vg00000dwYW2IAM",
+        "001Vg00000e4KfYIAU",
+        "001Vg00000e4TCUIA2",
+        "001Vg00000e4UeqIAE",
+        "001Vg00000e4ZwDIAU",
+        "001Vg00000eRkhHIAS",
+        "001Vg00000eSqxVIAS",
+        "001Vg00000eaC3gIAE",
+        "001Vg00000ebWRkIAM",
+        "001Vg00000fNWPOIA4",
+        "001Vg00000fkJ1fIAE",
+        "001Vg00000g8SADIA2",
+        "001Vg00000gHO0vIAG",
+        "001Vg00000gczIgIAI",
+        "001Vg00000gd6DYIAY",
+        "001Vg00000gd6QYIAY",
+        "001Vg00000i0P5BIAU",
+        "001Vg00000jghzVIAQ",
+        "001Vg00000jgkZDIAY",
+        "001Vg00000jgn0uIAA",
+        "001Vg00000jgsbcIAA",
+        "001Vg00000l6qQiIAI",
+        "001Vg00000mNkMhIAK",
+        "001Vg00000nLdn0IAC",
+        "001Vg00000nLr8LIAS",
+        "001Vg00000nLvbmIAC",
+        "001Vg00000nZNs3IAG",
+        "001Vg00000nZPtmIAG",
+        "001Vg00000o4d9PIAQ",
+        "001Vg00000o4tKUIAY",
+        "001Vg00000ofRSXIA2",
+        "001Vg00000pGJxRIAW",
+        "001Vg00000pHdUHIA0",
+        "001Vg00000rCckaIAC",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000rcifsIAA",
+        "001Vg00000rd1tmIAA",
+        "001Vg00000rovFuIAI",
+        "001Vg00000s0UjnIAE",
+        "001Vg00000sDxXqIAK",
+        "001Vg00000sMKR0IAO",
+        "001Vg00000tAQGEIA4",
+        "001Vg00000tASL8IAO"
+      ],
+      "tolerance": "ordered_top_n",
+      "tags": [
+        "geographic",
+        "nearby"
+      ],
+      "notes": "Moby results must be a subset of known CTS sites"
+    },
+    "G01": {
+      "description": "Members in UK",
+      "question": "Show me all member institutions in the UK",
+      "category": "members",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "GB"
+          }
+        ]
+      },
+      "expected_count": 17,
+      "expected_account_ids": [
+        "001Vg000000uZhVIAU",
+        "001Vg000000xrejIAA",
+        "001Vg0000017eEgIAI",
+        "001Vg000002JYksIAG",
+        "001Vg000002gRcAIAU",
+        "001Vg000002ggEdIAI",
+        "001Vg000002iLIvIAM",
+        "001Vg000002unRlIAI",
+        "001Vg000003CApxIAG",
+        "001Vg000003ITmhIAG",
+        "001Vg000003UBMCIA4",
+        "001Vg000003Ua1AIAS",
+        "001Vg000003fJUsIAM",
+        "001Vg000006Zu2HIAS",
+        "001Vg000007Dsv9IAC",
+        "001Vg00000YuHnYIAV",
+        "001Vg00000tC1DaIAK"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "members"
+      ]
+    },
+    "G02": {
+      "description": "Members in Germany",
+      "question": "Which member institutions are in Germany?",
+      "category": "members",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "DE"
+          }
+        ]
+      },
+      "expected_count": 10,
+      "expected_account_ids": [
+        "001Vg000000uWjcIAE",
+        "001Vg000000xrBhIAI",
+        "001Vg0000013wwkIAA",
+        "001Vg000002uqxNIAQ",
+        "001Vg000003Ft7KIAS",
+        "001Vg000003G3ugIAC",
+        "001Vg000003IfFtIAK",
+        "001Vg000003uIjpIAE",
+        "001Vg000004LN7OIAW",
+        "001Vg00000mLEsPIAW"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "members"
+      ]
+    },
+    "G03": {
+      "description": "Members in France",
+      "question": "Show me all member institutions in France",
+      "category": "members",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "FR"
+          }
+        ]
+      },
+      "expected_count": 29,
+      "expected_account_ids": [
+        "001Vg000002oUWbIAM",
+        "001Vg000003CbBpIAK",
+        "001Vg000003CeBFIA0",
+        "001Vg000003faLxIAI",
+        "001Vg0000068QwLIAU",
+        "001Vg00000LXXHFIA5",
+        "001Vg00000PZuPAIA1",
+        "001Vg00000Pa5MAIAZ",
+        "001Vg00000PiwhtIAB",
+        "001Vg00000Puz7NIAR",
+        "001Vg00000Pv8YkIAJ",
+        "001Vg00000Q4qvWIAR",
+        "001Vg00000Q5dgBIAR",
+        "001Vg00000Q5k9jIAB",
+        "001Vg00000Q5oziIAB",
+        "001Vg00000Q8yxhIAB",
+        "001Vg00000QhEtbIAF",
+        "001Vg00000R7tl1IAB",
+        "001Vg00000R7xAIIAZ",
+        "001Vg00000RQbsYIAT",
+        "001Vg00000Ruiq7IAB",
+        "001Vg00000SH14PIAT",
+        "001Vg00000XT0GHIA1",
+        "001Vg00000cGbU1IAK",
+        "001Vg00000dSyAvIAK",
+        "001Vg00000dT6l7IAC",
+        "001Vg00000dvu73IAA",
+        "001Vg00000dw1uvIAA",
+        "001Vg00000ia4gbIAA"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "members"
+      ]
+    },
+    "G04": {
+      "description": "Members in Italy",
+      "question": "Which member institutions are in Italy?",
+      "category": "members",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "IT"
+          }
+        ]
+      },
+      "expected_count": 73,
+      "expected_account_ids": [
+        "001Vg000000ueQzIAI",
+        "001Vg000000xtoWIAQ",
+        "001Vg000000xx0xIAA",
+        "001Vg000000xy8DIAQ",
+        "001Vg0000016AvRIAU",
+        "001Vg0000016DlCIAU",
+        "001Vg0000017tQqIAI",
+        "001Vg000001mkUwIAI",
+        "001Vg000002dAmLIAU",
+        "001Vg000003FtqWIAS",
+        "001Vg000003FxFqIAK",
+        "001Vg000003T0sXIAS",
+        "001Vg000003VvptIAC",
+        "001Vg0000042R6fIAE",
+        "001Vg000004S7IsIAK",
+        "001Vg000004v6HiIAI",
+        "001Vg000006EMDMIA4",
+        "001Vg000009k1TmIAI",
+        "001Vg00000AnGluIAF",
+        "001Vg00000G0UL4IAN",
+        "001Vg00000HQFrIIAX",
+        "001Vg00000IBbczIAD",
+        "001Vg00000IfOgkIAF",
+        "001Vg00000IfQPBIA3",
+        "001Vg00000JByPNIA1",
+        "001Vg00000LsnkTIAR",
+        "001Vg00000NVeVNIA1",
+        "001Vg00000NVfmPIAT",
+        "001Vg00000OfrDpIAJ",
+        "001Vg00000OgU6lIAF",
+        "001Vg00000PVpKqIAL",
+        "001Vg00000PW9WQIA1",
+        "001Vg00000PZkUgIAL",
+        "001Vg00000PZpEFIA1",
+        "001Vg00000PZrPpIAL",
+        "001Vg00000PZwZ1IAL",
+        "001Vg00000Pa0xfIAB",
+        "001Vg00000Pa10nIAB",
+        "001Vg00000Pj3WQIAZ",
+        "001Vg00000Pj5Q9IAJ",
+        "001Vg00000Pn3JKIAZ",
+        "001Vg00000PvDF3IAN",
+        "001Vg00000Q4mttIAB",
+        "001Vg00000Q5ZHcIAN",
+        "001Vg00000QqCm9IAF",
+        "001Vg00000QqWKzIAN",
+        "001Vg00000RQahwIAD",
+        "001Vg00000TLnQMIA1",
+        "001Vg00000TM2iPIAT",
+        "001Vg00000UbonlIAB",
+        "001Vg00000WigaeIAB",
+        "001Vg00000YC89aIAD",
+        "001Vg00000YC8mKIAT",
+        "001Vg00000YCDu3IAH",
+        "001Vg00000YCGVHIA5",
+        "001Vg00000YCHCoIAP",
+        "001Vg00000YCI2QIAX",
+        "001Vg00000YCI43IAH",
+        "001Vg00000bhuBNIAY",
+        "001Vg00000cGZwsIAG",
+        "001Vg00000dw5thIAA",
+        "001Vg00000ibntHIAQ",
+        "001Vg00000kOTOAIA4",
+        "001Vg00000mKy4VIAS",
+        "001Vg00000mLFYIIA4",
+        "001Vg00000mNuaYIAS",
+        "001Vg00000o914zIAA",
+        "001Vg00000o961OIAQ",
+        "001Vg00000qnnHmIAI",
+        "001Vg00000rcXEKIA2",
+        "001Vg00000u1pQ2IAI",
+        "001Vg00000u1spNIAQ",
+        "001Vg00000uCjKUIA0"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "members"
+      ]
+    },
+    "G05": {
+      "description": "Members in Belgium",
+      "question": "Show me member institutions in Belgium",
+      "category": "members",
+      "filter_used": {
+        "logic": "AND",
+        "rules": [
+          {
+            "field": "site.country",
+            "operator": "equals",
+            "value": "BE"
+          }
+        ]
+      },
+      "expected_count": 7,
+      "expected_account_ids": [
+        "001Vg000000szMpIAI",
+        "001Vg0000013xj3IAA",
+        "001Vg000003C1LEIA0",
+        "001Vg000003CVCpIAO",
+        "001Vg00000JBojNIAT",
+        "001Vg00000PZye2IAD",
+        "001Vg00000qjcmOIAQ"
+      ],
+      "tolerance": "exact",
+      "notes": "",
+      "tags": [
+        "members"
+      ]
+    },
+    "H01": {
+      "description": "How many sites per country",
+      "question": "How many CTS sites do we have per country?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer",
+        "mentions_country"
+      ],
+      "tags": [
+        "distribution",
+        "moby"
+      ]
+    },
+    "H02": {
+      "description": "Which country has most Stage 1 patients",
+      "question": "Which country has the most Stage 1 patients followed?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "distribution",
+        "stage1",
+        "moby"
+      ]
+    },
+    "H03": {
+      "description": "Which country has most ND under-18",
+      "question": "Which country has the most newly diagnosed T1D patients under 18?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "distribution",
+        "nd",
+        "moby"
+      ]
+    },
+    "H04": {
+      "description": "Stage 2 breakdown by country",
+      "question": "Show me a breakdown of Stage 2 patients by country",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "distribution",
+        "stage2",
+        "moby"
+      ]
+    },
+    "H05": {
+      "description": "Top 10 sites by Stage 1 patients",
+      "question": "What are the top 10 sites with the most Stage 1 individuals followed?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_5"
+      ],
+      "tags": [
+        "ranking",
+        "stage1",
+        "moby"
+      ]
+    },
+    "H06": {
+      "description": "Top sites by T1D patients per year",
+      "question": "Which sites have the highest number of T1D patients seen per year?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_3"
+      ],
+      "tags": [
+        "ranking",
+        "moby"
+      ]
+    },
+    "H07": {
+      "description": "Top ND sites",
+      "question": "Show me the sites with the most newly diagnosed T1D patients",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_3"
+      ],
+      "tags": [
+        "ranking",
+        "nd",
+        "moby"
+      ]
+    },
+    "H08": {
+      "description": "Study coordinators at Italian sites",
+      "question": "Who are the study coordinators at the Italian sites?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "contacts",
+        "sc",
+        "moby"
+      ]
+    },
+    "H09": {
+      "description": "Principal investigators at German sites",
+      "question": "Show me the principal investigators for all German sites",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "contacts",
+        "pi",
+        "moby"
+      ]
+    },
+    "H10": {
+      "description": "Study coordinators at Belgian sites",
+      "question": "Who are the study coordinators in Belgium?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "contacts",
+        "sc",
+        "moby"
+      ]
+    },
+    "H11": {
+      "description": "Sites without study coordinator listed",
+      "question": "Which sites don't have a dedicated study coordinator listed?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "contacts",
+        "sc",
+        "moby"
+      ]
+    },
+    "H12": {
+      "description": "All activities and site counts",
+      "question": "Show me all activities and how many sites participate in each",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "activity",
+        "moby"
+      ]
+    },
+    "H13": {
+      "description": "Assignments breakdown by country",
+      "question": "Show me a breakdown of assignments by country",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "activity",
+        "distribution",
+        "moby"
+      ]
+    },
+    "H14": {
+      "description": "Activities sponsored by Sanofi",
+      "question": "How many sites are involved in activities sponsored by Sanofi?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "activity",
+        "moby"
+      ]
+    },
+    "H15": {
+      "description": "Nearest 5 sites to Munich (natural language)",
+      "question": "What are the 5 closest CTS sites to Munich?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_3"
+      ],
+      "tags": [
+        "geographic",
+        "moby"
+      ]
+    },
+    "H16": {
+      "description": "Sites near Frankfurt for a monitoring tour",
+      "question": "I need to plan a monitoring visit tour through central Germany \u2014 which sites are near Frankfurt?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "geographic",
+        "moby"
+      ]
+    },
+    "H17": {
+      "description": "Nearest site with overnight to Warsaw",
+      "question": "Find the closest site with overnight stay capacity to Warsaw",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "geographic",
+        "nearby",
+        "moby"
+      ]
+    },
+    "H18": {
+      "description": "Sites near Leuven Belgium",
+      "question": "Which sites are nearest to Leuven, Belgium?",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "geographic",
+        "moby"
+      ]
+    },
+    "H19": {
+      "description": "Table of all sites with Stage 1 and Stage 2 by country",
+      "question": "Give me a table of all CTS sites with their Stage 1 and Stage 2 patient counts, by country",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_5"
+      ],
+      "tags": [
+        "reporting",
+        "moby"
+      ]
+    },
+    "H20": {
+      "description": "Sites per country with validated role",
+      "question": "Give me a count of sites per country that have at least one validated role",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "reporting",
+        "moby"
+      ]
+    },
+    "H21": {
+      "description": "Profiling sites with completion status by country",
+      "question": "Show me all profiling sites in Poland sorted by meeting date",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "reporting",
+        "profiling",
+        "moby"
+      ]
+    },
+    "H22": {
+      "description": "Feasibility for Stage 1 prevention trial (30+ Stage 1, 20 sites needed)",
+      "question": "For a Stage 1 prevention trial we need sites with more than 30 Stage 1 patients \u2014 how many sites do we have and in which countries?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "feasibility",
+        "stage1",
+        "moby"
+      ]
+    },
+    "H23": {
+      "description": "Expansion into Eastern Europe feasibility",
+      "question": "We want to expand into Eastern Europe \u2014 which countries already have profiling sites we could fast-track to CTS?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "feasibility",
+        "profiling",
+        "moby"
+      ]
+    },
+    "H24": {
+      "description": "Sites that could support early diagnosis work",
+      "question": "How many sites could potentially support early diagnosis work based on their profiling data?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "feasibility",
+        "early_diag",
+        "moby"
+      ]
+    },
+    "H25": {
+      "description": "Sites for HLA-based sub-study",
+      "question": "If we need HLA typing at the site level, how many of our current sites can provide it?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "feasibility",
+        "hla",
+        "moby"
+      ]
+    },
+    "H26": {
+      "description": "Sites not in any assignment in 2 years",
+      "question": "Which sites haven't been involved in any assignment? They might need re-engagement.",
+      "category": "moby_only",
+      "checks": [
+        "has_table",
+        "min_rows_1"
+      ],
+      "tags": [
+        "assignment",
+        "moby"
+      ]
+    },
+    "H27": {
+      "description": "Which institution does a site belong to",
+      "question": "Which member institution does the site in Brest belong to?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "members",
+        "moby"
+      ]
+    },
+    "H28": {
+      "description": "Institutions with multiple clinical subaccounts",
+      "question": "Which member institutions have multiple clinical subaccounts that could serve as coordinating centers?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "members",
+        "moby"
+      ]
+    },
+    "H29": {
+      "description": "Chart Stage 2 by country",
+      "question": "Show me a chart of Stage 2 patients per country",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "chart",
+        "moby"
+      ]
+    },
+    "H30": {
+      "description": "Sites active in assignments per country",
+      "question": "How many sites per country are currently active in assignments?",
+      "category": "moby_only",
+      "checks": [
+        "has_answer"
+      ],
+      "tags": [
+        "assignment",
+        "distribution",
+        "moby"
+      ]
+    }
+  }
+}
