@@ -5246,6 +5246,22 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 _mem_filters = {"logic": "AND", "rules": _mem_rules} if _mem_rules else {"logic": "AND", "rules": []}
                 _mem_result = tool_members_search(request, filters=_mem_filters, include_detail=False)
                 _mem_rows = (_mem_result.get("rows") or []) if isinstance(_mem_result, dict) else []
+                # H28 pattern: "multiple clinical subaccounts" → filter to members with > 1 subaccounts
+                _mem_multi_sub = bool(re.search(r"\bmultiple\b|\bmore\s+than\s+one\b|\bseveral\b|\b2\+\b", s)
+                                      and re.search(r"\bsubaccount[s]?\b|\bclinical\s+site[s]?\b|\bcenter[s]?\b", s))
+                if _mem_multi_sub:
+                    _min_sites = 2
+                    _mem_rows_filtered = [r for r in _mem_rows if isinstance(r, dict) and int(r.get("# Sites") or 0) >= _min_sites]
+                    # Rebuild table with only multi-subaccount members
+                    _mem_result_filtered = {
+                        "columns": _mem_result.get("columns", []) if isinstance(_mem_result, dict) else [],
+                        "rows": _mem_rows_filtered,
+                    }
+                    _mem_ans = (
+                        f"<p>Found <strong>{len(_mem_rows_filtered)}</strong> INNODIA member institution(s) "
+                        f"with 2 or more clinical subaccounts.</p>"
+                    )
+                    return {"answer": _mem_ans, "table": _normalize_table_for_ui(_mem_result_filtered)}
                 _country_str = ", ".join(_iso2sf_mem(c) for c in _mem_iso2s) if _mem_iso2s else "all countries"
                 _mem_ans = (
                     f"<p>Found <strong>{len(_mem_rows)}</strong> INNODIA member institution(s)"
@@ -5762,9 +5778,13 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             _asks_sites_asn = bool(re.search(
                 r"\bsite[s]?\b|\bcenter[s]?\b|\bwhich\b|\bshow\b|\bfind\b|\blist\b|\bactive\b|\binvolved\b", s))
             _is_phase_query = bool(re.search(r"\bphase\s*[i1]|\bphase\s*(?:ii|2)|\bphase\s*(?:iii|3)\b", s, re.I))
+            # Also detect "per country" / "by country" aggregation intent
+            _asn_per_country = bool(re.search(r"\bper\s+country\b|\bby\s+country\b|\beach\s+country\b|\bhow\s+many.*country\b", s))
             if _has_asn and _asks_sites_asn and not _is_phase_query:
-                # Detect NOT modifier
-                _asn_not = bool(re.search(r"\bnot\b|\bno\b|\bexcluding\b|\bexclude\b|\bwithout\b", s))
+                # Detect NOT modifier — includes "haven't", "never", "no assignment(s)"
+                _asn_not = bool(re.search(
+                    r"\bnot\b|\bno\b|\bexcluding\b|\bexclude\b|\bwithout\b"
+                    r"|\bhaven.?t\b|\bnever\b|\bnot\s+been\b", s))
                 # Extract assignment name: look for Title-Cased words near "assignment"
                 # e.g. "in the Beta Preserve assignment" → "Beta Preserve"
                 _asn_name: Optional[str] = None
@@ -5786,10 +5806,12 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         {"field": "extra.AssignmentsNames", "operator": _asn_op, "value": _asn_name}
                     ]}
                 else:
-                    # No specific name: NOT → count=0 (no assignments), else → count>0 (any assignment)
+                    # No specific name: NOT → is_null (no assignments ever), else → count>0 (active)
+                    # Note: extra.AssignmentsCount is None (not 0) for sites with no assignments,
+                    # because they never appear in the batch extras fetch.
                     _asn_filter = {"logic": "AND", "rules": [
                         {"field": "extra.AssignmentsCount",
-                         "operator": "equals" if _asn_not else "gt",
+                         "operator": "is_null" if _asn_not else "gt",
                          "value": 0}
                     ]}
                 _asn_url = "http://127.0.0.1:8000/api/explorer/search"
@@ -5812,19 +5834,35 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             "city": _er.get("city", ""),
                             "extra.AssignmentsNames": _ed.get("extra.AssignmentsNames", ""),
                         })
-                    cols_asn = [
-                        {"key": "account_name", "label": "Site"},
-                        {"key": "city", "label": "City"},
-                        {"key": "country", "label": "Country"},
-                        {"key": "extra.AssignmentsNames", "label": "Assignments"},
-                    ]
-                    tbl_asn = _normalize_table_for_ui({"columns": cols_asn, "rows": rows_asn})
-                    if _asn_name:
-                        _op_str = "not in" if _asn_not else "in"
-                        _ans_str = f"<p>Found <strong>{len(rows_asn)}</strong> site(s) {_op_str} the <em>{_asn_name}</em> assignment.</p>"
+                    # If per-country aggregation requested (H30 pattern), aggregate site counts
+                    if _asn_per_country and not _asn_name:
+                        from collections import Counter as _Counter
+                        _country_counts = _Counter(r["country"] for r in rows_asn)
+                        cols_asn = [
+                            {"key": "country", "label": "Country"},
+                            {"key": "site_count", "label": "Sites"},
+                        ]
+                        rows_agg = [{"country": c, "site_count": n}
+                                    for c, n in sorted(_country_counts.items(), key=lambda x: -x[1])]
+                        tbl_asn = _normalize_table_for_ui({"columns": cols_asn, "rows": rows_agg})
+                        _label = "not active in" if _asn_not else "active in"
+                        _ans_str = (f"<p>Found <strong>{len(rows_asn)}</strong> site(s) "
+                                    f"{_label} assignments across <strong>{len(rows_agg)}</strong> countries.</p>")
                     else:
-                        _ans_str = f"<p>Found <strong>{len(rows_asn)}</strong> site(s) active in at least one assignment.</p>"
-                    _dbg("Planner assignment Explorer: %d sites (name=%s, not=%s)", len(rows_asn), _asn_name, _asn_not)
+                        cols_asn = [
+                            {"key": "account_name", "label": "Site"},
+                            {"key": "city", "label": "City"},
+                            {"key": "country", "label": "Country"},
+                            {"key": "extra.AssignmentsNames", "label": "Assignments"},
+                        ]
+                        tbl_asn = _normalize_table_for_ui({"columns": cols_asn, "rows": rows_asn})
+                        if _asn_name:
+                            _op_str = "not in" if _asn_not else "in"
+                            _ans_str = f"<p>Found <strong>{len(rows_asn)}</strong> site(s) {_op_str} the <em>{_asn_name}</em> assignment.</p>"
+                        else:
+                            _label = "not in any assignment" if _asn_not else "active in at least one assignment"
+                            _ans_str = f"<p>Found <strong>{len(rows_asn)}</strong> site(s) {_label}.</p>"
+                    _dbg("Planner assignment Explorer: %d sites (name=%s, not=%s, per_country=%s)", len(rows_asn), _asn_name, _asn_not, _asn_per_country)
                     return {"answer": _ans_str, "table": tbl_asn, "last_filters": _asn_filter}
         except Exception as _e:
             _dbg("WARN: planner assignment handler failed: %s", _e)
@@ -5836,6 +5874,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             has_znt8       = bool(re.search(r"\bznt8\b|\bzn[-\u2010]?t8\b", s, re.I))
             has_hla        = bool(re.search(r"\bhla\b", s, re.I))
             has_insulin_ab = bool(re.search(r"\binsulin\b.*\bautoantibod|\bautoantibod.*\binsulin", s, re.I))
+            # Generic "autoantibodies" without ZnT8/insulin prefix → treat as ZnT8 (islet autoantibody test)
+            if (not has_insulin_ab and not has_znt8
+                    and re.search(r"\bautoantibod", s, re.I)):
+                has_znt8 = True
             has_longday    = bool(re.search(r"\bsingle.day\b.*\bvisit|\bday.*visit.*\bhour|\b8.hour.*visit|\bvisit.*\b8.hour", s, re.I))
             has_documents  = bool(re.search(r"\bdocument[s]?.*\bretain|\bretain.*\bdocument", s, re.I))
             has_emergency  = bool(re.search(r"\bemergency\b.*\bpersonnel|\bemergency\b.*\barrive|\b30.minut", s, re.I))
@@ -5860,16 +5902,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _qual_rules.append({"field": _K_PHARM, "operator": "equals", "value": "On-site"})
                     _qual_cols.append(_K_PHARM)
                 if has_overnight:
-                    _qual_rules.append({"field": _K_OVER, "operator": "is_not_null"})
+                    _qual_rules.append({"field": _K_OVER, "operator": "contains", "value": "yes"})
                     _qual_cols.append(_K_OVER)
                 if has_znt8:
-                    _qual_rules.append({"field": _K_ZNT8, "operator": "is_not_null"})
+                    _qual_rules.append({"field": _K_ZNT8, "operator": "contains", "value": "yes"})
                     _qual_cols.append(_K_ZNT8)
                 if has_hla:
-                    _qual_rules.append({"field": _K_HLA, "operator": "is_not_null"})
+                    _qual_rules.append({"field": _K_HLA, "operator": "contains", "value": "yes"})
                     _qual_cols.append(_K_HLA)
                 if has_insulin_ab:
-                    _qual_rules.append({"field": _K_INS, "operator": "is_not_null"})
+                    _qual_rules.append({"field": _K_INS, "operator": "contains", "value": "yes"})
                     _qual_cols.append(_K_INS)
                 if has_longday:
                     _qual_rules.append({"field": _K_LONGDAY, "operator": "is_not_null"})

@@ -116,14 +116,16 @@ def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
         return _cmp(v, tgt) == 0
     if op in ("not_equals","!=","ne"):
         return _cmp(v, tgt) != 0
+    # Comparison operators: None values never satisfy gt/gte/lt/lte
+    # (guards against str("None") > str("0") lexicographic false positives)
     if op in ("gt",">"):
-        return _cmp(v, tgt) > 0
+        return v is not None and _cmp(v, tgt) > 0
     if op in ("gte",">="):
-        return _cmp(v, tgt) >= 0
+        return v is not None and _cmp(v, tgt) >= 0
     if op in ("lt","<"):
-        return _cmp(v, tgt) < 0
+        return v is not None and _cmp(v, tgt) < 0
     if op in ("lte","<="):
-        return _cmp(v, tgt) <= 0
+        return v is not None and _cmp(v, tgt) <= 0
 
     # Empty / not-empty
     if op in ("is_empty",):
