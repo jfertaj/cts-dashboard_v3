@@ -201,6 +201,10 @@ _OP_SYNONYM = {
     "icontains": "contains",
     "≥": ">=",
     "≤": "<=",
+    "gte": ">=",
+    "lte": "<=",
+    "gt": ">",
+    "lt": "<",
 }
 
 _OP_MAP = {

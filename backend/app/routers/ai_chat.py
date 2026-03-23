@@ -2811,9 +2811,12 @@ def tool_activities_with_assignments_counts(
     recs = sf.query_all(asn_soql).get("records", [])
     agg_counts: Dict[str, int] = {}
     agg_countries: Dict[str, set] = {}
+    agg_latest: Dict[str, str] = {}   # latest assignment CreatedDate per activity
+    agg_earliest: Dict[str, str] = {} # earliest assignment CreatedDate per activity
     for r in recs:
         oid = r.get("C_Opportunity_Name__c")
         c = (r.get("C_Account__r") or {}).get("ShippingCountry")
+        d = (r.get("CreatedDate") or "")[:10]  # YYYY-MM-DD
         if not oid:
             continue
         agg_counts[oid] = agg_counts.get(oid, 0) + 1
@@ -2821,24 +2824,34 @@ def tool_activities_with_assignments_counts(
             agg_countries[oid] = set()
         if c:
             agg_countries[oid].add(c)
+        if d:
+            if oid not in agg_latest or d > agg_latest[oid]:
+                agg_latest[oid] = d
+            if oid not in agg_earliest or d < agg_earliest[oid]:
+                agg_earliest[oid] = d
+    has_date_filter = bool(date_cond)
     rows = []
     for oid, cnt in agg_counts.items():
+        earliest = agg_earliest.get(oid, "")
+        latest   = agg_latest.get(oid, "")
+        date_range = (f"{earliest} – {latest}" if earliest and latest and earliest != latest
+                      else earliest or latest)
         rows.append({
             "activity_name": id_to_name.get(oid) or oid,
             "assignments": cnt,
             "countries": ", ".join(sorted(list(agg_countries.get(oid) or set()))),
+            "date_range": date_range,
             "activity_id": oid,
         })
     rows.sort(key=lambda r: r.get("assignments", 0), reverse=True)
-    return {
-        "columns": [
-            {"key":"activity_name","label":"Activity"},
-            {"key":"assignments","label":"Assignments"},
-            {"key":"countries","label":"Countries"},
-            {"key":"activity_id","label":"Activity Id"},
-        ],
-        "rows": rows,
-    }
+    cols = [
+        {"key":"activity_name","label":"Activity"},
+        {"key":"assignments","label":"Assignments"},
+        {"key":"countries","label":"Countries"},
+        {"key":"date_range","label":"Assignment Date Range"},
+        {"key":"activity_id","label":"Activity Id"},
+    ]
+    return {"columns": cols, "rows": rows}
 
 
 def tool_activity_assignments_detailed(
@@ -4935,59 +4948,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             }
         }
 
-    # Clarificador determinista para consultas ambiguas de "pacientes"
-    def _needs_patient_clarification(text: str) -> Optional[Dict[str, Any]]:
-        if not text:
-            return None
-        s = (text or "").lower()
-        _dbg(f"NeedsPatientClarification input: '{s}'")
-        # Presencia del concepto pacientes
-        has_pat = re.search(r"\b(pacientes|patients?|t1d)\b", s) is not None
-        if not has_pat:
-            return None
-        # Don't trigger for facility/infrastructure queries — "patients" is incidental
-        if re.search(r"\b(overnight|pharmacy|pharmac|stay|facility|facilities|infrastructure|"
-                     r"hla|typing|activit|stage\s*[12]|assignment|enrollment|enroll)\b", s):
-            return None
-        # Señales de desambiguación ya especificadas
-        # "paediatric"/"pediatric" implies under 18 -> no clarification needed
-        if re.search(r"\b(pa?ediatric)\b", s):
-            _dbg("Skipping clarification: 'paediatric' detected")
-            return None
-        specified_type = re.search(r"\b(new|newly|diagnos(ed)?|dx|nd\b|actual(es)?|actualmente|current(ly)?|seguimiento|followed|follow.up)\b", s) is not None
-        specified_stage = re.search(r"\bstage\s*[12]\b", s) is not None
-        specified_age = re.search(r"(<\s*18|\bunder\s*18\b|u\s*18|≥\s*18|\bo(ver)?\s*18\b|o\s*18|\b18\s*or\s*older"
-                                   r"|\badulto?s?\b|\badults?\b|\bpediatri[ck]|paediatri[ck]|\bni[ñn]os?\b)\b", s) is not None
-        # Queries sobre agregaciones (average, total, sum) con edad especificada son suficientemente claras
-        has_aggregation = re.search(r"\b(average|avg|total|sum|count|how\s+many|highest|most|top|best|ranking|rank)\b", s) is not None
-        # Si especifica la edad, no pedir clarificación
-        if specified_age:
-            return None
-        # Si especifica el tipo (ej. "actualmente", "newly diagnosed"), tampoco pedir clarificación
-        if specified_type:
-            return None
-        # Si especifica stage, tampoco pedir clarificación
-        if specified_stage:
-            return None
-        # Si es una agregación o ranking, no pedir clarificación (usuario quiere datos, no opciones)
-        if has_aggregation:
-            return None
-        # Construye objeto clarify
-        question = "Which type of patients are you referring to?"
-        options = [
-            {"label": "Currently under 18", "query": "currently T1D patients under 18"},
-            {"label": "Currently 18 or older", "query": "currently T1D patients 18 or older"},
-            {"label": "Newly diagnosed under 18", "query": "newly diagnosed T1D patients under 18"},
-            {"label": "Newly diagnosed 18 or older", "query": "newly diagnosed T1D patients 18 or older"},
-            {"label": "Currently (both ages)", "query": "currently T1D patients all ages"},
-            {"label": "Newly diagnosed (both ages)", "query": "newly diagnosed T1D patients all ages"},
-        ]
-        return {"answer": "<p>Need one more detail.</p>", "clarify": {"question": question, "options": options}}
-
     # Aplica clarificadores
     try:
         last_text = payload.messages[-1].content if payload.messages else ""
-        for _fn in (_needs_contact_clarification, _needs_report_wizard, _needs_patient_clarification):
+        for _fn in (_needs_contact_clarification, _needs_report_wizard):
             clar = _fn(last_text)
             if clar:
                 return clar
@@ -5231,11 +5195,152 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
         # INTENCIÓN DIRECTA: Member institutions → route to tool_members_search
         try:
-            _mem_inst_intent = bool(re.search(
+            # Core member institution keywords
+            _mem_inst_kw = bool(re.search(
                 r"\bmember\s+institution[s]?\b|\bmember\s+universit|\binstitution[s]?\s+(?:in|from|of)\b"
                 r"|\bnetwork\s+member[s]?\b|\binnodia\s+member[s]?\b",
                 s, re.I
             ))
+            # Role context: validated roles or specific lab/org types
+            _mem_role_ctx = bool(re.search(
+                r"\bdxlab[s]?\b|\bdiagnostic\s+lab[s]?\b|\bpatient\s+org(?:anization)?s?\b"
+                r"|\bresearch.*lab[s]?\b|\bmechanistic.*lab[s]?\b|\blab.?validat\b"
+                r"|\bcs\b.*\bvalidat|\bvalidat.*\bcs\b|\bcts\b.*\bvalidat|\bvalidat.*\bcts\b"
+                r"|\brole[s]?\b", s, re.I))
+            # "institutions" or "members" combined with role context → member query
+            _mem_inst_intent = _mem_inst_kw or bool(
+                _mem_role_ctx and re.search(r"\binstitution[s]?\b|\bmember[s]?\b", s, re.I)
+                # Only block on "clinical site(s)" when it's the subject, not a role label
+                and not re.search(r"\bcts\s+site[s]?\b", s, re.I)
+                and not (re.search(r"\bclinical\s+site[s]?\b", s, re.I)
+                         and not re.search(r"\bclinical\s+site\s+role\b|\bcs\s+role\b", s, re.I))
+            )
+
+            # MB6: "how many clinical subaccounts/sites does the [institution] have?"
+            _mb6_m = re.search(
+                r"\bhow\s+many\b.{0,60}?\b(?:subaccount[s]?|clinical\s+unit[s]?|site[s]?|center[s]?)\b"
+                r".{0,60}?\b(?:does?\s+(?:the\s+)?|the\s+)?([A-Za-zÀ-ÿ][A-Za-z\s'\-]{2,30}?)\s+"
+                r"(?:institution|member|university|hospital)\b",
+                s, re.I)
+            if _mb6_m:
+                _mb6_name = _mb6_m.group(1).strip()
+                _mb6_all = tool_members_search(request, filters={"logic": "AND", "rules": []})
+                _mb6_inst = next(
+                    (r for r in (_mb6_all.get("rows") or [])
+                     if _mb6_name.lower() in str(r.get("account_name", "")).lower()),
+                    None
+                )
+                if _mb6_inst:
+                    _mb6_n = _mb6_inst.get("# Sites", 0)
+                    _mb6_full = _mb6_inst.get("account_name", _mb6_name)
+                    return {
+                        "answer": f"<p>The <strong>{_mb6_full}</strong> institution has <strong>{_mb6_n}</strong> clinical subaccount(s).</p>",
+                        "table": _normalize_table_for_ui({
+                            "columns": [
+                                {"key": "account_name", "label": "Institution"},
+                                {"key": "# Sites", "label": "# Clinical Subaccounts"},
+                            ],
+                            "rows": [{"account_name": _mb6_full, "# Sites": _mb6_n}],
+                        }),
+                    }
+
+            # MB7: "which institution does the site in [city] belong to?"
+            _mb7_m = re.search(
+                r"\bwhich\b.{0,50}?\binstitution\b.{0,50}?\bsite\s+in\s+([A-Za-zÀ-ÿ][A-Za-z\s'\-]{2,25}?)\b"
+                r"(?:\s+belong|\?|$)"
+                r"|\bsite\s+in\s+([A-Za-zÀ-ÿ][A-Za-z\s'\-]{2,25}?)\b.{0,50}?\bbelong.{0,15}?\binstitution\b",
+                s, re.I)
+            if _mb7_m and sf:
+                _mb7_city = ((_mb7_m.group(1) or _mb7_m.group(2)) or "").strip()
+                _mb7_city_safe = re.sub(r"['\"\\\n]", "", _mb7_city)  # sanitize for SOQL
+                try:
+                    _mb7_soql = (
+                        f"SELECT Id, Name, ShippingCity, C_Member__c, C_Member__r.Name "
+                        f"FROM Account "
+                        f"WHERE RecordType.DeveloperName = 'SubAccount' "
+                        f"AND (ShippingCity LIKE '%{_mb7_city_safe}%' OR Name LIKE '%{_mb7_city_safe}%') "
+                        f"LIMIT 5"
+                    )
+                    _mb7_recs = sf.query_all(_mb7_soql).get("records", [])
+                    if _mb7_recs:
+                        _mb7_site = _mb7_recs[0]
+                        _mb7_parent_obj = _mb7_site.get("C_Member__r") or {}
+                        _mb7_parent_name = _mb7_parent_obj.get("Name", "Unknown")
+                        _mb7_parent_id = _mb7_site.get("C_Member__c")
+                        _mb7_all_mems = tool_members_search(request, filters={"logic": "AND", "rules": []})
+                        _mb7_inst_row = next(
+                            (r for r in (_mb7_all_mems.get("rows") or [])
+                             if r.get("account_id") == _mb7_parent_id),
+                            {"account_name": _mb7_parent_name, "country": "", "city": "", "# Sites": ""}
+                        )
+                        _mb7_site_name = _mb7_site.get("Name", f"site in {_mb7_city}")
+                        return {
+                            "answer": (
+                                f"<p>The site <strong>{_mb7_site_name}</strong> in {_mb7_city} belongs to the "
+                                f"INNODIA member institution <strong>{_mb7_parent_name}</strong>.</p>"
+                            ),
+                            "table": _normalize_table_for_ui({
+                                "columns": [
+                                    {"key": "account_name", "label": "Institution"},
+                                    {"key": "country",      "label": "Country"},
+                                    {"key": "city",         "label": "City"},
+                                    {"key": "# Sites",      "label": "# Clinical Units"},
+                                ],
+                                "rows": [_mb7_inst_row],
+                            }),
+                        }
+                    else:
+                        return {"answer": f"<p>No INNODIA site found in <strong>{_mb7_city}</strong>.</p>", "table": {}}
+                except Exception as _mb7_e:
+                    _dbg("WARN: MB7 site-to-institution lookup failed: %s", _mb7_e)
+
+            # ST8: "CTS sites that are also DxLab / Diagnostic Labs"
+            # C_Deliver_Clinical_Grade_Services__c is on the RT_Member Account (parent institution),
+            # not on the SubAccount — must traverse C_Member__r relationship in SOQL.
+            _st8_cts_dxlab = bool(
+                re.search(r"\bcts\s+site[s]?\b|\bclinical\s+trial\s+site[s]?\b", s, re.I)
+                and re.search(r"\bdxlab[s]?\b|\bdiagnostic\s+lab[s]?\b|\blab.validat", s, re.I)
+            )
+            if _st8_cts_dxlab and sf:
+                try:
+                    _st8_soql = (
+                        "SELECT Id, Name, ShippingCity, ShippingCountry, C_Member__r.Name "
+                        "FROM Account "
+                        "WHERE RecordType.DeveloperName = 'SubAccount' "
+                        "AND INNODIA_Clinical_Trial_Site__c = true "
+                        "AND C_Member__r.C_Deliver_Clinical_Grade_Services__c = true "
+                        "AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
+                        "LIMIT 100"
+                    )
+                    _st8_raw = tool_salesforce_query(sf, _st8_soql)
+                    _st8_recs = _st8_raw.get("records") or []
+                    _st8_rows = [
+                        {
+                            "account_name": r.get("Name", ""),
+                            "city":         r.get("ShippingCity") or "",
+                            "country":      r.get("ShippingCountry") or "",
+                            "member":       (r.get("C_Member__r") or {}).get("Name") or "",
+                        }
+                        for r in _st8_recs
+                    ]
+                    return {
+                        "answer": (
+                            f"<p>Found <strong>{len(_st8_rows)}</strong> CTS site(s) whose parent "
+                            f"institution has the Diagnostic Lab (DxLab) role.</p>"
+                        ),
+                        "table": _normalize_table_for_ui({
+                            "columns": [
+                                {"key": "account_name", "label": "Site"},
+                                {"key": "city",         "label": "City"},
+                                {"key": "country",      "label": "Country"},
+                                {"key": "member",       "label": "Member Institution"},
+                            ],
+                            "rows": _st8_rows,
+                        }),
+                    }
+                except Exception as _st8_e:
+                    _dbg("WARN: ST8 CTS+DxLab handler failed: %s", _st8_e)
+
             if _mem_inst_intent:
                 from app.utils.country_norms import resolve_countries as _rc_mem, iso2_to_sf_name as _iso2sf_mem
                 _mem_iso2s = _rc_mem(user_text)  # pass original text so uppercase ISO2 codes (e.g. "UK") are matched
@@ -5243,9 +5348,150 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     {"field": "site.country", "operator": "equals", "value": iso2}
                     for iso2 in _mem_iso2s
                 ]
-                _mem_filters = {"logic": "AND", "rules": _mem_rules} if _mem_rules else {"logic": "AND", "rules": []}
+                # Role-based filter rules.
+                # Validated fields (Clinical_Site_CS_validated__c, etc.) are mostly empty in the SF org.
+                # Use proposed role fields as the primary signal, validated as secondary for explicit "validated" queries.
+                _mem_role_rules: list = []
+                _wants_validated = bool(re.search(r"\bvalidat", s, re.I))
+                if re.search(r"\bcs\b", s, re.I) and re.search(r"\bcts\b|\bclinical\s+trial", s, re.I):
+                    # MB2: "both CS and CTS validated" — use validated fields (these do have some data)
+                    _mem_role_rules.append({"field": "sf.Clinical_Site_CS_validated__c", "operator": "equals", "value": True})
+                    _mem_role_rules.append({"field": "sf.Clinical_Trial_Site_CTS_validated__c", "operator": "equals", "value": True})
+                elif re.search(r"\bcs\b", s, re.I) and _wants_validated:
+                    _mem_role_rules.append({"field": "sf.Clinical_Site_CS_validated__c", "operator": "equals", "value": True})
+                elif re.search(r"\bcts\b", s, re.I) and _wants_validated:
+                    _mem_role_rules.append({"field": "sf.Clinical_Trial_Site_CTS_validated__c", "operator": "equals", "value": True})
+                if re.search(r"\bdxlab[s]?\b|\bdiagnostic\s+lab[s]?\b", s, re.I):
+                    # Use proposed field (validated is empty): C_Deliver_Clinical_Grade_Services__c = DxLab role
+                    _mem_role_rules.append({"field": "sf.C_Deliver_Clinical_Grade_Services__c", "operator": "equals", "value": True})
+                if re.search(r"\bresearch.*lab\b|\bmechanistic.*lab\b|\blab.?validat\b|\blab\s+member\b|\blab\s+role\b", s, re.I):
+                    # Use proposed field: C_Perform_Cutting_Edge__c = Research/Mechanistic Lab role
+                    _mem_role_rules.append({"field": "sf.C_Perform_Cutting_Edge__c", "operator": "equals", "value": True})
+                if re.search(r"\bpatient\s+org(?:anization)?s?\b", s, re.I):
+                    # Use proposed field: C_Contribute_as_a_Patient_Organization__c = Patient Org role
+                    _mem_role_rules.append({"field": "sf.C_Contribute_as_a_Patient_Organization__c", "operator": "equals", "value": True})
+                # OC3: "proposed Clinical Site role (but not validated yet)"
+                if re.search(r"\bclinical\s+site\s+role\b|\bcs\s+role\b|\bproposed\s+(?:cs|clinical\s+site)\b", s, re.I):
+                    _mem_role_rules.append({"field": "sf.Clinical_Site_CS__c", "operator": "equals", "value": True})
+                _all_mem_rules = _mem_rules + _mem_role_rules
+                _mem_filters = {"logic": "AND", "rules": _all_mem_rules} if _all_mem_rules else {"logic": "AND", "rules": []}
                 _mem_result = tool_members_search(request, filters=_mem_filters, include_detail=False)
                 _mem_rows = (_mem_result.get("rows") or []) if isinstance(_mem_result, dict) else []
+                # City filter: "at the Edinburgh institution" / "the Paris member institution"
+                _mem_city_m = re.search(
+                    r"\bthe\s+([A-Z][A-Za-zÀ-ÿ'\-]{2,25})\s+(?:member|institution)\b"
+                    r"|\bat\s+(?:the\s+)?([A-Z][A-Za-zÀ-ÿ'\-]{2,25})\s+(?:member|institution)\b",
+                    user_text)
+                if _mem_city_m:
+                    _mem_city = (_mem_city_m.group(1) or _mem_city_m.group(2) or "").strip()
+                    if _mem_city and not _rc_mem(_mem_city):  # not a country name
+                        _mem_rows = [r for r in _mem_rows if _mem_city.lower() in str(r.get("account_name") or r.get("city") or "").lower()]
+                        _mem_result = dict(_mem_result, rows=_mem_rows) if isinstance(_mem_result, dict) else {"rows": _mem_rows, "columns": []}
+                # MB8: "clinical units/subaccounts linked to the [institution]" → fetch detail endpoint
+                _mb8_wants_units = bool(
+                    re.search(r"\bclinical\s+unit[s]?\b|\bsubaccount[s]?\b", s, re.I)
+                    and re.search(r"\blinked\s+to\b|\bbelonging\s+to\b|\bof\s+the\b|\bunder\b", s, re.I)
+                )
+                if _mb8_wants_units and len(_mem_rows) >= 1:
+                    _mb8_inst_row = _mem_rows[0]
+                    _mb8_inst_id = _mb8_inst_row.get("account_id", "")
+                    if re.fullmatch(r"[A-Za-z0-9]{15,18}", _mb8_inst_id):
+                        _mb8_headers: dict = {}
+                        _mb8_ck = request.headers.get("cookie")
+                        if _mb8_ck:
+                            _mb8_headers["cookie"] = _mb8_ck
+                        with httpx.Client(timeout=30.0) as _mb8_cli:
+                            _mb8_resp = _mb8_cli.get(
+                                f"http://127.0.0.1:8000/api/members/{_mb8_inst_id}/detail",
+                                headers=_mb8_headers,
+                            )
+                        if _mb8_resp.status_code == 200:
+                            _mb8_detail = _mb8_resp.json()
+                            _mb8_subs = _mb8_detail.get("subaccounts") or []
+                            _mb8_sub_rows = [
+                                {
+                                    "account_name": sub.get("name", ""),
+                                    "country":      sub.get("country", ""),
+                                    "city":         sub.get("city", ""),
+                                    "CTS":          "Yes" if sub.get("is_cts") else "No",
+                                    "CS":           "Yes" if sub.get("is_cs") else "No",
+                                    "Status":       sub.get("status") or "",
+                                }
+                                for sub in _mb8_subs
+                            ]
+                            _mb8_inst_name = _mb8_inst_row.get("account_name", "")
+                            return {
+                                "answer": (
+                                    f"<p>Found <strong>{len(_mb8_subs)}</strong> clinical unit(s) linked to the "
+                                    f"<strong>{_mb8_inst_name}</strong> member institution.</p>"
+                                ),
+                                "table": _normalize_table_for_ui({
+                                    "columns": [
+                                        {"key": "account_name", "label": "Clinical Unit"},
+                                        {"key": "country",      "label": "Country"},
+                                        {"key": "city",         "label": "City"},
+                                        {"key": "CTS",          "label": "CTS"},
+                                        {"key": "CS",           "label": "CS"},
+                                        {"key": "Status",       "label": "Status"},
+                                    ],
+                                    "rows": _mb8_sub_rows,
+                                }),
+                            }
+
+                # OC1/OC2: "contacts at the [institution]" → fetch member_contacts from detail endpoint
+                _mem_wants_contacts = bool(
+                    re.search(r"\bcontact[s]?\b|\bkey\s+contact[s]?\b", s, re.I)
+                    and re.search(r"\bat\s+(?:the\s+)?[A-Z]|\bfor\s+(?:the\s+)?[A-Z]|\bat\s+the\b", user_text)
+                    and not re.search(r"\bsubaccount[s]?\b|\bclinical\s+unit[s]?\b", s, re.I)
+                )
+                if _mem_wants_contacts and len(_mem_rows) >= 1:
+                    _oc_inst = _mem_rows[0]
+                    _oc_inst_id = _oc_inst.get("account_id", "")
+                    if re.fullmatch(r"[A-Za-z0-9]{15,18}", _oc_inst_id):
+                        _oc_hdrs: dict = {}
+                        _oc_ck = request.headers.get("cookie")
+                        if _oc_ck:
+                            _oc_hdrs["cookie"] = _oc_ck
+                        with httpx.Client(timeout=30.0) as _oc_cli:
+                            _oc_resp = _oc_cli.get(
+                                f"http://127.0.0.1:8000/api/members/{_oc_inst_id}/detail",
+                                headers=_oc_hdrs,
+                            )
+                        if _oc_resp.status_code == 200:
+                            _oc_detail = _oc_resp.json()
+                            _oc_contacts = _oc_detail.get("member_contacts") or []
+                            _oc_contact_rows = [
+                                {
+                                    "name":       c.get("name", ""),
+                                    "title":      c.get("title") or "",
+                                    "department": c.get("department") or "",
+                                    "email":      c.get("email") or "",
+                                    "phone":      c.get("phone") or "",
+                                    "board_member": "Yes" if c.get("is_board_member") else "",
+                                    "country_lead": "Yes" if c.get("is_country_lead") else "",
+                                }
+                                for c in _oc_contacts
+                            ]
+                            _oc_inst_name = _oc_inst.get("account_name", "")
+                            return {
+                                "answer": (
+                                    f"<p>Found <strong>{len(_oc_contacts)}</strong> contact(s) at "
+                                    f"<strong>{_oc_inst_name}</strong>.</p>"
+                                ),
+                                "table": _normalize_table_for_ui({
+                                    "columns": [
+                                        {"key": "name",        "label": "Name"},
+                                        {"key": "title",       "label": "Title"},
+                                        {"key": "department",  "label": "Department"},
+                                        {"key": "email",       "label": "Email"},
+                                        {"key": "phone",       "label": "Phone"},
+                                        {"key": "board_member","label": "Board Member"},
+                                        {"key": "country_lead","label": "Country Lead"},
+                                    ],
+                                    "rows": _oc_contact_rows,
+                                }),
+                            }
+
                 # H28 pattern: "multiple clinical subaccounts" → filter to members with > 1 subaccounts
                 _mem_multi_sub = bool(re.search(r"\bmultiple\b|\bmore\s+than\s+one\b|\bseveral\b|\b2\+\b", s)
                                       and re.search(r"\bsubaccount[s]?\b|\bclinical\s+site[s]?\b|\bcenter[s]?\b", s))
@@ -5263,9 +5509,24 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     )
                     return {"answer": _mem_ans, "table": _normalize_table_for_ui(_mem_result_filtered)}
                 _country_str = ", ".join(_iso2sf_mem(c) for c in _mem_iso2s) if _mem_iso2s else "all countries"
+                _role_desc = []
+                if _mem_role_rules:
+                    _role_map = {
+                        "sf.Clinical_Site_CS_validated__c": "CS-validated",
+                        "sf.Clinical_Trial_Site_CTS_validated__c": "CTS-validated",
+                        "sf.C_Deliver_Clinical_Grade_Services__c": "DxLab (Diagnostic Lab)",
+                        "sf.C_Perform_Cutting_Edge__c": "Research/Mechanistic Lab",
+                        "sf.C_Contribute_as_a_Patient_Organization__c": "Patient Organization",
+                        "sf.Diagnostic_Lab_DxLab_validated__c": "DxLab-validated",
+                        "sf.Research_Mechanistic_Lab_LAB_validated__c": "LAB-validated",
+                        "sf.Patient_Organization_validated__c": "Patient-Org-validated",
+                    }
+                    _role_desc = [_role_map.get(r["field"], r["field"]) for r in _mem_role_rules]
+                _role_str = " and ".join(_role_desc) if _role_desc else ""
                 _mem_ans = (
                     f"<p>Found <strong>{len(_mem_rows)}</strong> INNODIA member institution(s)"
                     + (f" in <strong>{_country_str}</strong>" if _mem_iso2s else "")
+                    + (f" with <strong>{_role_str}</strong> role" if _role_str else "")
                     + ".</p>"
                 )
                 return {"answer": _mem_ans, "table": _normalize_table_for_ui(_mem_result) if isinstance(_mem_result, dict) else {}}
@@ -5275,7 +5536,12 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         # INTENCIÓN DIRECTA: Study Coordinator(s) → llamar determinísticamente a study_coordinators_with_activities
         try:
             sc_intent = re.search(r"\bstudy\s*coordinators?\b", s) is not None
-            pi_intent = re.search(r"\bprincipal\s*investigators?\b|\b\bpi\b", s) is not None
+            pi_intent = re.search(r"\bprincipal\s*investigators?\b|\b\bpi\b|\binvestigators?\b", s) is not None
+            # "sites without / don't have coordinator" — detect sites lacking coordinators (P04)
+            _sc_no_coord = bool(re.search(
+                r"\bwithout\b|\bdon.?t\s+have\b|\bno\s+(?:dedicated\s+)?(?:study\s+)?coordinator"
+                r"|\bno\s+(?:dedicated\s+)?(?:study\s+)?sc\b|\bnot\s+listed\b|\blacking\b", s, re.I)
+                and (sc_intent or re.search(r"\bcoordinator[s]?\b", s)))
             if (sc_intent or pi_intent) and not sf:
                 return {"answer": "<p>⚠️ Contact/coordinator data requires an active Salesforce session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
@@ -5293,7 +5559,34 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             countries = vals
                 except Exception:
                     pass
-                if sc_intent:
+                # Extract city filter — "PI at the site in Barcelona" → city = "Barcelona"
+                _sc_city: Optional[str] = None
+                _city_m = re.search(r"\bin\s+(?:the\s+(?:site\s+(?:in|of)\s+)?)?([A-Z][A-Za-zÀ-ÿ'\-]{2,25})(?:\s*[,?]|\s*$)", user_text)
+                if _city_m:
+                    _cand = _city_m.group(1).strip()
+                    # Don't treat a country name as a city
+                    if not _resolve_countries_sc(_cand):
+                        _sc_city = _cand
+                if sc_intent and pi_intent:
+                    # Both requested: merge SC + PI contact results
+                    _tbl_sc = tool_study_coordinators_with_activities(
+                        sf, account_ids=[], countries=countries,
+                        title_contains="Study Coordinator", roles=[], include_subaccounts=True,
+                    )
+                    _tbl_pi = tool_study_coordinators_with_activities(
+                        sf, account_ids=[], countries=countries,
+                        title_contains="Investigator", roles=[], include_subaccounts=True,
+                    )
+                    _all_rows = (_tbl_sc.get("rows") or []) + (_tbl_pi.get("rows") or [])
+                    _seen_ckeys: set = set()
+                    _merged: list = []
+                    for _cr in _all_rows:
+                        _ck = (_cr.get("account_id"), _cr.get("contact_id"))
+                        if _ck not in _seen_ckeys:
+                            _seen_ckeys.add(_ck)
+                            _merged.append(_cr)
+                    table = dict(_tbl_sc, rows=_merged)
+                elif sc_intent:
                     table = tool_study_coordinators_with_activities(
                         sf,
                         account_ids=[],
@@ -5313,8 +5606,48 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         include_subaccounts=True,
                     )
                 rows = table.get("rows") or []
+                # Apply city filter if detected (P03: "PI at the site in Barcelona")
+                if _sc_city:
+                    rows = [r for r in rows if _sc_city.lower() in str(r.get("city") or "").lower()]
+                    table = dict(table, rows=rows)
+                # P04: "sites without coordinator" → invert: find sites NOT in coordinator list
+                if _sc_no_coord and sf:
+                    coord_account_ids = {str(r.get("account_id")) for r in rows if isinstance(r, dict) and r.get("account_id")}
+                    # Get all CTS clinical accounts
+                    _soql_all_cts = (
+                        "SELECT Account.Id, Account.Name, Account.ShippingCountry, Account.ShippingCity "
+                        "FROM Opportunity "
+                        "WHERE Account.RecordType.DeveloperName='SubAccount' AND Account.C_Type__c='Clinical' "
+                        "AND (Account.Account_Inactive__c = false OR Account.Account_Inactive__c = null) "
+                        "AND (Account.Subaccount_Inactive__c = false OR Account.Subaccount_Inactive__c = null) "
+                        "LIMIT 2000"
+                    )
+                    _raw_all = tool_salesforce_query(sf, _soql_all_cts)
+                    _recs_all = (_raw_all.get("records") or []) if isinstance(_raw_all, dict) else []
+                    rows_no_coord = []
+                    for _r in _recs_all:
+                        _acc = _r.get("Account") or {}
+                        _aid = _acc.get("Id", "")
+                        if _aid and _aid not in coord_account_ids:
+                            rows_no_coord.append({
+                                "account_id": _aid,
+                                "account_name": _acc.get("Name", ""),
+                                "country": _acc.get("ShippingCountry", ""),
+                                "city": _acc.get("ShippingCity", ""),
+                            })
+                    _cols_nc = [
+                        {"key": "account_name", "label": "Site"},
+                        {"key": "country", "label": "Country"},
+                        {"key": "city", "label": "City"},
+                    ]
+                    _tbl_nc = _normalize_table_for_ui({"columns": _cols_nc, "rows": rows_no_coord})
+                    _dbg("Planner P04: %d sites without coordinator", len(rows_no_coord))
+                    return {"answer": f"<p>Found <strong>{len(rows_no_coord)}</strong> site(s) with no coordinator listed.</p>",
+                            "table": _tbl_nc}
                 accs = len({str(r.get("account_id")) for r in rows if isinstance(r, dict) and r.get("account_id")})
                 ans = f"Found {len(rows)} coordinator(s) across {accs} account(s)."
+                if _sc_city:
+                    ans = f"Found {len(rows)} coordinator(s) in {_sc_city}."
                 return {"answer": f"<p>{ans}</p>", "table": table}
         except Exception as _e:
             _dbg("WARN: planner study_coordinators failed: %s", _e)
@@ -5366,10 +5699,14 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 return {"answer": "<p>⚠️ Newly Diagnosed T1D data is stored in Salesforce and requires an active session. "
                                   "Please log in via the <strong>Salesforce</strong> menu to refresh your session.</p>"}
             if _nd_intent and sf and (_nd_top or _nd_by_country or _nd_threshold is not None):
-                # Extract top N (default 10)
-                _m_topn = re.search(r"\b(top\s+)?(\d+)\b", s)
-                _nd_topn = int(_m_topn.group(2)) if _m_topn else 10
-                _nd_topn = min(max(_nd_topn, 1), 50)
+                # For threshold queries ("more than N"), fetch all matching sites
+                # For "top N" queries, limit to N
+                if _nd_threshold is not None and not _nd_top:
+                    _nd_topn = 2000
+                else:
+                    _m_topn = re.search(r"\b(top\s+)?(\d+)\b", s)
+                    _nd_topn = int(_m_topn.group(2)) if _m_topn else 10
+                    _nd_topn = min(max(_nd_topn, 1), 50)
                 if _nd_by_country:
                     # Fetch all sites with ND data, then aggregate in Python (GROUP BY SOQL has SF traversal issues)
                     soql_nd_agg = (
@@ -5540,8 +5877,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 re.search(r"(t1d|type\s*1|diabetes).{0,30}patient.{0,30}(seen|per\s+year|yearly|annual)", s, re.I)
             )
             # Skip if qual fields are also present — let qual handler combine T1D + qual filters
+            # Also skip if "newly diagnosed" is present — let ND handler handle it
             _t1d_rank_has_qual = bool(re.search(
-                r"\bhla\b|\bovernight\b|\bpharmac|\bznt8\b|\bautoantibod|\bnewly.diagnos", s, re.I))
+                r"\bhla\b|\bovernight\b|\bpharmac|\bznt8\b|\bautoantibod|\bnewly.diagnos|\bnew.diagnos|\bnd\b", s, re.I))
             if _t1d_rank_intent and not _t1d_rank_has_qual:
                 if not sf:
                     return {"answer": "<p>⚠️ T1D patient data requires an active Salesforce session.</p>"}
@@ -5675,6 +6013,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             _s12_has_qual = bool(re.search(
                 r"\bovernight\b|\bpharmac|\bhla\b|\bznt8\b|\bautoantibod|\binsulin.*autoantibod"
                 r"|\blong.*visit\b|\bdocument.*retain|\bemergency.*personnel", s, re.I))
+            # Detect "NOT in any assignment" — handle deterministically via Explorer with extra.AssignmentsCount
+            _s12_has_asn_filter = bool(re.search(
+                r"\bnot\b.*\bassignment|\bassignment.*\bnot\b|\bnot\s+in\s+any\s+assign"
+                r"|\bno\s+(?:current\s+)?assign|\bwithout\s+assign", s, re.I))
             # Detect "both ... AND" → requires both Stage 1 AND Stage 2 at same site
             _s12_both_and = bool(has_s1 and has_s2 and re.search(r"\bboth\b", s))
             # Detect threshold: "more than 50", "at least 30", "over 20", "> 10"
@@ -5684,6 +6026,57 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             # Detect top-N: "top 10"
             _s12_topn_m = re.search(r"\btop\s+(\d+)\b", s, re.I)
             _s12_topn = int(_s12_topn_m.group(1)) if _s12_topn_m else None
+
+            if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest and not _s12_has_country and not _s12_has_qual and _s12_has_asn_filter:
+                # X02: Stage1/2 with "NOT in any assignment" — call Explorer with AssignmentsCount check
+                _x02_rules: list = []
+                _s1f_x = "sf.C_Number_of_Stage1_Individuals_followed__c"
+                _s2f_x = "sf.C_Number_of_Stage2_Individuals_followed__c"
+                _thresh_x = _s12_threshold
+                if has_s1:
+                    _x02_rules.append({"field": _s1f_x, "operator": "gt", "value": _thresh_x})
+                if has_s2:
+                    _x02_rules.append({"field": _s2f_x, "operator": "gt", "value": _thresh_x})
+                _x02_rules.append({"field": "extra.AssignmentsCount", "operator": "is_empty"})
+                _x02_cols = ["sf.Account.Name", _s1f_x, _s2f_x]
+                _x02_filter = {"logic": "AND", "rules": _x02_rules}
+                _x02_url = "http://127.0.0.1:8000/api/explorer/search"
+                _x02_ck = request.headers.get("cookie") if request else None
+                with httpx.Client(timeout=90.0) as _xc:
+                    _xr = _xc.post(_x02_url, json={"filters": _x02_filter, "columns": _x02_cols},
+                                   headers={"cookie": _x02_ck} if _x02_ck else {})
+                rows_x02: list = []
+                if _xr.status_code < 400:
+                    for _er in (_xr.json().get("rows") or []):
+                        _aid = _er.get("account_id", "")
+                        if not _aid: continue
+                        _ed = _er.get("data") or {}
+                        rows_x02.append({
+                            "account_id": _aid,
+                            "account_name": _er.get("account_name", ""),
+                            "country": _er.get("country", ""),
+                            "city": _er.get("city", ""),
+                            _s1f_x: _ed.get(_s1f_x),
+                            _s2f_x: _ed.get(_s2f_x),
+                        })
+                cols_x02 = [
+                    {"key": "account_name", "label": "Site"},
+                    {"key": "country", "label": "Country"},
+                    {"key": "city", "label": "City"},
+                    {"key": _s1f_x, "label": "Stage 1"},
+                    {"key": _s2f_x, "label": "Stage 2"},
+                ]
+                tbl_x02 = _normalize_table_for_ui({"columns": cols_x02, "rows": rows_x02})
+                _thresh_lbl = f" (> {_thresh_x})" if _thresh_x else ""
+                _stage_lbl = ("Stage 1 and Stage 2" if (has_s1 and has_s2)
+                              else "Stage 1" if has_s1 else "Stage 2")
+                _dbg("Planner X02 Stage+NOT-assign Explorer: %d sites", len(rows_x02))
+                return {
+                    "answer": f"<p>Found <strong>{len(rows_x02)}</strong> site(s) with {_stage_lbl}{_thresh_lbl} "
+                              f"patients that have no current assignment.</p>",
+                    "table": tbl_x02,
+                    "last_filters": _x02_filter,
+                }
 
             if (has_s1 or has_s2) and asks_sites and sf and not _has_nearest and not _s12_has_country and not _s12_has_qual:
                 if _s12_both_and:
@@ -5778,7 +6171,19 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _ct_rules.append({"field": "sf.C_Phase_II_Type1__c", "operator": "equals", "value": True})
                 if _ct_phase3:
                     _ct_rules.append({"field": "sf.C_Phase_III_Type1__c", "operator": "equals", "value": True})
-                _ct_sf_cols = ["sf.Account.Id", "sf.Account.Name", "sf.Account.ShippingCountry", "sf.Account.ShippingCity"]
+                # Detect country filter — add site.country rule if specific country mentioned
+                from app.utils.country_norms import resolve_countries as _resolve_ct_countries
+                _ct_isos = _resolve_ct_countries(user_text)
+                if _ct_isos:
+                    if len(_ct_isos) == 1:
+                        _ct_rules.append({"field": "site.country", "operator": "equals", "value": _ct_isos[0]})
+                    else:
+                        _ct_rules.append({"logic": "OR", "rules": [
+                            {"field": "site.country", "operator": "equals", "value": _iso}
+                            for _iso in _ct_isos
+                        ]})
+                # Only request Phase field columns (account_name/country/city come from top-level Explorer row)
+                _ct_sf_cols = []
                 if _ct_phase1:
                     _ct_sf_cols.append("sf.C_Phase_I_Type1__c")
                 if _ct_phase2:
@@ -5826,13 +6231,20 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 
         # INTENCIÓN DIRECTA: assignment queries → Explorer API (extra.AssignmentsNames / AssignmentsCount)
         try:
-            _has_asn = bool(re.search(r"\bassignment[s]?\b|\binvolved\s+in\b|\bparticipating\s+in\b", s))
+            _has_asn = bool(re.search(r"\bassignment[s]?\b|\bopportunit\w+\b|\binvolved\s+in\b|\bparticipating\s+(?:in|to)\b", s))
             _asks_sites_asn = bool(re.search(
                 r"\bsite[s]?\b|\bcenter[s]?\b|\bwhich\b|\bshow\b|\bfind\b|\blist\b|\bactive\b|\binvolved\b", s))
             _is_phase_query = bool(re.search(r"\bphase\s*[i1]|\bphase\s*(?:ii|2)|\bphase\s*(?:iii|3)\b", s, re.I))
+            # Detect "most/ranking" → route to activity counts (A04: which assignments have the most sites?)
+            _asn_most_sites = bool(re.search(
+                r"\bmost\s+site[s]?\b|\bmost\s+participation\b|\branking\b|\bhighest.*site[s]?\b"
+                r"|\bmost\s+center[s]?\b|\blargest.*assignment[s]?\b", s, re.I))
             # Also detect "per country" / "by country" aggregation intent
             _asn_per_country = bool(re.search(r"\bper\s+country\b|\bby\s+country\b|\beach\s+country\b|\bhow\s+many.*country\b", s))
-            if _has_asn and _asks_sites_asn and not _is_phase_query:
+            # Also detect "near/close to" assignment intent → should route to km-of-assignment handler, not here
+            _asn_near = bool(re.search(r"\bnear(?:\s+to)?\b|\bclos(?:e|est)\b|\bwithin\b|\baround\b", s, re.I))
+            _asn_is_sponsor = bool(re.search(r"\bsponsore?(?:d|s|ing)?\b", s, re.I))
+            if _has_asn and _asks_sites_asn and not _is_phase_query and not _asn_most_sites and not _asn_near and not _asn_is_sponsor:
                 # Detect NOT modifier — includes "haven't", "never", "no assignment(s)"
                 _asn_not = bool(re.search(
                     r"\bnot\b|\bno\b|\bexcluding\b|\bexclude\b|\bwithout\b"
@@ -6011,6 +6423,13 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         _qual_cols.append(_s1f)
                     if _q_has_s2 and _s2f not in _qual_cols:
                         _qual_cols.append(_s2f)
+                # Add T1D patient count filter when T1D + threshold detected (and no Stage filter)
+                _q_has_t1d_thresh = bool(re.search(r"\bt1d\b|\btype\s*[–\-]?1\b|\btype\s*1\s+diab", s, re.I))
+                if _q_has_t1d_thresh and _q_stage_thresh_m is not None and not _q_has_s1 and not _q_has_s2:
+                    _T1D_F = "sf.C_Number_of_T1D_Patients_currently_O_18__c"
+                    _qual_rules.append({"field": _T1D_F, "operator": "gt", "value": _q_stage_thresh})
+                    if _T1D_F not in _qual_cols:
+                        _qual_cols.append(_T1D_F)
                 all_rules: list = list(_qual_rules)
                 if _qual_countries:
                     if len(_qual_countries) > 1:
@@ -6060,6 +6479,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 if has_emergency:  cols_qual.append({"key": _K_EMERG,   "label": "Emergency Process"})
                 if _q_has_s1:      cols_qual.append({"key": "sf.C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1"})
                 if _q_has_s2:      cols_qual.append({"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2"})
+                if _q_has_t1d_thresh and _q_stage_thresh_m is not None and not _q_has_s1 and not _q_has_s2:
+                    cols_qual.append({"key": "sf.C_Number_of_T1D_Patients_currently_O_18__c", "label": "T1D Patients"})
                 tbl_qual = _normalize_table_for_ui({"columns": cols_qual, "rows": rows_qual})
                 _cond_parts = []
                 if has_pharmacy:   _cond_parts.append("on-site pharmacy")
@@ -6088,18 +6509,44 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         # Handles: CTS-validated, profiling complete, profiling uploaded, referral partner, meeting dates
         try:
             _pl_cts_valid    = bool(re.search(r"\bcts.validat|\bvalidat.*\bcts\b|\binnodia\s+cts\b", s, re.I))
-            _pl_profiling_c  = bool(re.search(r"\bprofiling\b.*\bcomplete[d]?\b|\bcomplete[d]?\b.*\bprofiling\b", s, re.I))
+            _pl_profiling_c  = bool(re.search(r"\bprofiling\b.*\bcomplete[d]?\b|\bcomplete[d]?\b.*\bprofiling\b|c_profiling_complete|profiling_complete", s, re.I))
             _pl_profiling_up = bool(re.search(r"\bprofiling.*\bupload|\bupload.*\bprofiling|\bprofiling.*\bdatabase\b|\bprofiling.*\bdb\b", s, re.I))
             _pl_referral_p   = bool(re.search(r"\breferral\b.*\bpartner|\bpartner\b.*\breferral|\breferral.clinical", s, re.I))
             _pl_no_meeting   = bool(re.search(r"\bno.meeting\b|\bno.meeting.date|\bmeeting.*\bnot.set|\bfirst.contact.*meeting", s, re.I))
             _pl_prof_sent    = bool(re.search(r"\bprofiling.*\bsent\b|\bquestionnaire.*\bsent\b", s, re.I))
+            # Date qualifiers: "last year", "in 2024", "Q3 2024", "in the past year"
+            _pl_date_last_year = bool(re.search(r"\blast\s+year\b|\bpast\s+year\b|\bin\s+the\s+last\s+12\s+months\b", s, re.I))
+            _pl_date_year_m    = re.search(r"\bin\s+(20\d\d)\b|\b(20\d\d)\b(?!.*20\d\d)", s, re.I)
+            _pl_date_year      = int(_pl_date_year_m.group(1) or _pl_date_year_m.group(2)) if _pl_date_year_m else None
+            _pl_date_quarter_m = re.search(r"\bq([1-4])\s*(20\d\d)\b|\b(20\d\d)\s*q([1-4])\b", s, re.I)
+            _pl_date_quarter   = None  # (year, start_date, end_date)
+            if _pl_date_quarter_m:
+                _q_qn  = int(_pl_date_quarter_m.group(1) or _pl_date_quarter_m.group(4))
+                _q_yr  = int(_pl_date_quarter_m.group(2) or _pl_date_quarter_m.group(3))
+                _q_starts = {1: (1,1), 2: (4,1), 3: (7,1), 4: (10,1)}
+                _q_ends   = {1: (3,31), 2: (6,30), 3: (9,30), 4: (12,31)}
+                _pl_date_quarter = (_q_yr, f"{_q_yr}-{_q_starts[_q_qn][0]:02d}-{_q_starts[_q_qn][1]:02d}",
+                                    f"{_q_yr}-{_q_ends[_q_qn][0]:02d}-{_q_ends[_q_qn][1]:02d}")
             _pl_early_diag   = bool(re.search(r"\bearly.diagnos|\bscreening\b.*\bdiagnos|\bdiagnos.*\bscreening\b", s, re.I))
+            # "profiling stage" = sites currently being profiled (profiling NOT complete, but have had contact/upload)
+            # Note: exclude \bprofiling\s+sites?\b (too broad — catches F04 "profiling sites have submitted...")
+            _pl_prof_stage   = bool(re.search(
+                r"\bprofiling\s+stage\b|\bin\s+(?:the\s+)?profiling\b|\bcurrently\s+(?:in\s+)?profiling\b"
+                r"|\bprofiling\s+pipeline\b|\bhow\s+many.*profiling\b", s, re.I))
+            # "not CTS yet" modifier for profiling-complete queries
+            _pl_not_cts      = bool(re.search(r"\bnot\s+(?:yet\s+)?cts\b|\baren.?t\s+(?:yet\s+)?cts\b|\bnot\s+yet\s+(?:a\s+)?cts\b|\bcts\b.*\bnot\s+yet\b", s, re.I))
             _pl_asks_sites   = bool(re.search(r"\bsite[s]?\b|\bcenter[s]?\b|\bwhich\b|\bshow\b|\bfind\b|\blist\b|\ball\b|\bmany\b|\bhow\b", s))
             # NOT modifier: "have NOT yet", "haven't", "not yet", "without"
             _pl_not = bool(re.search(r"\bnot\s+yet\b|\bhaven.?t\b|\bnot\s+complete|\bwithout\s+profiling\b|\bunprofiled\b", s, re.I))
             # Map detected intent → Explorer filter
+            # "meeting date in Q3 2024" / "meeting date in 2024" — standalone date queries
+            _pl_meeting_date_period = bool(
+                re.search(r"\bmeeting\s+date\b|\bmeeting\s+(?:was|in|during|at)\b", s, re.I)
+                and (_pl_date_quarter or _pl_date_year or _pl_date_last_year)
+            )
             _pl_intent = (_pl_cts_valid or _pl_profiling_c or _pl_profiling_up
-                          or _pl_referral_p or _pl_no_meeting or _pl_prof_sent or _pl_early_diag)
+                          or _pl_referral_p or _pl_no_meeting or _pl_prof_sent or _pl_early_diag
+                          or _pl_prof_stage or _pl_meeting_date_period)
             if _pl_intent and _pl_asks_sites:
                 _pl_rules: list = []
                 _pl_cols: list = ["sf.Account.Name"]
@@ -6114,6 +6561,18 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _pl_rules.append({"field": "sf.C_Profiling_Complete__c", "operator": _pc_op})
                     _pl_cols.append("sf.C_Profiling_Complete__c")
                     _pl_desc_parts.append("profiling NOT complete" if _pl_not else "profiling complete")
+                    # "aren't CTS yet" → add NOT-CTS filter alongside profiling complete
+                    if _pl_not_cts:
+                        _pl_rules.append({"field": "sf.Account.INNODIA_Clinical_Trial_Site__c", "operator": "equals", "value": False})
+                        _pl_cols.append("sf.Account.INNODIA_Clinical_Trial_Site__c")
+                        _pl_desc_parts.append("not yet CTS-validated")
+                if _pl_prof_stage:
+                    # "currently in profiling stage" = questionnaire sent but profiling NOT complete
+                    _pl_rules.append({"field": "sf.C_Form_Questionnaire_sent__c", "operator": "is_not_null"})
+                    _pl_rules.append({"field": "sf.C_Profiling_Complete__c", "operator": "is_null"})
+                    _pl_cols.append("sf.C_Form_Questionnaire_sent__c")
+                    _pl_cols.append("sf.C_Profiling_Complete__c")
+                    _pl_desc_parts.append("currently in profiling stage")
                 if _pl_profiling_up:
                     _pl_rules.append({"field": "sf.Profiling_form_uploaded_to_DB__c", "operator": "is_not_null"})
                     _pl_cols.append("sf.Profiling_form_uploaded_to_DB__c")
@@ -6130,6 +6589,35 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     _pl_rules.append({"field": "sf.C_Meeting_invitation_sent__c", "operator": "is_not_null"})
                     _pl_cols.append("sf.C_Meeting_invitation_sent__c")
                     _pl_desc_parts.append("meeting invitation sent")
+                # RE6: "profiling complete in the last year" → date filter on Profiling_form_finalised_date__c
+                if _pl_profiling_c and _pl_date_last_year and not _pl_not:
+                    import datetime as _dt
+                    _one_year_ago = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+                    _pl_rules.append({"field": "sf.Profiling_form_finalised_date__c", "operator": "gte", "value": _one_year_ago})
+                    _pl_cols.append("sf.Profiling_form_finalised_date__c")
+                    _pl_desc_parts.append(f"profiling finalised after {_one_year_ago}")
+                elif _pl_profiling_c and _pl_date_year and not _pl_not:
+                    _pl_rules.append({"field": "sf.Profiling_form_finalised_date__c", "operator": "gte", "value": f"{_pl_date_year}-01-01"})
+                    _pl_rules.append({"field": "sf.Profiling_form_finalised_date__c", "operator": "lte", "value": f"{_pl_date_year}-12-31"})
+                    _pl_cols.append("sf.Profiling_form_finalised_date__c")
+                    _pl_desc_parts.append(f"profiling finalised in {_pl_date_year}")
+                # RE8: "meeting date in Q3 2024" → date range on C_Meeting_Date__c
+                if _pl_meeting_date_period and not _pl_no_meeting:
+                    _pl_cols.append("sf.C_Meeting_Date__c")
+                    if _pl_date_quarter:
+                        _, _q_start, _q_end = _pl_date_quarter
+                        _pl_rules.append({"field": "sf.C_Meeting_Date__c", "operator": "gte", "value": _q_start})
+                        _pl_rules.append({"field": "sf.C_Meeting_Date__c", "operator": "lte", "value": _q_end})
+                        _pl_desc_parts.append(f"meeting date {_q_start} – {_q_end}")
+                    elif _pl_date_last_year:
+                        import datetime as _dt
+                        _one_year_ago = (_dt.date.today() - _dt.timedelta(days=365)).isoformat()
+                        _pl_rules.append({"field": "sf.C_Meeting_Date__c", "operator": "gte", "value": _one_year_ago})
+                        _pl_desc_parts.append(f"meeting date after {_one_year_ago}")
+                    elif _pl_date_year:
+                        _pl_rules.append({"field": "sf.C_Meeting_Date__c", "operator": "gte", "value": f"{_pl_date_year}-01-01"})
+                        _pl_rules.append({"field": "sf.C_Meeting_Date__c", "operator": "lte", "value": f"{_pl_date_year}-12-31"})
+                        _pl_desc_parts.append(f"meeting date in {_pl_date_year}")
                 _pl_filter = {"logic": "AND", "rules": _pl_rules}
                 _pl_url = "http://127.0.0.1:8000/api/explorer/search"
                 _pl_ck = request.headers.get("cookie") if request else None
@@ -6167,13 +6655,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         try:
             # _COUNTRY_MAP is defined at module level (see top of file)
             asks_country_sites = bool(re.search(
-                r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all)\b", s
+                r"\b(site[s]?|center[s]?|centre[s]?|centro[s]?|show|list|find|all|many|people|individuals?|patients?)\b", s
             ))
             # Skip if this is a followup query — Phase 2 merge handles "and also Germany" etc.
             if _is_followup_prefix:
                 asks_country_sites = False
             # Skip if query is about Member institutions (not CTS sites) — let Claude route to members_search
             if re.search(r"\b(member[s]?|institution[s]?)\b", s):
+                asks_country_sites = False
+            # Skip if query is asking for nearest/closest — let nearest handler fire
+            if re.search(r"\bnearest\b|\bclosest\b|\bnear(?:\s+to)?\b", s):
                 asks_country_sites = False
             if asks_country_sites:
                 # Match ALL countries in query (deduplicate by sf_name)
@@ -6186,6 +6677,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                     "scandinavia":      ["SE", "NO", "DK"],
                     "scandinavian":     ["SE", "NO", "DK"],
                     "nordic":           ["SE", "NO", "DK", "FI", "IS"],
+                    "central europe":   ["DE", "AT", "CH", "CZ", "PL", "HU", "SK"],
+                    "eastern europe":   ["PL", "CZ", "SK", "HU", "RO", "BG", "HR", "SI", "RS", "UA"],
+                    "western europe":   ["FR", "BE", "NL", "LU", "GB", "IE", "PT", "ES"],
+                    "southern europe":  ["IT", "ES", "PT", "GR", "HR", "SI", "MT"],
                     "dach region":      ["DE", "AT", "CH"],
                     "dach":             ["DE", "AT", "CH"],
                     "benelux":          ["BE", "NL", "LU"],
@@ -6277,6 +6772,24 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         _expl_country_rules = [
                             {"field": "site.country", "operator": "equals", "value": _matched_iso}
                         ]
+                    # Base columns: always include patient/stage counts
+                    _expl_extra_cols: list = []
+                    _expl_extra_row_keys: list = []
+                    # Detect requested specific data → add corresponding columns
+                    if re.search(r"\bprofil(?:ing)?\b", s, re.I):
+                        _expl_extra_cols.append({"key": "sf.C_Profiling_Complete__c", "label": "Profiling Complete"})
+                        _expl_extra_row_keys.append("sf.C_Profiling_Complete__c")
+                    if re.search(r"\bmeeting\s+date\b", s, re.I):
+                        _expl_extra_cols.append({"key": "sf.C_Meeting_Date__c", "label": "Meeting Date"})
+                        _expl_extra_row_keys.append("sf.C_Meeting_Date__c")
+                    if re.search(r"\bfirst\s+contact\b", s, re.I):
+                        _expl_extra_cols.append({"key": "sf.C_Date_of_first_contact__c", "label": "First Contact"})
+                        _expl_extra_row_keys.append("sf.C_Date_of_first_contact__c")
+                    if re.search(r"\bcts\s+validat\b|\bcts-validat\b", s, re.I):
+                        _expl_extra_cols.append({"key": "sf.Account.INNODIA_Clinical_Trial_Site__c", "label": "CTS"})
+                        _expl_extra_row_keys.append("sf.Account.INNODIA_Clinical_Trial_Site__c")
+                    # "how many stage 2 people in italy?" — Stage 1/2 already in base columns, but ensure sorted by them
+                    _country_sort_by_s2 = bool(re.search(r"\bstage\s*2\b", s, re.I) and not re.search(r"\bstage\s*1\b", s, re.I))
                     _expl_payload = {
                         "filters": {"logic": "AND", "rules": _expl_country_rules},
                         "columns": [
@@ -6286,7 +6799,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                             "sf.C_Number_of_T1D_Patients_currently_U_18__c",
                             "sf.C_Number_of_Stage1_Individuals_followed__c",
                             "sf.C_Number_of_Stage2_Individuals_followed__c",
-                        ],
+                        ] + _expl_extra_row_keys,
                     }
                     with httpx.Client(timeout=90.0) as _c_cli:
                         _c_resp = _c_cli.post(_expl_url, json=_expl_payload, headers=_expl_hdrs)
@@ -6299,7 +6812,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                                 continue
                             seen_cids.add(aid)
                             _ed = _er.get("data") or {}
-                            rows_country.append({
+                            _base_row = {
                                 "account_id": aid,
                                 "account_name": _er.get("account_name", ""),
                                 "country": _iso2_to_sf(_er.get("country", "")) or _er.get("country", ""),
@@ -6310,8 +6823,15 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                                 "sf.C_Number_of_T1D_Patients_currently_U_18__c": _ed.get("sf.C_Number_of_T1D_Patients_currently_U_18__c"),
                                 "sf.C_Number_of_Stage1_Individuals_followed__c": _ed.get("sf.C_Number_of_Stage1_Individuals_followed__c"),
                                 "sf.C_Number_of_Stage2_Individuals_followed__c": _ed.get("sf.C_Number_of_Stage2_Individuals_followed__c"),
-                            })
-                    rows_country.sort(key=lambda r: r.get("account_name", ""))
+                            }
+                            # Add extra requested fields
+                            for _xk in _expl_extra_row_keys:
+                                _base_row[_xk] = _ed.get(_xk)
+                            rows_country.append(_base_row)
+                    if _country_sort_by_s2:
+                        rows_country.sort(key=lambda r: -(r.get("sf.C_Number_of_Stage2_Individuals_followed__c") or 0))
+                    else:
+                        rows_country.sort(key=lambda r: r.get("account_name", ""))
                     cols_country = [
                         {"key": "account_name", "label": "Site"},
                         {"key": "city", "label": "City"},
@@ -6320,7 +6840,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         {"key": "sf.C_Number_of_new_T1D_diagnosed_U_18__c", "label": "ND <18"},
                         {"key": "sf.C_Number_of_Stage1_Individuals_followed__c", "label": "Stage 1"},
                         {"key": "sf.C_Number_of_Stage2_Individuals_followed__c", "label": "Stage 2"},
-                    ]
+                    ] + _expl_extra_cols
                     tbl_country = _normalize_table_for_ui({"columns": cols_country, "rows": rows_country})
                     _country_names_str = ", ".join(n for n, _ in _matched_countries)
                     _dbg("Planner country deterministic (SF query): %d sites in %s",
@@ -6996,6 +7516,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             r"(?:within|in\s+a?\s*)(\d{2,4})\s*km\b.{0,80}\bof\s+(?:any\s+)?([\w\s',\-]{2,60}?)\s+(?:study\s+|trial\s+|clinical\s+)?(?:sites?|activit(?:y|ies))\b",
             qtxt, re.IGNORECASE,
         )
+        # Discard P1 match if extracted name is a stop word (e.g. "the", "a") — let P1c handle it
+        _P1_STOP = {"the", "a", "an", "all", "any", "some", ""}
+        if m_assign_km and m_assign_km.group(2).strip().lower() in _P1_STOP:
+            m_assign_km = None
         if not m_assign_km:
             # P1b: inverted order — "[around|near|close to] NAME within/in a N km"
             # e.g. "find all sites around BetaPreserve within 100 km"
@@ -7036,6 +7560,28 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                         def group(self, i):
                             return self._km if i == 1 else self._name
                     m_assign_km = _FakeMatch(m_assign_km_dist.group(1), m_assign_km_name.group(1))
+        if not m_assign_km:
+            # Pattern P1c: "within N km of the sites assigned/belonging/in [NAME]"
+            # e.g. "Find all sites within 150 km of the sites assigned to Safeguard"
+            _m1c = re.search(
+                r"(?:within|in\s+a?\s*)(\d{2,4})\s*km\b.{0,100}\bsites?\s+(?:assigned|belonging|in)\s+(?:to\s+)?(?:the\s+)?([\w\s'\-]{2,40}?)(?:\s*(?:\?|$|activity|assignment|study))",
+                qtxt, re.IGNORECASE,
+            )
+            if _m1c:
+                m_assign_km = _m1c
+        if not m_assign_km:
+            # Pattern P1d: "near/close to the sites involved/assigned in [NAME]" — no explicit km
+            # e.g. "What CTS sites are near the sites involved in the Safeguard activity?"
+            # Use default 100 km radius
+            _m1d = re.search(
+                r"\b(?:near|close\s+to|around)\s+(?:the\s+)?sites?\s+(?:involved|assigned|participating)\s+(?:to\s+|in\s+)?(?:the\s+)?([\w\s'\-]{2,40}?)\s*(?:activity|assignment|study|trial|\?|$)",
+                qtxt, re.IGNORECASE,
+            )
+            if _m1d:
+                class _FakeMatchP1d:
+                    def __init__(self, name): self._name = name
+                    def group(self, i): return "100" if i == 1 else self._name
+                m_assign_km = _FakeMatchP1d(_m1d.group(1).strip())
         # Country adjective → ISO2 map for queries like "Beta Preserve italian sites"
         _COUNTRY_ADJ_MAP = {
             "italian": "IT", "spanish": "ES", "french": "FR", "german": "DE",
@@ -7542,8 +8088,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         qtxt2 = (payload.messages[-1].content or "") if payload.messages else ""
         s2 = qtxt2.lower()
         # Detect "nearest N sites to <city>" or "closest N sites to <city>" or "N nearest sites to <city>"
+        # Also handle "sites near <city>" / "near the <city> airport corridor"
         m_nearest = re.search(
-            r"\b(?:nearest|closest|cerca(?:no)?s?|m[aá]s\s+cerca(?:no)?s?)\b",
+            r"\b(?:nearest|closest|cerca(?:no)?s?|m[aá]s\s+cerca(?:no)?s?|near(?:\s+to)?)\b",
             s2, re.I
         )
         if m_nearest:
@@ -7555,8 +8102,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             m_km = re.search(r"within\s+(\d+)\s*km", s2)
             max_km_det = float(m_km.group(1)) if m_km else 2000.0
             # Extract location: text after "to", "near", "of", "a" etc. (city must start with uppercase)
+            # Handles "near Frankfurt", "near the Frankfurt airport", "to London", "of Munich" etc.
             m_loc = re.search(
-                r"\b(?:to|near|of|cerca\s+de|desde|from|\ba\b)\s+([A-ZÀ-Ö×Ø-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s'\-]{1,40})"
+                r"\b(?:to|near|of|cerca\s+de|desde|from|\ba\b)\s+(?:the\s+)?([A-ZÀ-Ö×Ø-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s'\-]{1,40})"
+                r"(?:\s+(?:airport|corridor|area|region|city|center|centre|downtown|hub)\b)?"
                 r"(?:\s+(?:with|where|que|con|having|and|that|which|who)\b|\s*[.,?!]|\s*$)",
                 qtxt2,
             )

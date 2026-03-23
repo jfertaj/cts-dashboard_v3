@@ -122,25 +122,31 @@ def handle_assignment_sites(
         return None
     if re.search(r"\d+\s*km\b", s):
         return None
+    # Let km-of-assignment / nearest handler take priority for "near/close/within" queries
+    if re.search(r"\bnear(?:\s+to)?\b|\bclos(?:e|est)\b|\bwithin\b|\baround\b", s, re.I):
+        return None
+    # Let sponsor/company handler take priority
+    if re.search(r"\bsponsore?(?:d|s|ing)?\b", s, re.I):
+        return None
     # Let Phase I/II/III clinical trial handler take priority
     if re.search(r"\bphase\s*[i1]|\bphase\s*(?:ii|2)|\bphase\s*(?:iii|3)\b", s, re.I):
         return None
     if not re.search(r"\b(sites?|sitios?|centros?|all|show|ver|todos?|see|get|which|participating|involved)\b", s, re.I):
         return None
 
-    has_assignment_kw = bool(re.search(r"\bassignment\b", s, re.I))
+    has_assignment_kw = bool(re.search(r"\b(?:assignment|opportunity)\b", s, re.I))
 
     _assign_name_m = (
-        re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
-        re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
-        re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+assignment", s, re.I) or
+        re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+(?:assignment|opportunity)", s, re.I) or
+        re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+(?:assignment|opportunity)", s, re.I) or
+        # "participating in/to X" checked BEFORE "of" to avoid greedy "of the sites participating to X" false match
+        re.search(r"\bparticipating\s+(?:in|to)\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s*(?:[?,!.]|$)", s, re.I) or
+        re.search(r"\binvolved\s+in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s*(?:[?,!.]|assignment|activity|study|trial|$)", s, re.I) or
+        re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+(?:assignment|opportunity)", s, re.I) or
         re.search(
-            r"(?:assignment|estudio|actividad)\s+(?:called\s+|named\s+)?['\"]?([\w\s'\-\(\)]{2,60}?)['\"]?\s*(?:\?|$)",
+            r"(?:assignment|opportunity|estudio|actividad)\s+(?:called\s+|named\s+)?['\"]?([\w\s'\-\(\)]{2,60}?)['\"]?\s*(?:\?|$)",
             s, re.I,
-        ) or
-        # "participating in X" / "involved in X" without explicit "assignment" keyword
-        re.search(r"\bparticipating\s+in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s*(?:[?,!.]|$)", s, re.I) or
-        re.search(r"\binvolved\s+in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s*(?:[?,!.]|assignment|activity|study|trial|$)", s, re.I)
+        )
     )
     if not _assign_name_m and not has_assignment_kw:
         return None
@@ -152,11 +158,13 @@ def handle_assignment_sites(
         return None
 
     _asgn_name = _assign_name_m.group(1).strip().rstrip(".,;?")
-    _stop = {"the", "a", "an", "all", "any", "some", "some", "this", "that", "named", "called",
+    # Strip trailing "assignment"/"opportunity" keyword if captured as part of the name
+    _asgn_name = re.sub(r'\s+(?:assignment|opportunity)\s*$', '', _asgn_name, flags=re.I).strip()
+    _stop = {"the", "a", "an", "all", "any", "some", "this", "that", "named", "called",
              "any current", "current", "active", "existing", "ongoing"}
-    # Reject if any individual word in the name is a stop word (catches "any current" etc.)
+    # Reject if the full name is a stop word, or if it's suspiciously long (likely a false pattern match)
     _name_words = set(_asgn_name.lower().split())
-    if _asgn_name.lower() in _stop or _name_words & _stop or len(_asgn_name) < 2:
+    if _asgn_name.lower() in _stop or len(_name_words) > 6 or len(_asgn_name) < 2:
         return None
 
     tools.dbg("assignment-sites handler: name=%r", _asgn_name)
@@ -215,13 +223,19 @@ def handle_activity(
     _act_intent = bool(
         re.search(r"\bactivit(?:y|ies)\b", s) or
         re.search(r"\bactivites\b", s) or
-        "activit" in s
+        "activit" in s or
+        # "assignments where [company] is a sponsor" — treat as activity intent
+        (re.search(r"\bassignment[s]?\b", s) and re.search(r"\bsponsore?(?:d|s|ing)?\b", s, re.I))
     )
     # km guard
     if _act_intent and re.search(r"\d+\s*km\b", s) and re.search(
         r"actividad|within\s+\d+\s*km|\bin\s+a?\s*\d+\s*km", s
     ):
         _act_intent = False
+    # near-site guard: "near the sites involved in [activity]" → km-of-assignment handler
+    if _act_intent and re.search(r"\bnear(?:\s+to)?\b|\bclos(?:e|est)\b|\baround\b", s, re.I) and \
+            re.search(r"\bsites?\s+(?:involved|assigned|participating)\b|\binvolved\s+in\b", s, re.I):
+        return None
 
     if not _act_intent:
         return None
@@ -273,29 +287,76 @@ def handle_activity(
             )
             return {"answer": "<p>Activities with assignment counts.</p>", "table": tbl}
 
-    # 1a) Sponsor / account filter
+    # 1a) Sponsor / account filter — matches "sponsor", "sponsored by", "sponsoring"
     _sponsor_name: Optional[str] = None
-    if re.search(r"\bsponsor\b", s, re.I):
+    if re.search(r"\bsponsore?(?:d|s|ing)?\b", s, re.I):
         _m_sp = (
-            re.search(r"where\s+([\w\s\-&']{2,40}?)\s+is\s+(?:the\s+)?sponsor", s, re.I) or
+            re.search(r"where\s+([\w\s\-&']{2,40}?)\s+is\s+(?:(?:a|the)\s+)?sponsor", s, re.I) or
             re.search(r"sponsor(?:ed)?\s+by\s+([\w\s\-&']{2,40})", s, re.I) or
-            re.search(r"with\s+([\w\s\-&']{2,40}?)\s+as\s+(?:the\s+)?sponsor", s, re.I) or
-            re.search(r"([\w\s\-&']{2,40}?)\s+(?:is|as)\s+(?:the\s+)?sponsor", s, re.I)
+            re.search(r"with\s+([\w\s\-&']{2,40}?)\s+as\s+(?:(?:a|the)\s+)?sponsor", s, re.I) or
+            re.search(r"([\w\s\-&']{2,40}?)\s+(?:is|as)\s+(?:(?:a|the)\s+)?sponsor", s, re.I) or
+            re.search(r"(?:activities?|assignments?)\s+sponsor(?:ed)?\s+by\s+([\w\s\-&']{2,40})", s, re.I) or
+            re.search(r"sites?\s+involved\s+in\s+(?:activities?|assignments?)\s+sponsor(?:ed)?\s+by\s+([\w\s\-&']{2,40})", s, re.I)
         )
         if _m_sp:
-            _cand_sp = _m_sp.group(1).strip().rstrip(".,;")
+            _cand_sp = _m_sp.group(1).strip().rstrip(".,;?")
             _stop_sp = {"the", "a", "an", "all", "any", "some", "this", "that", "their"}
             if _cand_sp.lower() not in _stop_sp and len(_cand_sp) >= 2:
                 _sponsor_name = _cand_sp
     if _sponsor_name:
-        table = tools.tool_list_all_activities(sf, account_name_like=_sponsor_name)
-        rows = table.get("rows") or []
+        # Find activities by sponsor
+        act_tbl = tools.tool_list_all_activities(sf, account_name_like=_sponsor_name)
+        act_rows = act_tbl.get("rows") or []
+        if not act_rows:
+            return {"answer": f"<p>No activities found with sponsor matching <em>{_sponsor_name}</em>.</p>", "table": act_tbl}
+        # If query asks for sites ("how many sites", "which sites"), fetch sites per activity
+        _wants_sites = bool(re.search(r"\bsite[s]?\b|\bhow\s+many\b|\bwhich\b|\binvolved\b", s, re.I))
+        if _wants_sites:
+            # Collect unique sites across all sponsor activities using tool_sites_by_activity
+            _seen_aids: set = set()
+            _site_rows: list = []
+            for _ar in act_rows:
+                _aname = _ar.get("activity_name") or ""
+                if not _aname:
+                    continue
+                _st = tools.tool_sites_by_activity(sf, name=_aname)
+                for _sr in (_st.get("rows") or []):
+                    _aid = str(_sr.get("account_id") or "")
+                    if _aid and _aid not in _seen_aids:
+                        _seen_aids.add(_aid)
+                        _site_rows.append(_sr)
+            _act_names_str = ", ".join(
+                [f"<em>{r.get('activity_name','')}</em>" for r in act_rows]
+            )
+            _site_tbl = _st.__class__({  # reuse normalized structure
+                "columns": [
+                    {"key": "site", "label": "Site"},
+                    {"key": "city", "label": "City"},
+                    {"key": "country", "label": "Country"},
+                    {"key": "activity_name", "label": "Activity"},
+                ],
+                "rows": _site_rows,
+            }) if False else {"columns": [
+                {"key": "account_name", "label": "Site"},
+                {"key": "city", "label": "City"},
+                {"key": "country", "label": "Country"},
+                {"key": "activity_name", "label": "Activity"},
+            ], "rows": _site_rows}
+            return {
+                "answer": (
+                    f"<p>Found <strong>{len(_site_rows)}</strong> unique site(s) involved in "
+                    f"{len(act_rows)} activit{'y' if len(act_rows)==1 else 'ies'} "
+                    f"sponsored by <em>{_sponsor_name}</em>: {_act_names_str}.</p>"
+                ),
+                "table": _site_tbl,
+            }
+        # Otherwise just return the activity list
         ans = (
-            f"Found <strong>{len(rows)}</strong> "
-            f"activit{'y' if len(rows) == 1 else 'ies'} "
+            f"Found <strong>{len(act_rows)}</strong> "
+            f"activit{'y' if len(act_rows) == 1 else 'ies'} "
             f"where the sponsor / account matches <em>{_sponsor_name}</em>."
         )
-        return {"answer": f"<p>{ans}</p>", "table": table}
+        return {"answer": f"<p>{ans}</p>", "table": act_tbl}
 
     # 1b) is_list_activities classification
     has_list_word = bool(re.search(r"\b(list|show|all|what|which|lista|listar|mostrar|muestra)\b", s))

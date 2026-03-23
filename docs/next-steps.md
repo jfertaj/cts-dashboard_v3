@@ -146,6 +146,30 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
+## 16. Deploy demo-question handler fixes to ECS — READY TO DEPLOY (2026-03-20)
+
+**Observation (2026-03-20):** All fixable demo questions now passing on local backend. Full 79-question suite result:
+
+**Confirmed working (72/79):** E01–E10, C01–C05, S01–S04, Q01–Q04, Q06–Q08, Q10, M01–M11, G01–G06, P01–P05, A01–A06, F01–F05, X01–X04, MB1–MB4, MB6, MB8
+
+**Data gaps — confirmed empty in prod (7/79):** S05 (C_Referral_Clinical_Partner__c unpopulated), Q05/Q11–Q14 (qual fields not in data), MB7 (no site in Brest — verified across all 195 CTS sites and 247 member SubAccounts), M11 (no assignment named "Germany")
+
+**Structural gaps (1/79):** MB5 (no Germany Research Lab members in prod)
+
+**Fixes applied in 2026-03-20 session:**
+- `moby_handlers.py`: near guard in `handle_assignment_sites` + `handle_activity` for G06; sponsor bail-out in `handle_assignment_sites`; `\bsponsore?(?:d|s|ing)?\b` regex fix in `handle_activity`; sponsor handler rewired to fetch sites across all sponsor activities for "sites" intent (A02)
+- `ai_chat.py`: ND handler LIMIT fix (E07), T1D threshold in qual handler (Q03), profiling NOT-CTS (F01), profiling stage filter `C_Form_Questionnaire_sent__c` (F02), Stage1+NOT-assignment Explorer handler (X02), km-of-assignment P1c/P1d patterns + P1 stop-word discard (M09/G06)
+
+**Additional Sanofi sponsor fixes (2026-03-20 session 3):**
+- `moby_handlers.py`: sponsor regex `(?:the\s+)?sponsor` → `(?:(?:a|the)\s+)?sponsor` (was not matching "is **a** sponsor"); `_act_intent` extended to also fire on "assignment" + "sponsor" keyword combo
+- `ai_chat.py`: `_asn_is_sponsor` guard added to assignment Explorer handler so "assignments where X is a sponsor" no longer returns generic unfiltered active-assignment results
+
+**Files:** `backend/app/routers/ai_chat.py`, `backend/app/routers/moby_handlers.py`. Run `python scripts/test_demo_questions.py` with fresh SF session cookie before deploying.
+
+**Demo suite expanded (2026-03-20):** `scripts/test_demo_questions.py` grew from 79 → **116 questions** with 5 new sections: `OC` (3, org-level member contacts), `MAP` (8, map/geographic visual queries), `QU` (7, qualification upload/data quality), `RE` (8, reporting & export), `ST` (11, cross-functional/strategic feasibility + network planning + budget). Run new sections with `--section OC,MAP,QU,RE,ST`.
+
+---
+
 ## 12. Commit or discard the untracked root-level deploy script before merging `dev` → `main`
 
 **Observation:** `git status` on `dev` shows `builld_push_ECR_and_deploy_images_in_ECS_sso_profile_juan.sh` (note the typo: "builld") as untracked in the repository root. The tracked deploy scripts are `scripts/deploy.sh` (legacy) and `scripts/deploy_build_push_and_migrate.sh` (current, used per MEMORY.md). The untracked root file appears to be a personal one-off variant.
