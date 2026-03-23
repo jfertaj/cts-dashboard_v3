@@ -6,9 +6,10 @@ container (injected callables). This avoids circular imports while keeping
 handlers testable: pass mock tools in tests.
 
 Handler priority order (same as _try_planner):
-  1. handle_followup_activity_sponsor  — sponsor follow-up (pre-activity-intent)
-  2. handle_assignment_sites           — "sites in/belonging to X assignment"
-  3. handle_activity                   — all activity/enrollment queries
+  1. handle_followup_activity_sponsor       — sponsor follow-up (pre-activity-intent)
+  1b. handle_multi_activity_intersection   — "sites in BOTH X and Y" (must precede 2)
+  2. handle_assignment_sites               — "sites in/belonging to X assignment"
+  3. handle_activity                       — all activity/enrollment queries
 
 All functions return Optional[dict] — None means "I didn't handle this".
 """
@@ -99,6 +100,131 @@ def handle_followup_activity_sponsor(
         f"where the sponsor / account matches <em>{_cand_fu}</em>."
     )
     return {"answer": f"<p>{ans}</p>", "table": table}
+
+
+# ── Handler 1b: Multi-activity intersection ────────────────────────────────────
+
+def handle_multi_activity_intersection(
+    ctx: HandlerContext,
+    tools: ActivityTools,
+) -> Optional[Dict[str, Any]]:
+    """
+    Handles "sites in BOTH activity A AND activity B" intersection queries.
+
+    MUST fire before handle_assignment_sites: without this handler, that function
+    would silently extract only the first activity name and return a wrong result.
+
+    Approach: two tool_sites_by_activity calls + Python set intersection.
+    A single SOQL WHERE with AND on two different C_Opportunity_Name__r.Name
+    values ALWAYS returns 0 rows — each Assignment__c row belongs to exactly
+    one activity.
+    """
+    s = ctx.s
+    sf = ctx.sf
+
+    if not sf:
+        return None
+
+    # Require an explicit intersection-intent signal (keeps false-positive rate near zero)
+    if not re.search(
+        r"\bboth\b|\band\s+also\b|\balso\s+(?:in|participat)|\bintersect\b|\bcommon\b",
+        s, re.I,
+    ):
+        return None
+    # Require site / activity context
+    if not re.search(r"\bsite[s]?\b|\bactivit|\bassignment|\bparticipat|\binvolved", s, re.I):
+        return None
+
+    _name_a: Optional[str] = None
+    _name_b: Optional[str] = None
+
+    # Pattern A: "both [the] NAME [activity/assignment] and [the] NAME [activity/assignment]"
+    _m = re.search(
+        r"\bboth\s+(?:the\s+)?([\w\s'\-]{2,40}?)\s*(?:activity|assignment)?\s*"
+        r"(?:and|,)\s+(?:the\s+)?([\w\s'\-]{2,40}?)\s*(?:activity|assignment|\?|$)",
+        s, re.I,
+    )
+    if _m:
+        _name_a, _name_b = _m.group(1).strip(), _m.group(2).strip()
+
+    if not (_name_a and _name_b):
+        # Pattern B: "in [the] NAME [activity/assignment] that [also] [participate] in [the] NAME"
+        _m = re.search(
+            r"\bin\s+(?:the\s+)?([\w\s'\-]{2,40}?)\s*(?:activity|assignment)?\s+"
+            r"(?:that\s+(?:also\s+)?(?:participat[a-z]+\s+in\b|(?:are\s+)?in\b)|"
+            r"and\s+also\s+(?:participat[a-z]+\s+in\b|in\b)|"
+            r",\s*also\s+(?:participat[a-z]+\s+in\b|in\b))"
+            r"\s+(?:the\s+)?([\w\s'\-]{2,40}?)\s*(?:activity|assignment|\?|$)",
+            s, re.I,
+        )
+        if _m:
+            _name_a, _name_b = _m.group(1).strip(), _m.group(2).strip()
+
+    if not (_name_a and _name_b):
+        return None
+
+    # Cleanup both names: strip trailing keywords, punctuation, stop words
+    _stop = {"the", "a", "an", "both", "any", "all", "this", "that", "named", "called"}
+    for _orig, _attr in ((_name_a, "a"), (_name_b, "b")):
+        _n = re.sub(r'\s+(?:assignment|opportunity|activity)\s*$', '', _orig, flags=re.I).strip()
+        _n = _n.rstrip(".,;?")
+        if _n.lower() in _stop or len(_n) < 2:
+            return None
+        if _attr == "a":
+            _name_a = _n
+        else:
+            _name_b = _n
+
+    if _name_a.lower() == _name_b.lower():
+        return None  # degenerate: same name twice
+
+    tools.dbg("multi-activity intersection: %r ∩ %r", _name_a, _name_b)
+    try:
+        tbl_a = tools.tool_sites_by_activity(sf, name=_name_a)
+        tbl_b = tools.tool_sites_by_activity(sf, name=_name_b)
+        rows_a = tbl_a.get("rows") or []
+        rows_b = tbl_b.get("rows") or []
+
+        ids_a = {r.get("account_id") for r in rows_a if r.get("account_id")}
+        ids_b = {r.get("account_id") for r in rows_b if r.get("account_id")}
+        ids_common = ids_a & ids_b
+
+        rows_common = [r for r in rows_a if r.get("account_id") in ids_common]
+
+        if rows_common:
+            ans = (
+                f"Found <strong>{len(rows_common)}</strong> site(s) participating in "
+                f"both <em>{_name_a}</em> and <em>{_name_b}</em>."
+            )
+        elif not rows_a:
+            ans = (
+                f"No sites found for <em>{_name_a}</em> — check the exact name in Salesforce. "
+                f"<em>{_name_b}</em> has {len(rows_b)} site(s)."
+            )
+        elif not rows_b:
+            ans = (
+                f"No sites found for <em>{_name_b}</em> — check the exact name in Salesforce. "
+                f"<em>{_name_a}</em> has {len(rows_a)} site(s)."
+            )
+        else:
+            ans = (
+                f"No sites participate in both <em>{_name_a}</em> ({len(rows_a)} site(s)) "
+                f"and <em>{_name_b}</em> ({len(rows_b)} site(s)) — the two activities share no common sites."
+            )
+
+        tbl_out = {
+            "columns": tbl_a.get("columns") or [
+                {"key": "account_id", "label": "Account Id"},
+                {"key": "site", "label": "Account Name"},
+                {"key": "country", "label": "Country"},
+                {"key": "city", "label": "City"},
+            ],
+            "rows": rows_common,
+        }
+        return {"answer": f"<p>{ans}</p>", "table": tbl_out}
+    except Exception as _e:
+        tools.dbg("multi-activity intersection error: %s", _e)
+        return None  # fall through to handle_assignment_sites
 
 
 # ── Handler 2: Assignment sites ────────────────────────────────────────────────

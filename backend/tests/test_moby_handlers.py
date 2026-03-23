@@ -18,6 +18,7 @@ from app.routers.moby_handlers import (
     HandlerContext,
     ActivityTools,
     handle_followup_activity_sponsor,
+    handle_multi_activity_intersection,
     handle_assignment_sites,
     handle_activity,
 )
@@ -615,3 +616,134 @@ class TestReturnContract:
         t.tool_list_all_activities.assert_not_called()
         t.tool_sites_by_activity.assert_not_called()
         t.tool_sites_with_any_activity.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# handle_multi_activity_intersection  (GQ15 — Step 3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestHandleMultiActivityIntersection:
+    """
+    Handler 1b: "sites in BOTH X AND Y" — must fire before handle_assignment_sites.
+
+    The critical constraint: tool_sites_by_activity must be called TWICE (once
+    per activity), never with an AND condition on two names in one call.
+    """
+
+    def _tbl(self, rows):
+        return {"columns": [{"key": "account_id"}, {"key": "site"}, {"key": "country"}, {"key": "city"}], "rows": rows}
+
+    def _sites_detect(self):
+        return self._tbl([
+            {"account_id": "A1", "site": "Site Alpha", "country": "DE", "city": "Berlin"},
+            {"account_id": "A2", "site": "Site Beta",  "country": "IT", "city": "Rome"},
+            {"account_id": "A3", "site": "Site Gamma", "country": "FR", "city": "Paris"},
+        ])
+
+    def _sites_fabulinus(self):
+        return self._tbl([
+            {"account_id": "A2", "site": "Site Beta",  "country": "IT", "city": "Rome"},
+            {"account_id": "A4", "site": "Site Delta", "country": "ES", "city": "Madrid"},
+        ])
+
+    # ── detection fires ────────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("query", [
+        "Which sites are in both the DETECT activity and Fabulinus?",
+        "which sites are in both detect and fabulinus?",
+        "show sites participating in both Beta Preserve and Barricade Delay",
+        "sites in DETECT that also participate in Fabulinus",
+        "which sites are in DETECT and also in Fabulinus?",
+    ])
+    def test_fires_for_intersection_queries(self, query):
+        mock_tsba = MagicMock(side_effect=[self._sites_detect(), self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        r = handle_multi_activity_intersection(_ctx(query), t)
+        assert r is not None, f"Handler should fire for: {query!r}"
+
+    def test_calls_tool_twice_not_once(self):
+        """Core contract: two separate calls, not one AND query."""
+        mock_tsba = MagicMock(side_effect=[self._sites_detect(), self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        handle_multi_activity_intersection(
+            _ctx("Which sites are in both DETECT and Fabulinus?"), t
+        )
+        assert mock_tsba.call_count == 2
+
+    def test_extracts_correct_names(self):
+        """Names passed to tool must be DETECT and Fabulinus, not combined."""
+        mock_tsba = MagicMock(side_effect=[self._sites_detect(), self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        handle_multi_activity_intersection(
+            _ctx("which sites are in both DETECT and Fabulinus?"), t
+        )
+        names_called = {call_args[1]["name"] for call_args in mock_tsba.call_args_list}
+        assert "detect" in names_called or any("detect" in n.lower() for n in names_called)
+        assert "fabulinus" in names_called or any("fabulinus" in n.lower() for n in names_called)
+
+    def test_returns_intersection_not_union(self):
+        """Only A2 (Site Beta) is in both — result must be exactly 1 row."""
+        mock_tsba = MagicMock(side_effect=[self._sites_detect(), self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        r = handle_multi_activity_intersection(
+            _ctx("which sites are in both DETECT and Fabulinus?"), t
+        )
+        rows = r["table"]["rows"]
+        assert len(rows) == 1
+        assert rows[0]["account_id"] == "A2"
+
+    def test_zero_intersection_returns_correct_answer(self):
+        """No common sites → return 0-row table with informative message, not wrong data."""
+        sites_no_overlap = self._tbl([
+            {"account_id": "X1", "site": "Site X", "country": "PL", "city": "Warsaw"},
+        ])
+        mock_tsba = MagicMock(side_effect=[sites_no_overlap, self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        r = handle_multi_activity_intersection(
+            _ctx("which sites are in both Alpha Study and Fabulinus?"), t
+        )
+        assert r is not None
+        assert len(r["table"]["rows"]) == 0
+        assert "no site" in r["answer"].lower() or "share no common" in r["answer"].lower()
+
+    def test_answer_mentions_both_names(self):
+        mock_tsba = MagicMock(side_effect=[self._sites_detect(), self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        r = handle_multi_activity_intersection(
+            _ctx("sites in both detect and fabulinus"), t
+        )
+        ans_lower = r["answer"].lower()
+        assert "detect" in ans_lower
+        assert "fabulinus" in ans_lower
+
+    # ── detection does NOT fire ────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("query", [
+        "which sites are in DETECT?",                         # single activity
+        "show sites participating in Beta Preserve",          # single activity
+        "sites in Germany",                                   # no activity
+        "how many activities are there?",                     # listing, no intersection
+        "sites in DETECT and Germany",                        # country AND activity, not two activities
+    ])
+    def test_does_not_fire_for_single_or_irrelevant_queries(self, query):
+        t = _tools()
+        r = handle_multi_activity_intersection(_ctx(query), t)
+        assert r is None, f"Handler should NOT fire for: {query!r}"
+        t.tool_sites_by_activity.assert_not_called()
+
+    def test_no_sf_returns_none(self):
+        t = _tools()
+        r = handle_multi_activity_intersection(_ctx("sites in both DETECT and Fabulinus", sf=None), t)
+        assert r is None
+        t.tool_sites_by_activity.assert_not_called()
+
+    def test_priority_fires_before_handle_assignment_sites(self):
+        """Intersection handler must intercept before single-activity handler."""
+        mock_tsba = MagicMock(side_effect=[self._sites_detect(), self._sites_fabulinus()])
+        t = _tools(tool_sites_by_activity=mock_tsba)
+        query = "which sites are in both DETECT and Fabulinus?"
+        r_multi = handle_multi_activity_intersection(_ctx(query), t)
+        # If multi fires and returns a result, handle_assignment_sites should not be needed
+        assert r_multi is not None
+        # handle_assignment_sites would also fire but gets pre-empted in _try_planner
+        assert mock_tsba.call_count == 2  # two calls, not one

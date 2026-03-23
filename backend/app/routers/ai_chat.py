@@ -38,6 +38,7 @@ from app.routers.moby_handlers import (
     HandlerContext as _HandlerContext,
     ActivityTools as _ActivityTools,
     handle_followup_activity_sponsor,
+    handle_multi_activity_intersection,
     handle_assignment_sites,
     handle_activity,
 )
@@ -5674,6 +5675,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 dbg=_dbg,
             )
             _r = handle_followup_activity_sponsor(_act_ctx, _act_tools)
+            if _r is not None:
+                return _r
+            _r = handle_multi_activity_intersection(_act_ctx, _act_tools)
             if _r is not None:
                 return _r
             _r = handle_assignment_sites(_act_ctx, _act_tools)
