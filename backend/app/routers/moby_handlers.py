@@ -380,7 +380,7 @@ def handle_activity(
         countries: List[str] = []
         if m_c:
             raw = m_c.group(1).strip()
-            raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
+            raw = re.sub(r"\b(and|or|y|e)\b", ",", raw, flags=re.I)
             raw = raw.replace("/", ",").replace("&", ",")
             countries = [p.strip() for p in raw.split(",") if p.strip()]
         m_q = re.search(r"['\"]([^'\"]{3,})['\"]", s)
@@ -607,7 +607,7 @@ def handle_activity(
         countries_b: List[str] = []
         if m_c:
             raw = m_c.group(1).strip()
-            raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
+            raw = re.sub(r"\b(and|or|y|e)\b", ",", raw, flags=re.I)
             raw = raw.replace("/", ",").replace("&", ",")
             countries_b = [p.strip() for p in raw.split(",") if p.strip()]
         m_q = re.search(r"['\"]([^'\"]{3,})['\"]", s)
@@ -757,7 +757,7 @@ def handle_activity(
     countries2: List[str] = []
     if m_c2:
         raw = m_c2.group(1).strip()
-        raw = re.sub(r"\b(and|y|e)\b", ",", raw, flags=re.I)
+        raw = re.sub(r"\b(and|or|y|e)\b", ",", raw, flags=re.I)
         raw = raw.replace("/", ",").replace("&", ",")
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         countries2 = [p.title() for p in parts]
