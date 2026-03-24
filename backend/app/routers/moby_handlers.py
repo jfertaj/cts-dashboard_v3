@@ -815,6 +815,59 @@ def handle_activity(
         rows12b = tbl12b.get("rows") or []
         return {"answer": f"<p>Found <strong>{len(rows12b)}</strong> activities with site participation counts.</p>", "table": tbl12b}
 
+    # 12c) Multi-country AND coverage (GQ18):
+    #   "which activities have sites in Germany, France AND Italy?"
+    #   Requires 2+ countries joined by AND (not OR) + activity coverage intent.
+    #   Uses tool_activities_with_countries which returns {activity → countries_set},
+    #   then Python set filter: required_countries ⊆ activity_countries.
+    #   Must fire before sub-path 13 (fallthrough) which uses OR semantics.
+    #
+    #   Own country extraction (not countries2) because m_c2 uses '$' which fails
+    #   when the query ends with '?' — the most common case for GQ18-style questions.
+    _s12c = s.rstrip("?!.")
+    _m_awc = re.search(r"\bin\s+([a-zA-ZÀ-ÿ'\- ,/&]+)$", _s12c)
+    _countries12c: List[str] = []
+    if _m_awc:
+        _raw12c = _m_awc.group(1).strip()
+        _raw12c = re.sub(r"\b(and|y|e)\b", ",", _raw12c, flags=re.I)
+        _raw12c = _raw12c.replace("/", ",").replace("&", ",")
+        _countries12c = [p.strip().title() for p in _raw12c.split(",") if p.strip()]
+    _is_multi_country_and_coverage = (
+        len(_countries12c) >= 2
+        and not re.search(r"\bor\b", s, re.I)
+        and re.search(r"\bhave\b|\bwith\b|\bcontain\b|\bhaving\b|\bcovering\b|\bparticipat", s, re.I)
+    )
+    if _is_multi_country_and_coverage:
+        tbl_awc = tools.tool_activities_with_countries(sf)
+        rows_awc = tbl_awc.get("rows") or []
+        required = {c.strip().lower() for c in _countries12c}
+        filtered_awc = []
+        for _row in rows_awc:
+            cs = _row.get("countries") or ""
+            if cs == "(no sites)":
+                continue
+            row_countries = {c.strip().lower() for c in cs.split(",") if c.strip()}
+            if required <= row_countries:  # all required countries present (AND semantics)
+                filtered_awc.append(_row)
+        _country_list = ", ".join(_countries12c)
+        if filtered_awc:
+            _n = len(filtered_awc)
+            _ans_awc = (
+                f"Found <strong>{_n}</strong> activit{'y' if _n == 1 else 'ies'} "
+                f"with sites in all of: <em>{_country_list}</em>."
+            )
+        else:
+            _ans_awc = f"No activities have sites in all of: <em>{_country_list}</em>."
+        _tbl_awc_out = {
+            "columns": tbl_awc.get("columns") or [
+                {"key": "opportunity_name", "label": "Activity"},
+                {"key": "countries", "label": "Countries"},
+                {"key": "site_count", "label": "Site Count"},
+            ],
+            "rows": filtered_awc,
+        }
+        return {"answer": f"<p>{_ans_awc}</p>", "table": _tbl_awc_out}
+
     # 13) fallthrough: sites with any activity
     table = tools.tool_sites_with_any_activity(sf, countries=countries2 or None)
     rows = table.get("rows") or []
