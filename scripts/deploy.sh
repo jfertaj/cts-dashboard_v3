@@ -55,7 +55,7 @@ if [ ! -f "$BACKEND_DIR/.env" ]; then
   echo "❌  backend/.env not found. Run: python3 scripts/gen_local_env.py"
   exit 1
 fi
-VITE_GOOGLE_MAPS_API_KEY=$(grep '^GOOGLE_MAPS_API_KEY=' "$BACKEND_DIR/.env" | head -1 | cut -d= -f2 | tr -d '"' || echo "")
+VITE_GOOGLE_MAPS_API_KEY=$(grep '^GOOGLE_MAPS_API_KEY=' "$BACKEND_DIR/.env" | head -1 | cut -d= -f2 | tr -d "\"'" || echo "")
 
 log() { printf "\n\033[1;34m==> %s\033[0m\n" "$*"; }
 ok()  { printf "\033[1;32m✓  %s\033[0m\n" "$*"; }
