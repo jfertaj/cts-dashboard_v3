@@ -55,7 +55,7 @@ ISO2_TO_DISPLAY: Dict[str, str] = {
     "ME": "Montenegro",
     "MK": "North Macedonia",
     "MT": "Malta",
-    "NL": "Netherlands",
+    "NL": "The Netherlands",
     "NO": "Norway",
     "PL": "Poland",
     "PT": "Portugal",

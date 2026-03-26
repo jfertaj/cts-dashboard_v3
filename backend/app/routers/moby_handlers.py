@@ -178,6 +178,18 @@ def handle_multi_activity_intersection(
     if _name_a.lower() == _name_b.lower():
         return None  # degenerate: same name twice
 
+    # Guard: clinical stage labels are not activity names — let Stage1/Stage2 handler handle these
+    _stage_pat = re.compile(r"^stage\s*[12]\b|^stage\s*(?:one|two)\b", re.I)
+    if _stage_pat.match(_name_a) or _stage_pat.match(_name_b):
+        return None
+
+    # Guard: clinical capability phrases are not activity names — let qual/SF handler handle these
+    _clinical_pat = re.compile(
+        r"\b(hla|typing|overnight|pharmacy|biobank|t1d|patients|per\s+year)\b", re.I
+    )
+    if _clinical_pat.search(_name_a) or _clinical_pat.search(_name_b):
+        return None
+
     tools.dbg("multi-activity intersection: %r ∩ %r", _name_a, _name_b)
     try:
         tbl_a = tools.tool_sites_by_activity(sf, name=_name_a)
@@ -291,6 +303,24 @@ def handle_assignment_sites(
     # Reject if the full name is a stop word, or if it's suspiciously long (likely a false pattern match)
     _name_words = set(_asgn_name.lower().split())
     if _asgn_name.lower() in _stop or len(_name_words) > 6 or len(_asgn_name) < 2:
+        return None
+    # Guard: reject "in [Country]" — country/region is a geographic filter, not an activity name
+    _COUNTRY_NAMES = {
+        "germany", "france", "italy", "spain", "belgium", "netherlands", "austria",
+        "portugal", "poland", "switzerland", "sweden", "denmark", "norway", "finland",
+        "ireland", "czech republic", "hungary", "romania", "bulgaria", "croatia",
+        "slovenia", "serbia", "slovakia", "lithuania", "latvia", "estonia", "uk",
+        "united kingdom", "greece", "turkey", "ukraine", "europe", "eastern europe",
+        "western europe", "central europe", "scandinavia", "nordics",
+    }
+    _name_lower = _asgn_name.lower().strip()
+    # "in germany", "in France", etc.
+    if re.match(r"^in\s+", _name_lower):
+        _after_in = re.sub(r"^in\s+", "", _name_lower)
+        if _after_in in _COUNTRY_NAMES:
+            return None
+    # bare country name captured as assignment name
+    if _name_lower in _COUNTRY_NAMES:
         return None
 
     tools.dbg("assignment-sites handler: name=%r", _asgn_name)
@@ -785,8 +815,9 @@ def handle_activity(
             "visualization": viz_act.get("visualization"),
         }
 
-    # 12) unquoted "belong to X activity" / "in X activity"
+    # 12) unquoted "belong to X activity" / "in X activity" / "assigned to X activity"
     _act_belong_m = (
+        re.search(r"\bassigned\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
         re.search(r"belong(?:s|ing)?\s+to\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
         re.search(r"in\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or
         re.search(r"of\s+(?:the\s+)?([\w\s'\-\(\)]{2,60}?)\s+activit", s, re.I) or

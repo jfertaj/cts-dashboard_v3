@@ -4,6 +4,22 @@ These items are directly supported by observations in the code. Each entry state
 
 ---
 
+## 0. ACTIVE INCIDENT — Google Maps Distance Matrix cost spike (P0)
+
+**All other development is paused until the P0 items below are resolved.**
+
+Full details, evidence, and checklist: **`docs/incident-distance-matrix-cost.md`**
+
+Summary: the `within-drive-km` and `nearby-multi` endpoints generated ~186,000 billable Distance Matrix elements in March 2026 (~$730 unexpected cost). A hard guard rail (`MAX_DISTANCE_MATRIX_ELEMENTS = 2000`) was added on 2026-03-25 as stop-gap. Remaining P0 work:
+
+- [ ] Shared Distance Matrix cache (replace per-worker `_dm_cache` with file/SQLite/Redis)
+- [ ] Increase cache TTL from 1h to 24–48h
+- [x] ~~Add haversine pre-filter to `within-drive-km`~~ — DONE (2026-03-25). Both endpoints now have haversine sort + top-N cap (`DM_CANDIDATES_PER_BASE=20`)
+- [ ] Cap Moby's Distance Matrix usage in `ai_chat.py`
+- [ ] Set Google Cloud daily quota on Distance Matrix API
+
+---
+
 ## 1. ~~Remove dead OpenAI client instantiation from `ai_chat.py`~~ — DONE (2026-03-17)
 
 **Observation:** Line 73 of `ai_chat.py`:

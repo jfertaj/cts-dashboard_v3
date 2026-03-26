@@ -58,6 +58,12 @@ explorer_router   = APIRouter(prefix="/api/explorer",   tags=["explorer"])
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 
+# Guard rail: max billable elements (origins × destinations) per Distance Matrix request.
+# Prevents runaway costs from wide searches.  Override via env var if needed.
+MAX_DISTANCE_MATRIX_ELEMENTS = int(os.getenv("MAX_DISTANCE_MATRIX_ELEMENTS", "2000"))
+# Max candidates per base to send to Distance Matrix after haversine pre-filter
+DM_CANDIDATES_PER_BASE = int(os.getenv("DM_CANDIDATES_PER_BASE", "20"))
+
 # ======================= CARGA DE CAMPOS (JSON CURADO SF) =======================
 
 FIELDS_PATH = Path(__file__).parent.parent / "config" / "fields_opportunity_curated.json"
@@ -4196,15 +4202,16 @@ async def explorer_search_within_drive_km(
         country = a.get("country") or s.get("country")
         coords_by_acc[aid] = {"lat": lat, "lng": lng, "city": city, "country": country}
 
-    # Geocoding si faltan coords
-    for aid, info in list(coords_by_acc.items()):
-        if (info.get("lat") is None or info.get("lng") is None) and (info.get("city") or info.get("country")):
-            glat, glng = await _geocode_city_country(info.get("city"), info.get("country"))
-            if glat is not None and glng is not None:
-                info["lat"], info["lng"] = glat, glng
-                coords_by_acc[aid] = info
-            else:
-                log.debug("within-drive-km: no coords for account=%s city=%s country=%s", aid, info.get("city"), info.get("country"))
+    # Candidate coords: use only what's already in SF / local DB — NO geocoding for candidates.
+    # Exclude candidates without coords and log how many were dropped.
+    _n_before_coord_filter = len(coords_by_acc)
+    _excluded_no_coords = {aid for aid, info in coords_by_acc.items()
+                          if info.get("lat") is None or info.get("lng") is None}
+    for aid in _excluded_no_coords:
+        del coords_by_acc[aid]
+    if _excluded_no_coords:
+        log.info("within-drive-km: excluded %s candidates without coords (no geocoding for candidates)",
+                 len(_excluded_no_coords))
 
     # -------- base (coords) --------
     acc_map_base = _build_account_map(sf, [base_account_id])
@@ -4228,18 +4235,49 @@ async def explorer_search_within_drive_km(
         raise HTTPException(status_code=404, detail="Base account has no geolocation")
     log.info("within-drive-km: base coords lat=%s lng=%s city=%s country=%s", lat0, lng0, base_info.get("city"), base_info.get("country"))
 
-    # -------- 1) Vecinos por distancia (SIN filtros) --------
-    dests: List[Tuple[float, float]] = []
-    dest_accs: List[str] = []
+    # -------- 1) Vecinos por distancia — haversine pre-filter --------
+    # Collect all candidates with valid coords
+    _all_candidates: List[Tuple[str, float, float]] = []
     for acc, info in coords_by_acc.items():
         if acc == str(base_account_id):
             continue
         lat_i, lng_i = info.get("lat"), info.get("lng")
         if lat_i is None or lng_i is None:
             continue
-        dests.append((float(lat_i), float(lng_i)))
-        dest_accs.append(acc)
-    log.info("within-drive-km: candidate coords=%s", len(dest_accs))
+        _all_candidates.append((acc, float(lat_i), float(lng_i)))
+    _n_total_candidates = len(_all_candidates)
+
+    # Haversine pre-filter: compute straight-line distance, sort, keep top N
+    _hav_scored = [
+        (acc, lat_i, lng_i, _haversine_km(float(lat0), float(lng0), lat_i, lng_i))
+        for acc, lat_i, lng_i in _all_candidates
+    ]
+    _hav_scored.sort(key=lambda x: x[3])
+    _hav_scored = _hav_scored[:DM_CANDIDATES_PER_BASE]
+
+    dests: List[Tuple[float, float]] = [(lat_i, lng_i) for _, lat_i, lng_i, _ in _hav_scored]
+    dest_accs: List[str] = [acc for acc, _, _, _ in _hav_scored]
+
+    log.info(
+        "within-drive-km: total_candidates=%s after_haversine_prefilter=%s (top %s nearest)",
+        _n_total_candidates, len(dest_accs), DM_CANDIDATES_PER_BASE,
+    )
+
+    # Guard rail: reject if billable elements exceed safety limit
+    dm_elements = 1 * len(dests)  # 1 origin × N destinations
+    if dm_elements > MAX_DISTANCE_MATRIX_ELEMENTS:
+        log.warning(
+            "within-drive-km: BLOCKED — %s billable elements (1 base × %s dests) exceeds limit %s",
+            dm_elements, len(dests), MAX_DISTANCE_MATRIX_ELEMENTS,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Search too broad: {dm_elements} Distance Matrix elements "
+                f"(limit {MAX_DISTANCE_MATRIX_ELEMENTS}). "
+                f"Reduce max_km or add filters to narrow candidates."
+            ),
+        )
 
     dists_km = await _drive_km_matrix((float(lat0), float(lng0)), dests)
     valid = [km for km in dists_km if km is not None]
@@ -4920,14 +4958,16 @@ async def explorer_search_nearby_multi(
         lng = a.get("lng") if a.get("lng") is not None else s.get("lng")
         coords_by_acc[aid] = {"lat": lat, "lng": lng, "city": a.get("city") or s.get("city"), "country": a.get("country") or s.get("country")}
 
-    # geocode missing coords
-    for aid, info in list(coords_by_acc.items()):
-        if (info.get("lat") is None or info.get("lng") is None) and (info.get("city") or info.get("country")):
-            glat, glng = await _geocode_city_country(info.get("city"), info.get("country"))
-            if glat is not None and glng is not None:
-                info["lat"], info["lng"] = glat, glng
+    # Candidate coords: use only what's already in SF / local DB — NO geocoding for candidates.
+    _nm_excluded_no_coords = {aid for aid, info in coords_by_acc.items()
+                              if info.get("lat") is None or info.get("lng") is None}
+    for aid in _nm_excluded_no_coords:
+        del coords_by_acc[aid]
+    if _nm_excluded_no_coords:
+        log.info("nearby-multi: excluded %s candidates without coords (no geocoding for candidates)",
+                 len(_nm_excluded_no_coords))
 
-    # -------- resolve base coords --------
+    # -------- resolve base coords (geocoding allowed for bases only) --------
     base_coords: List[Tuple[float, float]] = []
     acc_map_bases = _build_account_map(sf, base_account_ids)
     for bid in base_account_ids:
@@ -4944,22 +4984,57 @@ async def explorer_search_nearby_multi(
     if not base_coords:
         raise HTTPException(status_code=404, detail="None of the base accounts have geolocation")
 
-    # -------- haversine pre-filter (2× max_km) --------
-    dests: List[Tuple[float, float]] = []
-    dest_accs: List[str] = []
+    # -------- haversine pre-filter: top-N per base (independently) --------
+    # For each base, compute haversine to all candidates, sort, keep top N.
+    # Union the per-base top-N sets to get the final candidate list.
+    _nm_total_with_coords = 0
+    _nm_candidate_pool: List[Tuple[str, float, float]] = []  # all candidates with coords
     for acc, info in coords_by_acc.items():
         if acc in base_account_ids:
             continue
         lat_i, lng_i = info.get("lat"), info.get("lng")
         if lat_i is None or lng_i is None:
             continue
-        # pre-filter: min haversine to any base ≤ 2× max_km
-        min_hav = min(_haversine_km(float(b[0]), float(b[1]), float(lat_i), float(lng_i)) for b in base_coords)
-        if min_hav <= float(max_km) * 2:
-            dests.append((float(lat_i), float(lng_i)))
-            dest_accs.append(acc)
+        _nm_total_with_coords += 1
+        _nm_candidate_pool.append((acc, float(lat_i), float(lng_i)))
 
-    log.info("nearby-multi: bases=%s candidate_coords=%s", len(base_coords), len(dest_accs))
+    # Per-base top-N: each base independently picks its N nearest candidates
+    _nm_selected: set = set()
+    for b_lat, b_lng in base_coords:
+        _scored = [
+            (acc, lat_i, lng_i, _haversine_km(b_lat, b_lng, lat_i, lng_i))
+            for acc, lat_i, lng_i in _nm_candidate_pool
+        ]
+        _scored.sort(key=lambda x: x[3])
+        for acc, _, _, hav_dist in _scored[:DM_CANDIDATES_PER_BASE]:
+            _nm_selected.add(acc)
+
+    # Build final dests from the union of per-base selections
+    _nm_selected_map = {acc: (lat_i, lng_i) for acc, lat_i, lng_i in _nm_candidate_pool if acc in _nm_selected}
+    dests: List[Tuple[float, float]] = list(_nm_selected_map.values())
+    dest_accs: List[str] = list(_nm_selected_map.keys())
+
+    log.info(
+        "nearby-multi: bases=%s total_with_coords=%s selected_union=%s (top %s per base)",
+        len(base_coords), _nm_total_with_coords, len(dest_accs), DM_CANDIDATES_PER_BASE,
+    )
+
+    # Guard rail: reject if billable elements exceed safety limit
+    dm_elements = len(base_coords) * len(dests)
+    if dm_elements > MAX_DISTANCE_MATRIX_ELEMENTS:
+        log.warning(
+            "nearby-multi: BLOCKED — %s billable elements (%s bases × %s dests) exceeds limit %s",
+            dm_elements, len(base_coords), len(dests), MAX_DISTANCE_MATRIX_ELEMENTS,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Search too broad: {dm_elements} Distance Matrix elements "
+                f"({len(base_coords)} bases × {len(dests)} destinations, "
+                f"limit {MAX_DISTANCE_MATRIX_ELEMENTS}). "
+                f"Reduce max_km, use fewer base accounts, or add filters."
+            ),
+        )
 
     # -------- driving distance from each base (parallel) --------
     # Fire all base → candidates Distance Matrix calls concurrently, keep min per destination.

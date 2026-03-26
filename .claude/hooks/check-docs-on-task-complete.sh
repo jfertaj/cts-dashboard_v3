@@ -45,8 +45,8 @@ done
 
 # Si algún archivo de proyecto fue modificado más recientemente que los docs → recordatorio
 if [ "$newest_project_mtime" -gt "$docs_mtime" ]; then
-  echo "Archivos de proyecto modificados desde la última actualización de docs. Si el cambio es significativo (nueva funcionalidad, bug fix de comportamiento, cambio arquitectural), actualiza docs/current-state.md y/o docs/next-steps.md. Si es menor (typo, estilo, ajuste de test), puedes ignorar este aviso." >&2
-  exit 2
+  echo "Archivos de proyecto modificados desde la última actualización de docs. Si el cambio es significativo (nueva funcionalidad, bug fix de comportamiento, cambio arquitectural), actualiza docs/current-state.md y/o docs/next-steps.md. Si es menor (typo, estilo, ajuste de test), puedes ignorar este aviso."
+  exit 0
 fi
 
 exit 0

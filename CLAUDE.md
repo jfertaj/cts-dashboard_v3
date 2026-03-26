@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 At the start of every session in this repository:
 
 1. Read this file (`CLAUDE.md`) first.
-2. Then read, in order: `docs/project-context.md`, `docs/current-state.md`, `docs/next-steps.md`.
+2. **Read `docs/incident-distance-matrix-cost.md` immediately.** There is an active cost incident — development is paused until P0 items in that doc are resolved. Do not work on unrelated features until the user confirms the incident is closed.
+3. Then read, in order: `docs/project-context.md`, `docs/current-state.md`, `docs/next-steps.md`.
 3. Before proposing any changes, write 2–4 lines summarising the current state (what is done, what is in progress, what is next).
 4. Do **not** re-analyse the full repository from scratch unless the user explicitly asks for it, or the documented state is clearly out of date relative to recent commits.
 5. Use the documented state as the baseline for all work.

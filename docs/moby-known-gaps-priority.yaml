@@ -1,0 +1,378 @@
+# Moby Known Gaps — Priority Roadmap
+# Date: 2026-03-25 | Updated: 2026-03-25
+# Source: moby-bulk-eval-initial.yaml (34 KNOWN_GAP entries)
+# Grouped by failure pattern, prioritized by impact + fix complexity + frequency
+#
+# Status summary:
+#   G1: CLOSED (Step 18)
+#   G2: CLOSED (Steps 19-25)
+#   G3: CLOSED (Steps 26-31)
+#   G4: CLOSED (PP04 Step 28, PP05 Step 35, SS09 Step 36)
+#   G5: CLOSED (QD01 Step 38; QO04+FA04 resolved automatically)
+#   G6: CLOSED (Step 33)
+#   G7: CLOSED (PC05 Step 37)
+#   G8: PARTIAL (QD05 fixed Step 34)
+#   G9: CLOSED (Step 32)
+#   G10: OPEN
+#   Benchmark core: 40/42 PASS + 2 EXPECTED_NO_DATA = 100% effective, 0 regressions
+
+groups:
+
+  # ═══════════════════════════════════════════════════════════════
+  # CLOSED
+  # ═══════════════════════════════════════════════════════════════
+
+  - group_id: G1
+    title: "Numeric thresholds silently ignored"
+    priority: CLOSED  # was HIGH — fixed in Step 18 (2026-03-25)
+    description: >
+      When users specify numeric thresholds (">50", ">30", ">100"), the deterministic
+      planner handlers (stage, T1D) return all matching rows without applying the
+      threshold filter. The constraint is silently dropped.
+    impact: "HIGH — users get wrong results and may not notice the threshold was ignored"
+    estimated_fix_complexity: "LOW — post-filter on returned rows, similar to GQ02 fix"
+    why_it_matters: >
+      Feasibility assessments depend on precise thresholds. Getting 37 sites instead
+      of 8 undermines trust in Moby for study planning.
+    recommended_order: 1
+    suggested_next_action: >
+      Add threshold post-filter to stage_handler and T1D handler, same pattern as
+      the GQ02 is_basic_site_count threshold fix already implemented.
+    questions:
+      - question_id: SC02
+        short_label: "Stage 1 > 50"
+        observed_behavior: "37 rows (all Stage 1 > 0) instead of >50"
+        likely_root_cause: "stage_handler has no threshold extraction"
+        confidence: high
+      - question_id: FA02
+        short_label: "Stage 1 > 30"
+        observed_behavior: "37 rows (same as SC02)"
+        likely_root_cause: "Same handler, same gap"
+        confidence: high
+      # MC03 reclassified to G2 (2026-03-25): threshold regex DOES match,
+      # but the T1D filter rule is added to Explorer and silently dropped.
+      # See G2 for MC03.
+
+  - group_id: G2
+    title: "Filter / constraint silently dropped"
+    priority: CLOSED  # was HIGH — fixed in Steps 19-25 (2026-03-25)
+    description: >
+      Secondary filters in complex queries are silently ignored. The handler matches
+      the primary intent but drops additional constraints (CTS-validated, validated role,
+      time window, proposed-vs-validated, first-contact existence).
+    impact: "HIGH — results include rows that should be excluded, leading to wrong counts"
+    estimated_fix_complexity: "MEDIUM — each constraint type needs its own detection + filter logic"
+    why_it_matters: >
+      Users combine constraints naturally ("pharmacy AND CTS-validated", "no assignment
+      in last 2 years"). Dropping any constraint makes the answer unreliable.
+    recommended_order: 2
+    suggested_next_action: >
+      Audit each handler for constraint pass-through. Add CTS-validated as a recognized
+      qualifier. Add temporal constraints to assignment handler.
+    questions:
+      - question_id: SC08
+        short_label: "Pharmacy + CTS-validated"
+        observed_behavior: "37 pharmacy sites — CTS-validated filter not applied"
+        likely_root_cause: "qual_handler doesn't recognize 'CTS-validated' as Account-level boolean"
+        confidence: medium
+      - question_id: SS05
+        short_label: "Referral/Clinical Partner role"
+        observed_behavior: "0 rows — queried Account field but got empty"
+        likely_root_cause: "Account-level boolean filter approach may be wrong for RP role"
+        confidence: medium
+      - question_id: SS02
+        short_label: "First contact + no meeting"
+        observed_behavior: "180 rows — only checked 'no meeting', not 'has first contact'"
+        likely_root_cause: "Pipeline handler matched 'no meeting date' only, ignored conjunction"
+        confidence: medium
+      - question_id: RE04
+        short_label: "Sites per country with validated role"
+        observed_behavior: "25 countries (all) — 'validated role' constraint dropped"
+        likely_root_cause: "is_basic_site_count doesn't parse additional qualifiers"
+        confidence: high
+      - question_id: OC03
+        short_label: "Proposed CS not validated"
+        observed_behavior: "214 institutions — no proposed/validated distinction"
+        likely_root_cause: "members_search doesn't distinguish proposed from validated status"
+        confidence: high
+      - question_id: BR03
+        short_label: "No assignment in last 2 years"
+        observed_behavior: "56 sites (same as 'no assignment ever')"
+        likely_root_cause: "not_in_assignment handler has no temporal filter"
+        confidence: high
+      - question_id: MC03
+        short_label: "HLA + overnight + T1D > 100 (IT/ES)"
+        observed_behavior: "14 rows — HLA+overnight applied but T1D >100 threshold dropped"
+        likely_root_cause: "qual_handler adds T1D gt rule to Explorer filter but it is silently not applied (moved from G1 — threshold regex works, filter enforcement fails)"
+        confidence: high
+
+  - group_id: G3
+    title: "Misrouting / intent misparse"
+    priority: CLOSED  # Steps 26-31: SP05, SS06, SC07, QI02, GL05 all fixed.
+    description: >
+      The query is routed to the wrong handler or the handler misparses the user's
+      intent. Examples: country name parsed as activity name, percentage question
+      parsed as activity lookup, site query routed to members search.
+    impact: "HIGH — completely wrong answer or 0 rows"
+    estimated_fix_complexity: "MEDIUM — needs better intent classification or guard clauses"
+    why_it_matters: >
+      These produce obviously wrong answers (0 rows, wrong entity type) which
+      immediately erode user trust.
+    recommended_order: 3
+    suggested_next_action: >
+      Add guards: (1) country names should not be parsed as activity names,
+      (2) percentage/proportion queries need a new handler or Claude routing,
+      (3) 'mechanistic studies' should route to sites, not members.
+    questions:
+      - question_id: SP05
+        short_label: "Assignments in Germany"
+        observed_behavior: "0 rows — 'in germany' treated as activity name"
+        likely_root_cause: "Activity handler captures everything after 'assignment' as name"
+        confidence: high
+      - question_id: SS06
+        short_label: "Percentage participating"
+        observed_behavior: "0 rows — 'at least 1 activity' parsed as activity name"
+        likely_root_cause: "No percentage/proportion handler exists"
+        confidence: high
+      - question_id: QI02
+        short_label: "Mechanistic studies (sites)"
+        observed_behavior: "0 rows — searched members instead of sites"
+        likely_root_cause: "'mechanistic' keyword triggered members_search (Research/Mechanistic Lab role)"
+        confidence: high
+      - question_id: GL05
+        short_label: "Driving distance + pharmacy"
+        observed_behavior: "9 rows but garbled answer — grouping formatter intercepted"
+        likely_root_cause: "Answer formatter matched before geographic formatter"
+        confidence: medium
+      - question_id: SC07
+        short_label: "ND T1D field confusion"
+        observed_behavior: "94 rows — wrong SF field (current vs newly diagnosed)"
+        likely_root_cause: "Claude selected C_Number_of_T1D_Patients_currently_U_18__c instead of C_Number_of_new_T1D_diagnosed_U_18__c"
+        confidence: high
+
+  # ═══════════════════════════════════════════════════════════════
+  # MEDIUM PRIORITY
+  # ═══════════════════════════════════════════════════════════════
+
+  - group_id: G4
+    title: "Pipeline semantic mismatch"
+    priority: CLOSED  # was MEDIUM — PP04 Step 28, PP05 Step 35, SS09 Step 36.
+    description: >
+      Pipeline handler matches a related but semantically wrong pipeline field.
+      PP04 and PP05 now fixed. SS09 remains open.
+    impact: "MEDIUM — returns data but semantically wrong results"
+    estimated_fix_complexity: "MEDIUM — needs better pipeline field disambiguation"
+    why_it_matters: >
+      Pipeline tracking is a core workflow. Wrong semantic mapping means users
+      can't track their actual profiling funnel.
+    recommended_order: 4
+    suggested_next_action: >
+      All resolved: PP04 (Step 28), PP05 (Step 35), SS09 (Step 36).
+    questions:
+      - question_id: PP04
+        short_label: "Questionnaire submitted + no meeting"
+        observed_behavior: "51 rows — questionnaire received + no meeting date (Step 28)"
+        likely_root_cause: "RESOLVED — Form_Questionnaire_received__c is_not_null + C_Meeting_Date__c is_null"
+        confidence: high
+      - question_id: PP05
+        short_label: "Form sent but not received"
+        observed_behavior: "23 rows — form sent + not received (Step 35)"
+        likely_root_cause: "RESOLVED — C_Form_Questionnaire_sent__c is_not_null + Form_Questionnaire_received__c is_null"
+        confidence: high
+      - question_id: SS09
+        short_label: "Italy sites needing qualification visit"
+        observed_behavior: "25 rows — cross-Opportunity two-SOQL set difference (Step 36 corrected)"
+        likely_root_cause: "RESOLVED — profiled AccountIds (Profiling Opps) minus qualified AccountIds (Accreditation Opps). Types: Qualification, CTS/CTU Qualification, CTS Accreditation."
+        confidence: high
+
+  - group_id: G5
+    title: "Abstract concept with no field mapping"
+    priority: CLOSED  # QD01 fixed Step 38; QO04+FA04 resolved automatically by same fix
+    description: >
+      User asks about a high-level concept ('early diagnosis screening', 'early
+      diagnosis experience') that doesn't map to any single SF or qual field.
+      Handler returns all sites unfiltered.
+    impact: "MEDIUM — returns all 195 sites, obviously unhelpful"
+    estimated_fix_complexity: "MEDIUM — needs concept-to-field mapping or composite filter"
+    why_it_matters: >
+      Users naturally use domain concepts. Returning all sites is worse than
+      saying 'I don't know how to filter for that'.
+    recommended_order: 5
+    suggested_next_action: >
+      Option A: Map 'early diagnosis' to a composite filter (autoantibodies + OGTT + screening fields).
+      Option B: Return a helpful 'this concept maps to multiple fields, please specify' message.
+    questions:
+      - question_id: QD01
+        short_label: "Early diagnosis screening"
+        observed_behavior: "41 rows — autoantibody testing capability (Step 38)"
+        likely_root_cause: "RESOLVED — mapped to qual.3_8__autoantibodies_aab"
+        confidence: high
+      - question_id: QO04
+        short_label: "Early diagnosis experience"
+        observed_behavior: "41 rows — autoantibody testing capability (resolved by Step 38 QD01 fix)"
+        likely_root_cause: "RESOLVED — same has_early_diag regex covers 'early diagnosis experience'"
+        confidence: high
+      - question_id: FA04
+        short_label: "Early diagnosis from profiling"
+        observed_behavior: "41 rows — autoantibody testing capability (resolved by Step 38 QD01 fix)"
+        likely_root_cause: "RESOLVED — qual handler now fires before pipeline handler for 'early diagnosis'"
+        confidence: high
+
+  - group_id: G6
+    title: "Cross-source / data quality queries"
+    priority: CLOSED  # DR02 handler added (Step 33), returns correct 0 for current data. QU02-QU04/DR03 remain low-priority.
+    description: >
+      User asks diagnostic or troubleshooting questions that require combining data
+      from multiple backend sources (qual JSONB + SF fields, qual table + geocoords)
+      or inspecting field-level data quality per site.
+    impact: "MEDIUM — 0 results or wrong interpretation of diagnostic intent"
+    estimated_fix_complexity: "HIGH — needs new tools or cross-source query capability"
+    why_it_matters: >
+      Data quality monitoring is important for operations. These questions come up
+      after uploads and during data cleanup.
+    recommended_order: 6
+    suggested_next_action: >
+      Start with QU04 (qual preview tool exists, just needs Moby integration).
+      QU02 diagnostic intent could be addressed with a 'site data inspector' tool.
+    questions:
+      - question_id: QU02
+        short_label: "Why pharmacy empty for Berlin?"
+        observed_behavior: "37 rows — returned pharmacy sites instead of diagnosing"
+        likely_root_cause: "No diagnostic/troubleshooting handler — treated as 'find pharmacy sites'"
+        confidence: high
+      - question_id: QU03
+        short_label: "ZnT8 field troubleshooting"
+        observed_behavior: "0 rows"
+        likely_root_cause: "No handler to inspect field presence per site"
+        confidence: high
+      - question_id: QU04
+        short_label: "Qual preview for Warsaw"
+        observed_behavior: "0 rows"
+        likely_root_cause: "Qual preview API exists but no Moby tool wraps it"
+        confidence: high
+      - question_id: DR02
+        short_label: "Qual upload + no geocoords"
+        observed_behavior: "0 rows"
+        likely_root_cause: "Cross-source join (Questionnaire table + Site geocoords)"
+        confidence: high
+      - question_id: DR03
+        short_label: "Qual upload older than 2 years"
+        observed_behavior: "0 rows"
+        likely_root_cause: "Questionnaire table not exposed to Moby tools"
+        confidence: high
+
+  - group_id: G7
+    title: "Contact / people role resolution"
+    priority: CLOSED  # PC05 fixed Step 37 (contact_generic trigger + NL country fix)
+    description: >
+      When user asks for 'contacts' (generic) rather than 'study coordinators' or 'PI'
+      (specific), Moby returns sites instead of contact details. The contacts intent
+      is dropped when the country handler fires first.
+    impact: "MEDIUM — user gets sites but not the contact info they asked for"
+    estimated_fix_complexity: "LOW — extend coordinator handler to fire on 'contacts' keyword"
+    why_it_matters: >
+      Finding contact details is a frequent operational need.
+    recommended_order: 7
+    suggested_next_action: >
+      Add 'contacts' as a trigger for the study_coordinators handler when combined
+      with country/city filters.
+    questions:
+      - question_id: PC05
+        short_label: "All contacts in Netherlands"
+        observed_behavior: "7 contacts (SC + PI) across 6 NL sites (Step 37)"
+        likely_root_cause: "RESOLVED — _contact_generic trigger + NL country name fix (The Netherlands)"
+        confidence: high
+
+  # ═══════════════════════════════════════════════════════════════
+  # LOW PRIORITY
+  # ═══════════════════════════════════════════════════════════════
+
+  - group_id: G8
+    title: "Field not in schema"
+    priority: PARTIAL  # was LOW — QD05 fixed in Step 34 (2026-03-26). QI03/QI04 remain open.
+    description: >
+      User asks about a capability (OGTT, CT/MRI, insulin pump) that is not captured
+      in any SF or qual field. These are data model gaps, not handler gaps.
+    impact: "LOW — correct 0 results for missing data; no handler fix can add the data"
+    estimated_fix_complexity: "N/A — requires data model change or new qual questions"
+    why_it_matters: >
+      Good to know which capabilities users expect but aren't tracked.
+      Could inform next qual questionnaire revision.
+    recommended_order: 9
+    suggested_next_action: >
+      QD05 resolved: OGTT mapped to qual.3_8__glucose (40 rows). QI03/QI04 remain —
+      verify whether CT/MRI and insulin pump fields exist under different qual keys.
+    questions:
+      - question_id: QD05
+        short_label: "OGTT / glucose testing capacity"
+        observed_behavior: "40 rows — mapped to qual.3_8__glucose contains 'yes' (Step 34)"
+        likely_root_cause: "RESOLVED — field exists as qual.3_8__glucose"
+        confidence: high
+      - question_id: QI03
+        short_label: "CT or MRI capability"
+        observed_behavior: "0 rows"
+        likely_root_cause: "Not captured in SF or qual"
+        confidence: high
+      - question_id: QI04
+        short_label: "Insulin pump therapy"
+        observed_behavior: "0 rows — columns attempted but no data"
+        likely_root_cause: "Field may exist but data is sparse or key is wrong"
+        confidence: medium
+
+  - group_id: G9
+    title: "Name / entity matching"
+    priority: CLOSED  # OC02 reclassified as EXPECTED_NO_DATA (Edinburgh not in org). MR07/MR09 remain low-priority edge cases.
+    description: >
+      Institution or site lookup fails because the user's name doesn't match the
+      stored name exactly. No fuzzy matching or alias resolution.
+    impact: "LOW — 0 results for specific institution lookups"
+    estimated_fix_complexity: "MEDIUM — needs fuzzy search or alias table"
+    why_it_matters: >
+      Users won't always know the exact stored name. But this affects few queries
+      and can often be worked around by trying alternative names.
+    recommended_order: 10
+    suggested_next_action: >
+      Add fuzzy name matching (LIKE '%edinburgh%') to member institution lookup.
+      For MR09 (local language name), verify if the field exists in SF schema.
+    questions:
+      - question_id: MR07
+        short_label: "Institution for site in Brest"
+        observed_behavior: "0 rows — 'No INNODIA site found in brest'"
+        likely_root_cause: "City name mismatch or site not in local DB"
+        confidence: medium
+      - question_id: OC02
+        short_label: "Edinburgh contacts"
+        observed_behavior: "0 institutions found"
+        likely_root_cause: "Edinburgh stored as 'University of Edinburgh' or similar"
+        confidence: medium
+      - question_id: MR09
+        short_label: "Local language name for Oslo"
+        observed_behavior: "0 rows"
+        likely_root_cause: "No 'local language name' field exposed"
+        confidence: high
+
+  - group_id: G10
+    title: "Sub-country geographic / clustering"
+    priority: LOW
+    description: >
+      User asks about a region within a country ('Northern Italy') or clustering
+      analysis. Current handlers only support country-level or point-radius.
+    impact: "LOW — returns all country results instead of regional subset"
+    estimated_fix_complexity: "HIGH — needs geographic region definitions or clustering algorithm"
+    why_it_matters: >
+      Nice-to-have for planning but users can visually filter from the full country list.
+    recommended_order: 11
+    suggested_next_action: >
+      Defer. Users can use the map view for visual clustering. If needed later,
+      add region definitions (lat/lng bounding boxes) for common sub-regions.
+    questions:
+      - question_id: MV02
+        short_label: "Northern Italy clusters"
+        observed_behavior: "62 rows = ALL Italian sites"
+        likely_root_cause: "No sub-country region filter"
+        confidence: high
+      - question_id: NP01
+        short_label: "Regional hub clusters"
+        observed_behavior: "25 entries = country counts only"
+        likely_root_cause: "No clustering analysis capability"
+        confidence: high

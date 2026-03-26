@@ -1,0 +1,406 @@
+# Moby Benchmark Core — 42 questions
+# Date: 2026-03-26 (updated)
+# Source: moby-bulk-eval-initial.yaml (121 questions) → curated subset
+#
+# Purpose: compact, balanced benchmark for regression testing and gap tracking
+# Balance: 36 PASS_NOW + 4 KNOWN_GAP + 2 EXPECTED_NO_DATA
+# Families: filtering(7), ranking(4), pipeline(5), qualification(6), geography(6),
+#           contacts(4), members(5), activities(3), data-quality(2)
+
+entries:
+
+  # ── Filtering / Site Discovery (7) ─────────────────────────────
+
+  - id: BM01
+    question: "Show me all CTS sites in Germany, Italy, and Belgium"
+    source_question_id: SC01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Multi-country OR — core country handler"
+    representative_pattern: multi_country_filter
+    notes: "79 rows, 3 countries"
+
+  - id: BM02
+    question: "List all sites with Stage 2 patients AND overnight stay capacity"
+    source_question_id: SC03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Multi-condition (SF + qual) via Claude — validates cross-source AND"
+    representative_pattern: multi_condition_sf_qual
+    notes: "5 rows"
+
+  - id: BM03
+    question: "Which sites in France have HLA typing capability available?"
+    source_question_id: SC06
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "HLA + country filter — validates qual field resolution"
+    representative_pattern: qual_plus_country
+    notes: "9 rows"
+
+  - id: BM04
+    question: "Show all sites that have NOT yet completed profiling"
+    source_question_id: SC09
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "NOT filter on pipeline field"
+    representative_pattern: negation_filter
+    notes: "187 rows"
+
+  - id: BM05
+    question: "Which sites have more than 50 Stage 1 individuals currently followed?"
+    source_question_id: SC02
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Numeric threshold on stage handler (Step 18)"
+    representative_pattern: numeric_threshold
+    notes: "Threshold > 50 now applied correctly"
+
+  - id: BM06
+    question: "List sites with more than 20 newly diagnosed T1D patients under 18 per year"
+    source_question_id: SC07
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Correct ND T1D field + threshold (Step 29)"
+    representative_pattern: nd_threshold
+    notes: "77 rows — C_Number_of_new_T1D_diagnosed_U_18__c > 20"
+
+  - id: BM07
+    question: "Find sites that have a pharmacy AND are CTS-validated"
+    source_question_id: SC08
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "CTS-validated + qual conjunction (Step 19)"
+    representative_pattern: qual_plus_account_flag
+    notes: "Pharmacy + INNODIA_Clinical_Trial_Site__c=true applied"
+
+  # ── Ranking / Aggregation (4) ──────────────────────────────────
+
+  - id: BM08
+    question: "How many CTS sites are there in each country?"
+    source_question_id: CL01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Basic site count — GQ01 baseline anchor"
+    representative_pattern: country_count
+    notes: "25 countries, 197 total"
+
+  - id: BM09
+    question: "What are the top 10 sites by number of Stage 1 individuals followed?"
+    source_question_id: MR03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Top-N ranking — GQ14 baseline anchor"
+    representative_pattern: top_n_ranking
+    notes: "10 rows"
+
+  - id: BM10
+    question: "Show me a breakdown of Stage 2 patients by country"
+    source_question_id: MR04
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Country-level aggregation with specific metric"
+    representative_pattern: country_aggregation
+    notes: "27 countries"
+
+  - id: BM11
+    question: "What percentage of clinical sites are participating to at least 1 activity?"
+    source_question_id: SS06
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Percentage handler (Step 27)"
+    representative_pattern: percentage_calculation
+    notes: "73.6% (145 of 197)"
+
+  # ── Profiling Pipeline (5) ─────────────────────────────────────
+
+  - id: BM12
+    question: "Which sites have completed profiling but aren't CTS yet?"
+    source_question_id: PP01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Two-condition pipeline filter (profiling complete + NOT CTS)"
+    representative_pattern: pipeline_two_condition
+    notes: "27 sites"
+
+  - id: BM13
+    question: "How many sites are currently in the profiling stage?"
+    source_question_id: PP02
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Pipeline stage filter"
+    representative_pattern: pipeline_stage
+    notes: "37 sites"
+
+  - id: BM14
+    question: "Which sites had a meeting date in Q3 2024?"
+    source_question_id: RT03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Date range (quarter) filter on pipeline field"
+    representative_pattern: date_range_filter
+    notes: "19 sites, 2024-07-01 to 2024-09-30"
+
+  - id: BM15
+    question: "Which profiling sites have submitted the questionnaire but not had a meeting?"
+    source_question_id: PP04
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Questionnaire received + no meeting conjunction (Step 28)"
+    representative_pattern: pipeline_two_condition
+    notes: "51 rows — Form_Questionnaire_received__c is_not_null + C_Meeting_Date__c is_null"
+
+  - id: BM16
+    question: "Find sites where profiling form was sent but not yet received"
+    source_question_id: PP05
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Form sent + not received conjunction (Step 35)"
+    representative_pattern: pipeline_sent_not_received
+    notes: "23 rows — C_Form_Questionnaire_sent__c is_not_null + Form_Questionnaire_received__c is_null"
+
+  # ── Qualification (6) ──────────────────────────────────────────
+
+  - id: BM17
+    question: "Show me sites that have ZnT8 autoantibody testing available"
+    source_question_id: QD02
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Specific qual field lookup"
+    representative_pattern: qual_specific_field
+    notes: "30 rows"
+
+  - id: BM18
+    question: "Which sites have insulin autoantibody testing?"
+    source_question_id: QD04
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Different qual field — validates alias resolution"
+    representative_pattern: qual_alias_resolution
+    notes: "38 rows"
+
+  - id: BM19
+    question: "Which sites can accommodate a single-day visit longer than 8 hours?"
+    source_question_id: QO01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Qual field with numeric threshold — validates qual thresholds work"
+    representative_pattern: qual_numeric_threshold
+    notes: "41 rows"
+
+  - id: BM20
+    question: "We need 20 sites for a new study that requires overnight stay and pharmacy - which sites qualify?"
+    source_question_id: FA01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Feasibility query — multi-qual condition, real business use case"
+    representative_pattern: feasibility_multi_qual
+    notes: "34 sites"
+
+  - id: BM21
+    question: "Which sites can perform early diagnosis screening?"
+    source_question_id: QD01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Early diagnosis mapped to autoantibody testing (Step 38)"
+    representative_pattern: concept_mapped
+    notes: "41 rows — qual.3_8__autoantibodies_aab contains 'yes'. Answer explicit: 'autoantibody testing'"
+
+  - id: BM22
+    question: "Show me sites with OGTT (oral glucose tolerance test) capacity"
+    source_question_id: QD05
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Glucose testing mapped to qual.3_8__glucose (Step 34)"
+    representative_pattern: qual_alias_resolution
+    notes: "40 rows — mapped OGTT/glucose testing to qual.3_8__glucose contains 'yes'"
+
+  # ── Geography (6) ──────────────────────────────────────────────
+
+  - id: BM23
+    question: "What are the 5 closest CTS sites to Munich?"
+    source_question_id: GL01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Nearest-N to city — core geo handler"
+    representative_pattern: nearest_to_city
+    notes: "5 sites"
+
+  - id: BM24
+    question: "Show me all sites within 200 km of Paris"
+    source_question_id: GL02
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Radius search — validates km filter"
+    representative_pattern: radius_search
+    notes: "17 sites"
+
+  - id: BM25
+    question: "Find all sites within 150 km of the sites assigned to Safeguard"
+    source_question_id: SP03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "km-of-assignment — nearby-multi path, most complex geo query"
+    representative_pattern: km_of_assignment
+    notes: "52 sites, driving distances"
+
+  - id: BM26
+    question: "What CTS sites are near the sites involved in the Safeguard activity?"
+    source_question_id: GL06
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Near-activity without explicit km — validates default radius"
+    representative_pattern: near_activity_default
+    notes: "37 sites, 100km default"
+
+  - id: BM27
+    question: "Show me all sites within driving distance of Madrid that have pharmacy on-site"
+    source_question_id: GL05
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Driving distance trigger + city extraction fix (Step 31)"
+    representative_pattern: geo_plus_qual
+    notes: "10 rows with clean answer text"
+
+  - id: BM28
+    question: "Which sites are geographically clustered together in Northern Italy?"
+    source_question_id: MV02
+    category: KNOWN_GAP
+    expected_status: fail
+    why_included: "Sub-country geographic filter — returned all Italy"
+    representative_pattern: sub_country_filter
+    notes: "62 rows = all Italy, 'Northern' ignored"
+
+  # ── Contacts / People (4) ──────────────────────────────────────
+
+  - id: BM29
+    question: "Who are the study coordinators at the Italian sites?"
+    source_question_id: PC01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Study coordinators by country — core contacts handler"
+    representative_pattern: coordinators_by_country
+    notes: "42 coordinators"
+
+  - id: BM30
+    question: "Who is the PI at the site in Barcelona?"
+    source_question_id: PC03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "PI by city — validates city-level contact lookup"
+    representative_pattern: pi_by_city
+    notes: "1 PI"
+
+  - id: BM31
+    question: "Which sites don't have a dedicated study coordinator listed?"
+    source_question_id: PC04
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Negative contact query — validates NOT-has-coordinator"
+    representative_pattern: no_coordinator
+    notes: "79 sites"
+
+  - id: BM32
+    question: "Show me all contacts at sites in the Netherlands"
+    source_question_id: PC05
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Generic contacts trigger + NL country fix (Step 37)"
+    representative_pattern: contacts_by_country
+    notes: "7 contacts (SC + PI) across 6 NL sites — names, emails, titles"
+
+  # ── Members (5) ────────────────────────────────────────────────
+
+  - id: BM33
+    question: "Show me all Member institutions in the UK"
+    source_question_id: MI01
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Member search by country — core members handler"
+    representative_pattern: members_by_country
+    notes: "17 institutions"
+
+  - id: BM34
+    question: "Find institutions that have a DxLab (Diagnostic Lab) role"
+    source_question_id: MI03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Member role filter"
+    representative_pattern: members_by_role
+    notes: "77 institutions"
+
+  - id: BM35
+    question: "Show me which CTS sites are also validated Diagnostic Labs"
+    source_question_id: NP03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Cross-entity (sites + member DxLab role) — validates ST8 handler"
+    representative_pattern: cross_entity_sites_members
+    notes: "45 sites"
+
+  - id: BM36
+    question: "Show me all contacts and roles at the Edinburgh institution"
+    source_question_id: OC02
+    category: EXPECTED_NO_DATA
+    expected_status: no_match
+    why_included: "Tests graceful handling when institution doesn't exist in data"
+    representative_pattern: graceful_no_match
+    notes: "Edinburgh does not exist in INNODIA SF org (verified: 0/247 members, 0/197 sites). Moby now returns clear 'No institution found matching Edinburgh' message (Step 32). Not a bug — correct behavior for missing data."
+
+  - id: BM37
+    question: "Which institutions have proposed Clinical Site role but not validated yet?"
+    source_question_id: OC03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Proposed CS not validated conjunction (Step 25)"
+    representative_pattern: role_status_distinction
+    notes: "212 rows — Clinical_Site_CS__c=true AND Clinical_Site_CS_validated__c not_equals true"
+
+  # ── Activities / Assignments (3) ───────────────────────────────
+
+  - id: BM38
+    question: "Show me all activities and how many sites participate in each"
+    source_question_id: AA03
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "All activities summary — GQ11 anchor"
+    representative_pattern: all_activities_summary
+    notes: "11 activities"
+
+  - id: BM39
+    question: "List all sites that have no current assignment"
+    source_question_id: AA05
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "NOT-in-assignment — GQ19 anchor"
+    representative_pattern: not_in_assignment
+    notes: "56 sites"
+
+  - id: BM40
+    question: "Show me all sites that have ever had an assignment in Germany"
+    source_question_id: SP05
+    category: PASS_NOW
+    expected_status: pass
+    why_included: "Country guard in assignment handler (Step 26)"
+    representative_pattern: assignment_with_country
+    notes: "8 German sites with assignments"
+
+  # ── Data Quality (2) ───────────────────────────────────────────
+
+  - id: BM41
+    question: "Why is the pharmacy field showing empty for the Berlin site?"
+    source_question_id: QU02
+    category: KNOWN_GAP
+    expected_status: fail
+    why_included: "Diagnostic intent missed — no troubleshooting handler"
+    representative_pattern: diagnostic_intent
+    notes: "Returned 37 pharmacy sites instead of diagnosing Berlin's missing data"
+
+  - id: BM42
+    question: "Which sites have uploaded a qualification form but don't yet have geocoordinates?"
+    source_question_id: DR02
+    category: EXPECTED_NO_DATA
+    expected_status: no_match
+    why_included: "Tests cross-source join between local DB tables (sites + site_qual)"
+    representative_pattern: cross_source_join
+    notes: "Handler works correctly (Step 33): joins sites + site_qual, filters latitude/longitude IS NULL. Returns 0 because all qual-uploaded sites already have geocoordinates (geocoding runs on upload). Not a bug — correct behavior for current data."
