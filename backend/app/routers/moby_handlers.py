@@ -166,7 +166,7 @@ def handle_multi_activity_intersection(
     # Cleanup both names: strip trailing keywords, punctuation, stop words
     _stop = {"the", "a", "an", "both", "any", "all", "this", "that", "named", "called"}
     for _orig, _attr in ((_name_a, "a"), (_name_b, "b")):
-        _n = re.sub(r'\s+(?:assignment|opportunity|activity)\s*$', '', _orig, flags=re.I).strip()
+        _n = re.sub(r'\s+(?:assignment[s]?|opportunit(?:y|ies)|activit(?:y|ies))\s*$', '', _orig, flags=re.I).strip()
         _n = _n.rstrip(".,;?")
         if _n.lower() in _stop or len(_n) < 2:
             return None
@@ -296,8 +296,11 @@ def handle_assignment_sites(
         return None
 
     _asgn_name = _assign_name_m.group(1).strip().rstrip(".,;?")
-    # Strip trailing "assignment"/"opportunity" keyword if captured as part of the name
-    _asgn_name = re.sub(r'\s+(?:assignment|opportunity)\s*$', '', _asgn_name, flags=re.I).strip()
+    # Strip trailing keywords if captured as part of the name
+    _asgn_name = re.sub(r'\s+(?:assignment[s]?|opportunit(?:y|ies)|activit(?:y|ies))\s*$', '', _asgn_name, flags=re.I).strip()
+    # Multi-name queries ("X and Y", "X or Y") → let handler 12d handle them
+    if re.search(r"\b(?:and|or)\b", _asgn_name, re.I):
+        return None
     _stop = {"the", "a", "an", "all", "any", "some", "this", "that", "named", "called",
              "any current", "current", "active", "existing", "ongoing"}
     # Reject if the full name is a stop word, or if it's suspiciously long (likely a false pattern match)
@@ -826,6 +829,11 @@ def handle_activity(
     _stop_act = {"the", "a", "an", "all", "any", "some", "this", "that"}
     if _act_belong_m:
         _act_nm = _act_belong_m.group(1).strip().rstrip(".,;?")
+        # Multi-name queries ("X and Y", "X or Y") → skip to 12d
+        if re.search(r"\b(?:and|or)\b", _act_nm, re.I):
+            _act_belong_m = None
+    if _act_belong_m:
+        _act_nm = _act_belong_m.group(1).strip().rstrip(".,;?")
         if _act_nm.lower() not in _stop_act and len(_act_nm) >= 2:
             byname = tools.tool_sites_by_activity(
                 sf, name=_act_nm, countries=countries2 or None, exact=False
@@ -863,9 +871,14 @@ def handle_activity(
         _raw12c = re.sub(r"\b(and|y|e)\b", ",", _raw12c, flags=re.I)
         _raw12c = _raw12c.replace("/", ",").replace("&", ",")
         _countries12c = [p.strip().title() for p in _raw12c.split(",") if p.strip()]
+    # Guard: if any extracted "country" looks like an activity keyword, skip 12c
+    _countries12c_has_activity_word = any(
+        re.search(r"\bactivit", c, re.I) for c in _countries12c
+    )
     _is_multi_country_and_coverage = (
         len(_countries12c) >= 2
         and not re.search(r"\bor\b", s, re.I)
+        and not _countries12c_has_activity_word
         and re.search(r"\bhave\b|\bwith\b|\bcontain\b|\bhaving\b|\bcovering\b|\bparticipat", s, re.I)
     )
     if _is_multi_country_and_coverage:
@@ -901,11 +914,16 @@ def handle_activity(
 
     # 12d) "sites that have DETECT and SAFEGUARD activities"
     #      "sites with Baricade activities"
-    #      Captures activity name(s) before "activit*" from "have/with" phrasing.
+    #      "sites that belong to both DETECT and Safeguard activities"
+    #      "sites participating in DETECT and Fabulinus activities"
+    #      Captures activity name(s) before "activit*" from various phrasings.
     #      Multiple names joined by "and"/"or"/","  → AND or OR semantics.
-    _m_have_act = re.search(
-        r"\b(?:have|with|having)\s+([\w\s'\-\(\),&/]+?)\s+activit",
-        s, re.I,
+    _m_have_act = (
+        re.search(r"\b(?:have|with|having)\s+([\w\s'\-\(\),&/]+?)\s+activit", s, re.I) or
+        re.search(r"\bbelong\w*\s+to\s+(?:both\s+)?([\w\s'\-\(\),&/]+?)\s+activit", s, re.I) or
+        re.search(r"\bparticipat\w+\s+in\s+(?:both\s+)?([\w\s'\-\(\),&/]+?)\s+activit", s, re.I) or
+        re.search(r"\binvolved\s+in\s+(?:both\s+)?([\w\s'\-\(\),&/]+?)\s+activit", s, re.I) or
+        re.search(r"\bin\s+(?:both\s+)([\w\s'\-\(\),&/]+?)\s+activit", s, re.I)
     )
     if _m_have_act:
         _raw_names = _m_have_act.group(1).strip()
@@ -919,12 +937,21 @@ def handle_activity(
         _stop_names = {"the", "a", "an", "all", "any", "some", "this", "that", "no", "each"}
         _act_names = [n for n in _act_names if n.lower() not in _stop_names and len(n) >= 2]
         if _act_names:
+            # Filter countries2: remove entries that overlap with extracted activity names
+            # (prevents "participating in DETECT or Safeguard activities" from treating
+            # "detect"/"safeguard" as country filters)
+            _act_lower = {n.lower() for n in _act_names}
+            _clean_countries = [
+                c for c in (countries2 or [])
+                if not any(a in c.lower() for a in _act_lower)
+                and "activit" not in c.lower()
+            ] or None
             # Lookup sites for each activity name
             _sets_by_name: Dict[str, set] = {}
             _rows_by_acc: Dict[str, dict] = {}
             _act_label_by_acc: Dict[str, set] = {}
             for _aname in _act_names:
-                _tbl_a = tools.tool_sites_by_activity(sf, name=_aname, countries=countries2 or None, exact=False)
+                _tbl_a = tools.tool_sites_by_activity(sf, name=_aname, countries=_clean_countries, exact=False)
                 _arows = _tbl_a.get("rows") or []
                 _aid_set: set = set()
                 for _r in _arows:

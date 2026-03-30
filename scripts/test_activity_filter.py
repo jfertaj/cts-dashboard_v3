@@ -212,6 +212,55 @@ test(
     "Phrasing: question mark at end",
 )
 
+test(
+    "PHRASING_BELONG_BOTH_AND",
+    "show me sites that belong to both BARICADE and Safeguard activities",
+    lambda r: row_count(r) > 0 and row_count(r) < 50,
+    "Phrasing: 'belong to both X and Y activities'",
+)
+
+test(
+    "PHRASING_PARTICIPATE_AND",
+    "which sites participate in DETECT and Fabulinus activities?",
+    lambda r: row_count(r) > 0 and row_count(r) < 50,
+    "Phrasing: 'participate in X and Y activities?'",
+)
+
+test(
+    "PHRASING_INVOLVED_BOTH",
+    "sites involved in both DETECT and Beta Preserve activities",
+    lambda r: row_count(r) > 0 and row_count(r) < 50,
+    "Phrasing: 'involved in both X and Y activities'",
+)
+
+test(
+    "PHRASING_IN_BOTH",
+    "show me sites in both Baricade and Fabulinus activities",
+    lambda r: row_count(r) > 0 and row_count(r) < 50,
+    "Phrasing: 'in both X and Y activities'",
+)
+
+test(
+    "PHRASING_BELONG_SINGLE",
+    "sites that belong to Fabulinus activities",
+    lambda r: row_count(r) > 0,
+    "Phrasing: 'belong to X activities' (single name)",
+)
+
+test(
+    "PHRASING_PARTICIPATE_OR",
+    "sites participating in DETECT or Safeguard activities",
+    lambda r: row_count(r) > 50,
+    "Phrasing: 'participating in X or Y activities' (OR union)",
+)
+
+test(
+    "EXISTING_ASSIGNED_TO",
+    "which sites are assigned to the DETECT activity?",
+    lambda r: row_count(r) > 0,
+    "Existing: 'assigned to X' handler still works",
+)
+
 # ── 6. Country scoping ───────────────────────────────────────
 
 test(
