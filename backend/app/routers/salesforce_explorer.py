@@ -2434,7 +2434,9 @@ async def explorer_search(
         for _fld, _rules in _field_groups.items():
             if len(_rules) < 2:
                 continue
-            _base = f"Type IN ({TYPE_IN}) AND AccountId != null"
+            # Search across ALL Opportunity types (Qualification, Profiling, Activity)
+            _act_rt_in = "'Activity', 'RT_Activity'"
+            _base = f"(Type IN ({TYPE_IN}) OR RecordType.DeveloperName IN ({_act_rt_in}) OR Type = 'Activity') AND AccountId != null"
             _per_rule_aids: List[Set[str]] = []
             for _idx, _nr in _rules:
                 _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_nr]))
