@@ -2434,21 +2434,29 @@ async def explorer_search(
         for _fld, _rules in _field_groups.items():
             if len(_rules) < 2:
                 continue
-            # Search across ALL Opportunity types (Qualification, Profiling, Activity)
-            _act_rt_in = "'Activity', 'RT_Activity'"
-            _base = f"(Type IN ({TYPE_IN}) OR RecordType.DeveloperName IN ({_act_rt_in}) OR Type = 'Activity') AND AccountId != null"
             _per_rule_aids: List[Set[str]] = []
             for _idx, _nr in _rules:
                 _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_nr]))
                 if not _nw:
                     continue
-                _nsoql = f"SELECT AccountId FROM Opportunity WHERE {_base} AND ({_nw})"
+                # 1) Qualification/Profiling Opportunities: AccountId links to site
+                _opp_soql = f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null AND ({_nw})"
+                # 2) Activity Opportunities: linked to sites via Assignment__c
+                _asn_nw = _nw.replace("Name ", "C_Opportunity_Name__r.Name ")
+                _asn_soql = f"SELECT C_Account__c FROM Assignment__c WHERE {_asn_nw} AND C_Account__c != null"
+                _aids: Set[str] = set()
                 try:
-                    _nrecs = await asyncio.to_thread(_sf_query_all, sf, _nsoql)
-                    _aids = {r.get("AccountId") for r in (_nrecs or []) if r.get("AccountId")}
-                    _per_rule_aids.append(_aids)
+                    _opp_recs = await asyncio.to_thread(_sf_query_all, sf, _opp_soql)
+                    _aids.update(r.get("AccountId") for r in (_opp_recs or []) if r.get("AccountId"))
                 except Exception:
                     pass
+                try:
+                    _asn_recs = await asyncio.to_thread(_sf_query_all, sf, _asn_soql)
+                    _aids.update(r.get("C_Account__c") for r in (_asn_recs or []) if r.get("C_Account__c"))
+                except Exception:
+                    pass
+                if _aids or True:  # always append (empty set = valid "no matches")
+                    _per_rule_aids.append(_aids)
             if _per_rule_aids:
                 _intersection = _per_rule_aids[0]
                 for _s in _per_rule_aids[1:]:
