@@ -2423,7 +2423,14 @@ async def explorer_search(
     _raw_logic = filters.get("logic") or "AND"
     _STRING_OPS = {"contains", "not_contains", "starts_with", "ends_with"}
     _pre_query_acc_ids: Optional[Set[str]] = None
-    if _raw_logic == "AND" or _is_logic_expr(_raw_logic):
+    # Only apply for simple AND or all-AND expressions (e.g. "1 AND 2 AND 3").
+    # Complex expressions with OR like "(1 AND 2) OR 3" cannot use simple
+    # intersection — the OR branch would be incorrectly excluded.
+    _is_simple_and = (
+        _raw_logic == "AND"
+        or (_is_logic_expr(_raw_logic) and not re.search(r"\bOR\b", _raw_logic, re.I))
+    )
+    if _is_simple_and:
         # Group sf_rules by field — only string-op rules
         _field_groups: Dict[str, List[tuple]] = {}
         for i, r in enumerate(sf_rules):
