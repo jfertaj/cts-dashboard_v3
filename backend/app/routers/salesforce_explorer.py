@@ -2411,8 +2411,57 @@ async def explorer_search(
                 sf_rules.append(Rule(field=f, operator=op, value=val))
                 sf_rule_indices.append(_rule_1idx)
 
-    merged_rules = sf_rules + _prefix_account_rules_for_where(account_rules)
+    # ── Multi-value AND override for same-field string rules ────
+    # When multiple rules target the SAME sf field with string ops (contains,
+    # starts_with, etc.) under AND logic, each condition may match a DIFFERENT
+    # Opportunity/record for the same Account. A single SOQL WHERE with AND
+    # requires ONE record to match all conditions — which is impossible when
+    # values live on separate records (e.g., Opp Name "DETECT" vs "Safeguard").
+    # Strategy: per unique field with ≥2 string-op rules, run a pre-query per
+    # rule to find matching AccountIds, intersect them, then inject the
+    # intersection into the main query.
     _raw_logic = filters.get("logic") or "AND"
+    _STRING_OPS = {"contains", "not_contains", "starts_with", "ends_with"}
+    _pre_query_acc_ids: Optional[Set[str]] = None
+    if _raw_logic == "AND" or _is_logic_expr(_raw_logic):
+        # Group sf_rules by field — only string-op rules
+        _field_groups: Dict[str, List[tuple]] = {}
+        for i, r in enumerate(sf_rules):
+            if r.operator in _STRING_OPS:
+                _field_groups.setdefault(r.field, []).append((i, r))
+        # Process fields with ≥2 rules (multi-value same-field AND)
+        _remove_indices: Set[int] = set()
+        for _fld, _rules in _field_groups.items():
+            if len(_rules) < 2:
+                continue
+            _base = f"Type IN ({TYPE_IN}) AND AccountId != null"
+            _per_rule_aids: List[Set[str]] = []
+            for _idx, _nr in _rules:
+                _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_nr]))
+                if not _nw:
+                    continue
+                _nsoql = f"SELECT AccountId FROM Opportunity WHERE {_base} AND ({_nw})"
+                try:
+                    _nrecs = await asyncio.to_thread(_sf_query_all, sf, _nsoql)
+                    _aids = {r.get("AccountId") for r in (_nrecs or []) if r.get("AccountId")}
+                    _per_rule_aids.append(_aids)
+                except Exception:
+                    pass
+            if _per_rule_aids:
+                _intersection = _per_rule_aids[0]
+                for _s in _per_rule_aids[1:]:
+                    _intersection &= _s
+                # Merge with any previous pre-query intersection
+                if _pre_query_acc_ids is None:
+                    _pre_query_acc_ids = _intersection
+                else:
+                    _pre_query_acc_ids &= _intersection
+                _remove_indices.update(i for i, _ in _rules)
+        if _remove_indices:
+            sf_rules = [r for i, r in enumerate(sf_rules) if i not in _remove_indices]
+            sf_rule_indices = [idx for i, idx in enumerate(sf_rule_indices) if i not in _remove_indices]
+
+    merged_rules = sf_rules + _prefix_account_rules_for_where(account_rules)
     # For expression-based logic (e.g. "1 AND (2 OR 3)"), SOQL uses OR (safe over-inclusion)
     # Python-side pass_* functions do exact evaluation using the expression.
     _soql_logic: str = _raw_logic if _raw_logic in ("AND", "OR") else "OR"
@@ -2446,6 +2495,13 @@ async def explorer_search(
     # 1) OPP “normales” (Qualification / Profiling)
     # ===========================================================
     base_where  = f"Type IN ({TYPE_IN}) AND AccountId != null"
+    # Inject pre-query AccountId intersection (multi-Name AND)
+    if _pre_query_acc_ids is not None:
+        if not _pre_query_acc_ids:
+            # Empty intersection → no results possible
+            return {"rows": [], "columns": [], "points": []}
+        _aid_in = ", ".join(f"'{a}'" for a in sorted(_pre_query_acc_ids))
+        base_where += f" AND AccountId IN ({_aid_in})"
     extra_where = _build_sf_where(sf_filter)
     if extra_where and not extra_where.strip().startswith("("):
         extra_where = f"({extra_where})"
