@@ -2436,10 +2436,13 @@ async def explorer_search(
         for i, r in enumerate(sf_rules):
             if r.operator in _STRING_OPS:
                 _field_groups.setdefault(r.field, []).append((i, r))
-        # Process fields with ≥2 rules (multi-value same-field AND)
+        # Process grouped rules. For "Name" field: ≥1 rule triggers pre-query
+        # (Activity Opps are linked via Assignment__c, not the main SOQL).
+        # For other fields: ≥2 rules (multi-value same-field AND).
         _remove_indices: Set[int] = set()
         for _fld, _rules in _field_groups.items():
-            if len(_rules) < 2:
+            _min_rules = 1 if _fld == "Name" else 2
+            if len(_rules) < _min_rules:
                 continue
             _per_rule_aids: List[Set[str]] = []
             for _idx, _nr in _rules:
