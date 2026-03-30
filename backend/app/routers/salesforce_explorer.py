@@ -1887,6 +1887,8 @@ def collapse_rows_by_account(raw_rows: List[Dict[str, Any]]) -> List[Dict[str, A
 
 
 ACCOUNT_EXTRA_FIELDS: Dict[str, Dict[str, Any]] = {
+    # Account name — needed for Python-side pass_account() "contains" checks
+    "Name": {"type": "string", "label": "Account Name"},
     # CS contribution (booleans)
     "INNODIA_Clinical_Trial_Site__c": {"type": "boolean", "label": "CS: Clinical Trial Site"},
     "Clinical_Site_CS__c": {"type": "boolean", "label": "CS: Clinical Site"},

@@ -899,6 +899,68 @@ def handle_activity(
         }
         return {"answer": f"<p>{_ans_awc}</p>", "table": _tbl_awc_out}
 
+    # 12d) "sites that have DETECT and SAFEGUARD activities"
+    #      "sites with Baricade activities"
+    #      Captures activity name(s) before "activit*" from "have/with" phrasing.
+    #      Multiple names joined by "and"/"or"/","  → AND or OR semantics.
+    _m_have_act = re.search(
+        r"\b(?:have|with|having)\s+([\w\s'\-\(\),&/]+?)\s+activit",
+        s, re.I,
+    )
+    if _m_have_act:
+        _raw_names = _m_have_act.group(1).strip()
+        # strip leading stop-words
+        _raw_names = re.sub(r"^(?:the|a|an|any|some|both)\s+", "", _raw_names, flags=re.I)
+        # detect OR vs AND
+        _has_or = bool(re.search(r"\bor\b", _raw_names, re.I))
+        # split on "and", "or", ",", "&", "/"
+        _parts_act = re.split(r"\s+and\s+|\s+or\s+|[,&/]", _raw_names, flags=re.I)
+        _act_names = [p.strip().rstrip(".,;?") for p in _parts_act if p.strip()]
+        _stop_names = {"the", "a", "an", "all", "any", "some", "this", "that", "no", "each"}
+        _act_names = [n for n in _act_names if n.lower() not in _stop_names and len(n) >= 2]
+        if _act_names:
+            # Lookup sites for each activity name
+            _sets_by_name: Dict[str, set] = {}
+            _rows_by_acc: Dict[str, dict] = {}
+            _act_label_by_acc: Dict[str, set] = {}
+            for _aname in _act_names:
+                _tbl_a = tools.tool_sites_by_activity(sf, name=_aname, countries=countries2 or None, exact=False)
+                _arows = _tbl_a.get("rows") or []
+                _aid_set: set = set()
+                for _r in _arows:
+                    _aid = str(_r.get("account_id") or "")
+                    if _aid:
+                        _aid_set.add(_aid)
+                        _rows_by_acc.setdefault(_aid, _r)
+                        _act_label_by_acc.setdefault(_aid, set()).add(
+                            _r.get("activity_name") or _aname
+                        )
+                _sets_by_name[_aname] = _aid_set
+            # Combine: AND (intersection) or OR (union)
+            if _has_or:
+                _final_aids = set().union(*_sets_by_name.values()) if _sets_by_name else set()
+            else:
+                _all_sets = list(_sets_by_name.values())
+                _final_aids = _all_sets[0].intersection(*_all_sets[1:]) if _all_sets else set()
+            _out_rows = []
+            for _aid in sorted(_final_aids):
+                _base = dict(_rows_by_acc.get(_aid, {}))
+                _base["matched_activities"] = "; ".join(sorted(_act_label_by_acc.get(_aid, set())))
+                _out_rows.append(_base)
+            _names_str = ", ".join(f"<em>{n}</em>" for n in _act_names)
+            _logic_word = "or" if _has_or else "and"
+            _ans_12d = (
+                f"Found <strong>{len(_out_rows)}</strong> site(s) with "
+                f"{_names_str} activities ({_logic_word} match)."
+            )
+            _cols_12d = [
+                {"key": "site", "label": "Site"},
+                {"key": "city", "label": "City"},
+                {"key": "country", "label": "Country"},
+                {"key": "matched_activities", "label": "Matched Activities"},
+            ]
+            return {"answer": f"<p>{_ans_12d}</p>", "table": {"columns": _cols_12d, "rows": _out_rows}}
+
     # 13) fallthrough: sites with any activity
     table = tools.tool_sites_with_any_activity(sf, countries=countries2 or None)
     rows = table.get("rows") or []
