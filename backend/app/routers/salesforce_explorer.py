@@ -2424,78 +2424,101 @@ async def explorer_search(
     _STRING_OPS = {"contains", "not_contains", "starts_with", "ends_with"}
     _NEGATIVE_OPS = {"not_contains"}
     _pre_query_acc_ids: Optional[Set[str]] = None
-    _pre_query_exclude_ids: Optional[Set[str]] = None  # accounts to EXCLUDE
-    # Only apply for simple AND or all-AND expressions (e.g. "1 AND 2 AND 3").
-    # Complex expressions with OR like "(1 AND 2) OR 3" cannot use simple
-    # intersection — the OR branch would be incorrectly excluded.
-    _is_simple_and = (
+    _pre_query_exclude_ids: Optional[Set[str]] = None
+
+    # ── Name pre-query: ALWAYS resolve Name string-op rules via pre-query ──
+    # Activity Opportunities are linked to sites via Assignment__c, not the main
+    # SOQL's AccountId. Name rules must be evaluated Python-side using pre-computed
+    # per-rule AccountId sets, regardless of expression type (AND, OR, or complex).
+    #
+    # Per-rule sets: {rule_1idx: (account_ids_that_match, is_negative)}
+    # - contains/starts_with/ends_with: aid IN set → True
+    # - not_contains: aid IN set → False (rule is satisfied when NOT in set)
+    _name_rule_sets: Dict[int, tuple] = {}  # {1idx: (set_of_aids, is_negative)}
+    _name_rule_indices: List[int] = []
+    _name_remove_sf_indices: Set[int] = set()
+
+    for i, r in enumerate(sf_rules):
+        if r.field == "Name" and r.operator in _STRING_OPS:
+            _rule_1idx = sf_rule_indices[i]
+            _is_neg = r.operator in _NEGATIVE_OPS
+            # Always run POSITIVE query to find accounts that HAVE the term
+            _pos_rule = Rule(field=r.field, operator="contains", value=r.value)
+            _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_pos_rule]))
+            if not _nw:
+                continue
+            _opp_soql = f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null AND ({_nw})"
+            _asn_nw = _nw.replace("Name ", "C_Opportunity_Name__r.Name ")
+            _asn_soql = f"SELECT C_Account__c FROM Assignment__c WHERE {_asn_nw} AND C_Account__c != null"
+            _aids: Set[str] = set()
+            try:
+                _opp_recs = await asyncio.to_thread(_sf_query_all, sf, _opp_soql)
+                _aids.update(r2.get("AccountId") for r2 in (_opp_recs or []) if r2.get("AccountId"))
+            except Exception:
+                pass
+            try:
+                _asn_recs = await asyncio.to_thread(_sf_query_all, sf, _asn_soql)
+                _aids.update(r2.get("C_Account__c") for r2 in (_asn_recs or []) if r2.get("C_Account__c"))
+            except Exception:
+                pass
+            _name_rule_sets[_rule_1idx] = (_aids, _is_neg)
+            _name_rule_indices.append(_rule_1idx)
+            _name_remove_sf_indices.add(i)
+
+    if _name_remove_sf_indices:
+        sf_rules = [r for i, r in enumerate(sf_rules) if i not in _name_remove_sf_indices]
+        sf_rule_indices = [idx for i, idx in enumerate(sf_rule_indices) if i not in _name_remove_sf_indices]
+        # For simple AND: compute aggregate include/exclude for SOQL WHERE injection
+        _is_simple_and = (
+            _raw_logic == "AND"
+            or (_is_logic_expr(_raw_logic) and not re.search(r"\bOR\b", _raw_logic, re.I))
+        )
+        if _is_simple_and:
+            _pos_sets = [aids for aids, neg in _name_rule_sets.values() if not neg]
+            _neg_sets = [aids for aids, neg in _name_rule_sets.values() if neg]
+            if _pos_sets:
+                _pre_query_acc_ids = _pos_sets[0]
+                for _s in _pos_sets[1:]:
+                    _pre_query_acc_ids &= _s
+            if _neg_sets:
+                _pre_query_exclude_ids = set().union(*_neg_sets)
+
+    # ── Non-Name multi-value AND: ≥2 same-field string-op rules ──
+    _is_simple_and_for_others = (
         _raw_logic == "AND"
         or (_is_logic_expr(_raw_logic) and not re.search(r"\bOR\b", _raw_logic, re.I))
     )
-    if _is_simple_and:
-        # Group sf_rules by field — only string-op rules
+    if _is_simple_and_for_others:
         _field_groups: Dict[str, List[tuple]] = {}
         for i, r in enumerate(sf_rules):
-            if r.operator in _STRING_OPS:
+            if r.operator in _STRING_OPS and r.field != "Name":
                 _field_groups.setdefault(r.field, []).append((i, r))
-        # Process grouped rules. For "Name" field: ≥1 rule triggers pre-query
-        # (Activity Opps are linked via Assignment__c, not the main SOQL).
-        # For other fields: ≥2 rules (multi-value same-field AND).
         _remove_indices: Set[int] = set()
         for _fld, _rules in _field_groups.items():
-            _min_rules = 1 if _fld == "Name" else 2
-            if len(_rules) < _min_rules:
+            if len(_rules) < 2:
                 continue
-            _per_rule_include: List[Set[str]] = []   # positive: accounts TO include
-            _per_rule_exclude: List[Set[str]] = []   # negative: accounts TO exclude
+            _per_rule_aids: List[Set[str]] = []
             for _idx, _nr in _rules:
-                _is_neg = _nr.operator in _NEGATIVE_OPS
-                # For negative ops, run the POSITIVE version to find accounts
-                # that DO match, then we'll exclude them.
-                if _is_neg:
-                    _pos_rule = Rule(field=_nr.field, operator="contains", value=_nr.value)
-                else:
-                    _pos_rule = _nr
-                _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_pos_rule]))
+                _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_nr]))
                 if not _nw:
                     continue
-                # 1) Qualification/Profiling Opportunities: AccountId links to site
                 _opp_soql = f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null AND ({_nw})"
-                # 2) Activity Opportunities: linked to sites via Assignment__c
-                _asn_nw = _nw.replace("Name ", "C_Opportunity_Name__r.Name ")
-                _asn_soql = f"SELECT C_Account__c FROM Assignment__c WHERE {_asn_nw} AND C_Account__c != null"
-                _aids: Set[str] = set()
+                _aids2: Set[str] = set()
                 try:
                     _opp_recs = await asyncio.to_thread(_sf_query_all, sf, _opp_soql)
-                    _aids.update(r.get("AccountId") for r in (_opp_recs or []) if r.get("AccountId"))
+                    _aids2.update(r2.get("AccountId") for r2 in (_opp_recs or []) if r2.get("AccountId"))
                 except Exception:
                     pass
-                try:
-                    _asn_recs = await asyncio.to_thread(_sf_query_all, sf, _asn_soql)
-                    _aids.update(r.get("C_Account__c") for r in (_asn_recs or []) if r.get("C_Account__c"))
-                except Exception:
-                    pass
-                if _is_neg:
-                    _per_rule_exclude.append(_aids)  # these accounts HAVE the term → exclude
-                else:
-                    _per_rule_include.append(_aids)  # these accounts HAVE the term → include
-            # Positive rules: intersect (account must match ALL positive conditions)
-            if _per_rule_include:
-                _intersection = _per_rule_include[0]
-                for _s in _per_rule_include[1:]:
+                _per_rule_aids.append(_aids2)
+            if _per_rule_aids:
+                _intersection = _per_rule_aids[0]
+                for _s in _per_rule_aids[1:]:
                     _intersection &= _s
                 if _pre_query_acc_ids is None:
                     _pre_query_acc_ids = _intersection
                 else:
                     _pre_query_acc_ids &= _intersection
-            # Negative rules: union (exclude account if it matches ANY negative condition)
-            if _per_rule_exclude:
-                _excluded = set().union(*_per_rule_exclude)
-                if _pre_query_exclude_ids is None:
-                    _pre_query_exclude_ids = _excluded
-                else:
-                    _pre_query_exclude_ids |= _excluded
-            _remove_indices.update(i for i, _ in _rules)
+                _remove_indices.update(i for i, _ in _rules)
         if _remove_indices:
             sf_rules = [r for i, r in enumerate(sf_rules) if i not in _remove_indices]
             sf_rule_indices = [idx for i, idx in enumerate(sf_rule_indices) if i not in _remove_indices]
@@ -3026,6 +3049,28 @@ async def explorer_search(
         glue_and = logic_str == "AND"
         return all(res) if glue_and else any(res)
 
+    # pass_name: evaluates Name pre-query rules Python-side.
+    # Each rule has a pre-computed AccountId set from the pre-query.
+    # - contains/starts_with/ends_with: aid must be IN the set
+    # - not_contains: aid must NOT be in the set
+    def pass_name(aid: str) -> bool:
+        if not _name_rule_sets:
+            return True
+        res = []
+        _sorted_indices = sorted(_name_rule_sets.keys())
+        for _idx in _sorted_indices:
+            _aids_set, _is_neg = _name_rule_sets[_idx]
+            if _is_neg:
+                res.append(str(aid) not in _aids_set)  # not_contains: pass if NOT in set
+            else:
+                res.append(str(aid) in _aids_set)      # contains: pass if IN set
+        logic_str = filters.get("logic") or "AND"
+        if _is_logic_expr(logic_str):
+            expr_results = {_sorted_indices[i]: res[i] for i in range(len(res))}
+            return _eval_logic_expr_be(logic_str, expr_results)
+        glue_and = logic_str == "AND"
+        return all(res) if glue_and else any(res)
+
     # Helper: applies all Python-side pass_* checks respecting root AND/OR logic.
     # For AND (default): all categories must pass.
     # For OR: at least one category with actual rules must pass.
@@ -3034,19 +3079,22 @@ async def explorer_search(
     def passes_row_checks(acc: Dict[str, Any], qual_data: Dict[str, Any], aid: str) -> bool:
         # Expression mode: each pass_* evaluates its category rules using the expression.
         # SF rules are pre-filtered by SOQL → treated as True for any surviving row.
-        # This correctly handles same-category expressions; cross-category defaults to AND.
+        # Name rules are resolved via pre-query → evaluated Python-side by pass_name.
         if _is_logic_expr(_root_logic):
             return (pass_site(acc) and pass_qual(qual_data) and
-                    pass_member(aid) and pass_account(aid) and pass_extra(aid))
+                    pass_member(aid) and pass_account(aid) and pass_extra(aid) and
+                    pass_name(aid))
         if _root_and:
             return (pass_site(acc) and pass_qual(qual_data) and
-                    pass_member(aid) and pass_account(aid) and pass_extra(aid))
+                    pass_member(aid) and pass_account(aid) and pass_extra(aid) and
+                    pass_name(aid))
         checks = []
-        if site_rules:    checks.append(pass_site(acc))
-        if qual_rules:    checks.append(pass_qual(qual_data))
-        if member_rules:  checks.append(pass_member(aid))
-        if account_rules: checks.append(pass_account(aid))
-        if extra_rules:   checks.append(pass_extra(aid))
+        if site_rules:       checks.append(pass_site(acc))
+        if qual_rules:       checks.append(pass_qual(qual_data))
+        if member_rules:     checks.append(pass_member(aid))
+        if account_rules:    checks.append(pass_account(aid))
+        if extra_rules:      checks.append(pass_extra(aid))
+        if _name_rule_sets:  checks.append(pass_name(aid))
         return any(checks) if checks else True
 
     # ===========================================================
