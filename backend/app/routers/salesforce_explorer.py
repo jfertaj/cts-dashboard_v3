@@ -2422,7 +2422,9 @@ async def explorer_search(
     # intersection into the main query.
     _raw_logic = filters.get("logic") or "AND"
     _STRING_OPS = {"contains", "not_contains", "starts_with", "ends_with"}
+    _NEGATIVE_OPS = {"not_contains"}
     _pre_query_acc_ids: Optional[Set[str]] = None
+    _pre_query_exclude_ids: Optional[Set[str]] = None  # accounts to EXCLUDE
     # Only apply for simple AND or all-AND expressions (e.g. "1 AND 2 AND 3").
     # Complex expressions with OR like "(1 AND 2) OR 3" cannot use simple
     # intersection — the OR branch would be incorrectly excluded.
@@ -2444,9 +2446,17 @@ async def explorer_search(
             _min_rules = 1 if _fld == "Name" else 2
             if len(_rules) < _min_rules:
                 continue
-            _per_rule_aids: List[Set[str]] = []
+            _per_rule_include: List[Set[str]] = []   # positive: accounts TO include
+            _per_rule_exclude: List[Set[str]] = []   # negative: accounts TO exclude
             for _idx, _nr in _rules:
-                _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_nr]))
+                _is_neg = _nr.operator in _NEGATIVE_OPS
+                # For negative ops, run the POSITIVE version to find accounts
+                # that DO match, then we'll exclude them.
+                if _is_neg:
+                    _pos_rule = Rule(field=_nr.field, operator="contains", value=_nr.value)
+                else:
+                    _pos_rule = _nr
+                _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_pos_rule]))
                 if not _nw:
                     continue
                 # 1) Qualification/Profiling Opportunities: AccountId links to site
@@ -2465,18 +2475,27 @@ async def explorer_search(
                     _aids.update(r.get("C_Account__c") for r in (_asn_recs or []) if r.get("C_Account__c"))
                 except Exception:
                     pass
-                if _aids or True:  # always append (empty set = valid "no matches")
-                    _per_rule_aids.append(_aids)
-            if _per_rule_aids:
-                _intersection = _per_rule_aids[0]
-                for _s in _per_rule_aids[1:]:
+                if _is_neg:
+                    _per_rule_exclude.append(_aids)  # these accounts HAVE the term → exclude
+                else:
+                    _per_rule_include.append(_aids)  # these accounts HAVE the term → include
+            # Positive rules: intersect (account must match ALL positive conditions)
+            if _per_rule_include:
+                _intersection = _per_rule_include[0]
+                for _s in _per_rule_include[1:]:
                     _intersection &= _s
-                # Merge with any previous pre-query intersection
                 if _pre_query_acc_ids is None:
                     _pre_query_acc_ids = _intersection
                 else:
                     _pre_query_acc_ids &= _intersection
-                _remove_indices.update(i for i, _ in _rules)
+            # Negative rules: union (exclude account if it matches ANY negative condition)
+            if _per_rule_exclude:
+                _excluded = set().union(*_per_rule_exclude)
+                if _pre_query_exclude_ids is None:
+                    _pre_query_exclude_ids = _excluded
+                else:
+                    _pre_query_exclude_ids |= _excluded
+            _remove_indices.update(i for i, _ in _rules)
         if _remove_indices:
             sf_rules = [r for i, r in enumerate(sf_rules) if i not in _remove_indices]
             sf_rule_indices = [idx for i, idx in enumerate(sf_rule_indices) if i not in _remove_indices]
@@ -2515,13 +2534,17 @@ async def explorer_search(
     # 1) OPP “normales” (Qualification / Profiling)
     # ===========================================================
     base_where  = f"Type IN ({TYPE_IN}) AND AccountId != null"
-    # Inject pre-query AccountId intersection (multi-Name AND)
+    # Inject pre-query AccountId filters (Name pre-query)
     if _pre_query_acc_ids is not None:
-        if not _pre_query_acc_ids:
-            # Empty intersection → no results possible
+        if not _pre_query_acc_ids and _pre_query_exclude_ids is None:
+            # Empty positive intersection + no exclusions → no results possible
             return {"rows": [], "columns": [], "points": []}
-        _aid_in = ", ".join(f"'{a}'" for a in sorted(_pre_query_acc_ids))
-        base_where += f" AND AccountId IN ({_aid_in})"
+        if _pre_query_acc_ids:
+            _aid_in = ", ".join(f"'{a}'" for a in sorted(_pre_query_acc_ids))
+            base_where += f" AND AccountId IN ({_aid_in})"
+    if _pre_query_exclude_ids:
+        _aid_not_in = ", ".join(f"'{a}'" for a in sorted(_pre_query_exclude_ids))
+        base_where += f" AND AccountId NOT IN ({_aid_not_in})"
     extra_where = _build_sf_where(sf_filter)
     if extra_where and not extra_where.strip().startswith("("):
         extra_where = f"({extra_where})"
