@@ -1081,7 +1081,9 @@ def _build_sf_where(q: FilterQuery) -> str:
         if op == "contains":
             clauses.append(f"{f} LIKE '%{sv}%'"); continue
         if op == "not_contains":
-            clauses.append(f"{f} NOT LIKE '%{sv}%'"); continue
+            # SOQL does not support `field NOT LIKE 'x'`; use logical NOT.
+            # Include NULL-safety: NULL values semantically "don't contain" the term.
+            clauses.append(f"({f} = null OR (NOT {f} LIKE '%{sv}%'))"); continue
         if op == "starts_with":
             clauses.append(f"{f} LIKE '{sv}%'"); continue
         if op == "ends_with":

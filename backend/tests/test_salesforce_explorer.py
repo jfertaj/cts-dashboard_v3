@@ -223,3 +223,41 @@ class TestPassAccountExpressionMode:
         indices = [1, 2]
         vals = {"Name": "Other", "BillingCity": "Berlin"}
         assert self._pass_account_fixed(rules, indices, {"acc1": vals}, "acc1", "OR") is True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _build_sf_where — SOQL builder (regression for bug fixed 2026-04-20)
+# Salesforce SOQL does NOT accept `field NOT LIKE 'x'`. Must use `NOT (field LIKE 'x')`.
+# ──────────────────────────────────────────────────────────────────────────────
+
+from app.routers.filter_engine import Rule, FilterQuery
+from app.routers.salesforce_explorer import _build_sf_where
+
+
+class TestBuildSfWhereNotContains:
+    def test_not_contains_uses_logical_not_not_raw_not_like(self):
+        q = FilterQuery(logic="AND", rules=[
+            Rule(field="Account.CTU_Status__c", operator="not_contains", value="profilation")
+        ])
+        out = _build_sf_where(q)
+        assert "NOT LIKE" not in out, (
+            f"SOQL must not contain raw 'NOT LIKE' (invalid syntax). Got: {out}"
+        )
+        assert "NOT Account.CTU_Status__c LIKE '%profilation%'" in out
+
+    def test_not_contains_includes_null_safety(self):
+        q = FilterQuery(logic="AND", rules=[
+            Rule(field="Account.CTU_Status__c", operator="not_contains", value="profilation")
+        ])
+        out = _build_sf_where(q)
+        assert "Account.CTU_Status__c = null" in out, (
+            f"NULL records should match 'not_contains'. Got: {out}"
+        )
+
+    def test_contains_still_uses_plain_like(self):
+        q = FilterQuery(logic="AND", rules=[
+            Rule(field="Account.Name", operator="contains", value="foo")
+        ])
+        out = _build_sf_where(q)
+        assert "Account.Name LIKE '%foo%'" in out
+        assert "NOT" not in out
