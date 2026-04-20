@@ -3,6 +3,36 @@
 from typing import Iterable
 
 
+def soql_escape_quote(v: str) -> str:
+    """
+    Escape a user-supplied value for a SOQL string literal used with `=`,
+    `!=`, `IN (…)`, etc. Backslash must be escaped first so escape-backslashes
+    introduced for the quote aren't re-escaped.
+
+    Use `soql_escape_like_value` instead if the value will go inside a LIKE
+    pattern (so `%` and `_` are also treated as literals).
+    """
+    if not v:
+        return ""
+    return v.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def soql_escape_like_value(v: str) -> str:
+    """
+    Escape a user-supplied value so it can be safely embedded inside a SOQL
+    LIKE pattern: `... LIKE '%<escaped>%'`.
+
+    SOQL LIKE requires escaping `\\`, `'`, `%`, and `_`.
+    """
+    if not v:
+        return ""
+    return (
+        soql_escape_quote(v)
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
 def soql_in_ids(field: str, ids: Iterable[str]) -> str:
     """
     Construye un IN (...) seguro. Si la lista viene vacía, nunca rompe.

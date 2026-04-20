@@ -261,3 +261,63 @@ class TestBuildSfWhereNotContains:
         out = _build_sf_where(q)
         assert "Account.Name LIKE '%foo%'" in out
         assert "NOT" not in out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SOQL LIKE-value escaping (regression 2026-04-20)
+# A user value containing `'`, `%`, `\`, or `_` must be escaped before being
+# embedded in a LIKE pattern, otherwise we either break the query or change its
+# semantics (e.g. `%` matches everything).
+# ──────────────────────────────────────────────────────────────────────────────
+
+from app.utils.soql_helpers import soql_escape_like_value
+
+
+class TestSoqlEscapeLikeValue:
+    def test_single_quote_escaped(self):
+        # "L'Oréal" must not break the query
+        assert soql_escape_like_value("L'Oréal") == "L\\'Oréal"
+
+    def test_percent_escaped(self):
+        # user-typed '%' must not act as a wildcard
+        assert soql_escape_like_value("50%") == "50\\%"
+
+    def test_underscore_escaped(self):
+        assert soql_escape_like_value("foo_bar") == "foo\\_bar"
+
+    def test_backslash_escaped_first(self):
+        # literal backslash must be doubled; it must happen BEFORE other escapes
+        # so the inserted escape-backslashes aren't re-escaped.
+        assert soql_escape_like_value("a\\b") == "a\\\\b"
+
+    def test_combined(self):
+        assert soql_escape_like_value("L'O%al_\\x") == "L\\'O\\%al\\_\\\\x"
+
+    def test_empty_string(self):
+        assert soql_escape_like_value("") == ""
+
+
+class TestBuildSfWhereLikeEscaping:
+    def test_contains_escapes_percent(self):
+        q = FilterQuery(logic="AND", rules=[
+            Rule(field="Account.Name", operator="contains", value="50%")
+        ])
+        out = _build_sf_where(q)
+        # Expect '%50\%%' — the user's `%` is escaped, the wrapping `%` are wildcards
+        assert "LIKE '%50\\%%'" in out, f"got: {out}"
+
+    def test_contains_escapes_single_quote(self):
+        q = FilterQuery(logic="AND", rules=[
+            Rule(field="Account.Name", operator="contains", value="L'Oréal")
+        ])
+        out = _build_sf_where(q)
+        # Must contain the escaped form \' (not a bare ')
+        assert "L\\'Oréal" in out, f"got: {out}"
+        assert "L'Oréal" not in out, f"unescaped value leaked into SOQL: {out}"
+
+    def test_not_contains_escapes_percent(self):
+        q = FilterQuery(logic="AND", rules=[
+            Rule(field="Account.Name", operator="not_contains", value="50%")
+        ])
+        out = _build_sf_where(q)
+        assert "50\\%" in out, f"got: {out}"

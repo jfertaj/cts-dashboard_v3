@@ -20,6 +20,7 @@ from simple_salesforce.exceptions import (
 
 from app.routers.salesforce_extras_batch import batch_fetch_account_extras
 from app.utils.country_norms import norm_to_iso2, iso2_to_display, ISO2_TO_DISPLAY as _ISO2_TO_DISPLAY
+from app.utils.soql_helpers import soql_escape_like_value
 
 from app.routers.filter_engine import (
     Rule, FilterQuery,
@@ -823,12 +824,13 @@ def _sf_query_all(sf, soql: str):
         log.error("SF malformed request: %s | soql snippet: %.200s", e, soql)
         raise HTTPException(status_code=400, detail="Salesforce query error: invalid field or filter. Check the filter configuration.")
     except (SalesforceGeneralError, SalesforceRefusedRequest) as e:
-        log.error("SF general/refused error: %s", e)
+        log.error("SF general/refused error: %s | soql snippet: %.200s", e, soql)
         raise HTTPException(status_code=500, detail="Salesforce returned an error. Please try again.")
-    except SalesforceResourceNotFound:
+    except SalesforceResourceNotFound as e:
+        log.error("SF resource not found: %s | soql snippet: %.200s", e, soql)
         raise HTTPException(status_code=404, detail="Salesforce resource not found.")
-    except Exception as e:
-        log.exception("SF query unexpected failure")
+    except Exception:
+        log.exception("SF query unexpected failure | soql snippet: %.200s", soql)
         raise HTTPException(status_code=500, detail="Salesforce query failed. Please try again.")
 
 def _get_sf(request: Request):
@@ -1076,8 +1078,8 @@ def _build_sf_where(q: FilterQuery) -> str:
             clauses.append(f"{f} {sop} '{sv}'")
             continue
 
-        # String LIKE ops
-        sv = _escape_quotes(str(r.value or ""))
+        # String LIKE ops — use LIKE-aware escaping (handles ', %, _, \)
+        sv = soql_escape_like_value(str(r.value or ""))
         if op == "contains":
             clauses.append(f"{f} LIKE '%{sv}%'"); continue
         if op == "not_contains":
