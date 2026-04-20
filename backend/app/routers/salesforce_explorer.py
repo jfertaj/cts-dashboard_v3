@@ -2442,6 +2442,10 @@ async def explorer_search(
     _name_rule_indices: List[int] = []
     _name_remove_sf_indices: Set[int] = set()
 
+    # Collect per-rule (Opp, Assignment) SOQL pairs, then fire them all in one
+    # asyncio.gather — previously each rule fired both queries serially, so N
+    # Name rules meant 2N sequential round-trips to SF.
+    _name_pre_tasks: List[Tuple[int, int, bool, str, str]] = []
     for i, r in enumerate(sf_rules):
         if r.field == "Name" and r.operator in _STRING_OPS:
             _rule_1idx = sf_rule_indices[i]
@@ -2454,17 +2458,29 @@ async def explorer_search(
             _opp_soql = f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null AND ({_nw})"
             _asn_nw = _nw.replace("Name ", "C_Opportunity_Name__r.Name ")
             _asn_soql = f"SELECT C_Account__c FROM Assignment__c WHERE {_asn_nw} AND C_Account__c != null"
+            _name_pre_tasks.append((_rule_1idx, i, _is_neg, _opp_soql, _asn_soql))
+
+    if _name_pre_tasks:
+        _soqls_flat: List[str] = []
+        for (_, _, _, _opp_s, _asn_s) in _name_pre_tasks:
+            _soqls_flat.append(_opp_s)
+            _soqls_flat.append(_asn_s)
+        _results_flat = await asyncio.gather(
+            *[asyncio.to_thread(_sf_query_all, sf, _s) for _s in _soqls_flat],
+            return_exceptions=True,
+        )
+        for _n, (_rule_1idx, i, _is_neg, _, _) in enumerate(_name_pre_tasks):
+            _opp_recs = _results_flat[_n * 2]
+            _asn_recs = _results_flat[_n * 2 + 1]
             _aids: Set[str] = set()
-            try:
-                _opp_recs = await asyncio.to_thread(_sf_query_all, sf, _opp_soql)
+            if isinstance(_opp_recs, Exception):
+                log.warning("Name pre-query Opp failed (rule %d): %s", _rule_1idx, _opp_recs)
+            else:
                 _aids.update(r2.get("AccountId") for r2 in (_opp_recs or []) if r2.get("AccountId"))
-            except Exception:
-                pass
-            try:
-                _asn_recs = await asyncio.to_thread(_sf_query_all, sf, _asn_soql)
+            if isinstance(_asn_recs, Exception):
+                log.warning("Name pre-query Assignment failed (rule %d): %s", _rule_1idx, _asn_recs)
+            else:
                 _aids.update(r2.get("C_Account__c") for r2 in (_asn_recs or []) if r2.get("C_Account__c"))
-            except Exception:
-                pass
             _name_rule_sets[_rule_1idx] = (_aids, _is_neg)
             _name_rule_indices.append(_rule_1idx)
             _name_remove_sf_indices.add(i)
@@ -2497,32 +2513,49 @@ async def explorer_search(
         for i, r in enumerate(sf_rules):
             if r.operator in _STRING_OPS and r.field != "Name":
                 _field_groups.setdefault(r.field, []).append((i, r))
-        _remove_indices: Set[int] = set()
+        # Build all per-rule SOQLs across all eligible groups, then gather once
+        # so groups and rules run in parallel rather than in nested serial loops.
+        _mv_groups: List[Tuple[str, List[Tuple[int, Rule, str]]]] = []
         for _fld, _rules in _field_groups.items():
             if len(_rules) < 2:
                 continue
-            _per_rule_aids: List[Set[str]] = []
+            _per_rule: List[Tuple[int, Rule, str]] = []
             for _idx, _nr in _rules:
                 _nw = _build_sf_where(FilterQuery(logic="AND", rules=[_nr]))
                 if not _nw:
                     continue
                 _opp_soql = f"SELECT AccountId FROM Opportunity WHERE Type IN ({TYPE_IN}) AND AccountId != null AND ({_nw})"
-                _aids2: Set[str] = set()
-                try:
-                    _opp_recs = await asyncio.to_thread(_sf_query_all, sf, _opp_soql)
-                    _aids2.update(r2.get("AccountId") for r2 in (_opp_recs or []) if r2.get("AccountId"))
-                except Exception:
-                    pass
-                _per_rule_aids.append(_aids2)
-            if _per_rule_aids:
-                _intersection = _per_rule_aids[0]
-                for _s in _per_rule_aids[1:]:
-                    _intersection &= _s
-                if _pre_query_acc_ids is None:
-                    _pre_query_acc_ids = _intersection
-                else:
-                    _pre_query_acc_ids &= _intersection
-                _remove_indices.update(i for i, _ in _rules)
+                _per_rule.append((_idx, _nr, _opp_soql))
+            if _per_rule:
+                _mv_groups.append((_fld, _per_rule))
+        _remove_indices: Set[int] = set()
+        if _mv_groups:
+            _all_soqls = [_s for _, _per in _mv_groups for (_, _, _s) in _per]
+            _all_results = await asyncio.gather(
+                *[asyncio.to_thread(_sf_query_all, sf, _s) for _s in _all_soqls],
+                return_exceptions=True,
+            )
+            _cursor = 0
+            for _fld, _per_rule in _mv_groups:
+                _per_rule_aids: List[Set[str]] = []
+                for _idx, _nr, _ in _per_rule:
+                    _res = _all_results[_cursor]
+                    _cursor += 1
+                    _aids2: Set[str] = set()
+                    if isinstance(_res, Exception):
+                        log.warning("Multi-value pre-query failed (field %s, rule idx %d): %s", _fld, _idx, _res)
+                    else:
+                        _aids2.update(r2.get("AccountId") for r2 in (_res or []) if r2.get("AccountId"))
+                    _per_rule_aids.append(_aids2)
+                if _per_rule_aids:
+                    _intersection = _per_rule_aids[0]
+                    for _s in _per_rule_aids[1:]:
+                        _intersection &= _s
+                    if _pre_query_acc_ids is None:
+                        _pre_query_acc_ids = _intersection
+                    else:
+                        _pre_query_acc_ids &= _intersection
+                    _remove_indices.update(i for i, _, _ in _per_rule)
         if _remove_indices:
             sf_rules = [r for i, r in enumerate(sf_rules) if i not in _remove_indices]
             sf_rule_indices = [idx for i, idx in enumerate(sf_rule_indices) if i not in _remove_indices]
