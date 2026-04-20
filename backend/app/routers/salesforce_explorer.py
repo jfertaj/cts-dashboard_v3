@@ -893,12 +893,16 @@ def _strip_account_prefix(field: str) -> str:
     return f
 
 def _safe_field(field: str) -> str:
-    if field not in ALLOWED_FIELDS:
-        if field.startswith("Account."):
-            return field
-        raise HTTPException(400, f"Campo no permitido: {field}")
     if field.startswith("Account."):
-        return field
+        base = field[len("Account."):]
+        # Permissive mode = SF describe unavailable at boot; accept all Account.*
+        # rather than locking users out. Otherwise require the field to exist on
+        # Account (or be explicitly allow-listed for legacy keys).
+        if _DESCRIBE_PERMISSIVE or _exists_on_account(base) or field in ALLOWED_FIELDS:
+            return field
+        raise HTTPException(400, f"Campo no existe en Account: {base}")
+    if field not in ALLOWED_FIELDS:
+        raise HTTPException(400, f"Campo no permitido: {field}")
     if not _exists_on_opportunity(field):
         if _exists_on_account(field):
             return f"Account.{field}"
@@ -2392,7 +2396,14 @@ async def explorer_search(
                     extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
                     extra_rule_indices.append(_rule_1idx)
                     need_batch_extras = True  # must fetch assignment data from SF
-                # Other sf.Assignment.* fields (Type, Stage, MCA, Payment) silently skipped
+                else:
+                    # Other sf.Assignment.* fields (Type, Stage, MCA, Payment) are
+                    # multipicklist / not traversable from Opportunity SOQL. Fail
+                    # fast instead of silently dropping the filter.
+                    raise HTTPException(
+                        400,
+                        f"Filter on '{f}' is not supported yet. Only 'sf.Assignment.Name' can be filtered."
+                    )
             else:
                 sf_rules.append(Rule(field=nf, operator=op, value=val))
                 sf_rule_indices.append(_rule_1idx)
@@ -2410,6 +2421,13 @@ async def explorer_search(
                 extra_rules.append(Rule(field="extra.AssignmentsNames", operator=_aop, value=val))
                 extra_rule_indices.append(_rule_1idx)
                 need_batch_extras = True
+            else:
+                # Non-Name Assignment fields (Type, Stage, …) can't be evaluated
+                # from Opportunity SOQL. Surface the error instead of dropping it.
+                raise HTTPException(
+                    400,
+                    f"Filter on '{f}' is not supported yet. Only 'Assignment.Name' can be filtered."
+                )
         else:
             if f in ALLOWED_FIELDS and not f.startswith("Account."):
                 sf_rules.append(Rule(field=f, operator=op, value=val))

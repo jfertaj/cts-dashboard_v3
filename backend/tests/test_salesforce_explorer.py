@@ -232,6 +232,26 @@ class TestPassAccountExpressionMode:
 
 from app.routers.filter_engine import Rule, FilterQuery
 from app.routers.salesforce_explorer import _build_sf_where
+import app.routers.salesforce_explorer as _sfx_for_build_tests
+
+
+@pytest.fixture(autouse=True)
+def _build_sf_where_permissive(request):
+    """
+    Tests in this file use synthetic Account.* fields (e.g. CTU_Status__c)
+    that aren't in MIN_ALLOWED. `_safe_field` now validates Account.* against
+    the real describe, so without permissive mode those tests fail. Mirror
+    prod's boot-time permissive fallback for the duration of each test.
+    """
+    if request.node.get_closest_marker("no_permissive"):
+        yield
+        return
+    _orig_perm = _sfx_for_build_tests._DESCRIBE_PERMISSIVE
+    _sfx_for_build_tests._DESCRIBE_PERMISSIVE = True
+    try:
+        yield
+    finally:
+        _sfx_for_build_tests._DESCRIBE_PERMISSIVE = _orig_perm
 
 
 class TestBuildSfWhereNotContains:
@@ -321,3 +341,45 @@ class TestBuildSfWhereLikeEscaping:
         ])
         out = _build_sf_where(q)
         assert "50\\%" in out, f"got: {out}"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _safe_field Account.* validation (regression 2026-04-20)
+# Before: any "Account.X" passed through without checking the SF Account
+# describe, so typos reached SOQL and came back as a generic SF 400.
+# After: we validate against _ACC_FIELD_SET (or pass through in permissive mode).
+# ──────────────────────────────────────────────────────────────────────────────
+
+import app.routers.salesforce_explorer as sfx
+from fastapi import HTTPException as _HTTPException
+
+
+class TestSafeFieldAccountValidation:
+    def setup_method(self):
+        # Capture originals
+        self._orig_acc = sfx._ACC_FIELD_SET
+        self._orig_perm = sfx._DESCRIBE_PERMISSIVE
+
+    def teardown_method(self):
+        sfx._ACC_FIELD_SET = self._orig_acc
+        sfx._DESCRIBE_PERMISSIVE = self._orig_perm
+
+    def test_valid_account_field_passes(self):
+        sfx._ACC_FIELD_SET = {"Name", "CTU_Status__c"}
+        sfx._DESCRIBE_PERMISSIVE = False
+        assert sfx._safe_field("Account.CTU_Status__c") == "Account.CTU_Status__c"
+
+    def test_unknown_account_field_raises_with_field_name(self):
+        sfx._ACC_FIELD_SET = {"Name"}
+        sfx._DESCRIBE_PERMISSIVE = False
+        with pytest.raises(_HTTPException) as exc:
+            sfx._safe_field("Account.BullingCity")  # typo of BillingCity
+        assert "BullingCity" in exc.value.detail
+        assert exc.value.status_code == 400
+
+    def test_permissive_mode_accepts_unknown_account_field(self):
+        # When SF describe failed at boot, we must stay permissive to avoid
+        # locking users out of all Account.* filters.
+        sfx._ACC_FIELD_SET = set()
+        sfx._DESCRIBE_PERMISSIVE = True
+        assert sfx._safe_field("Account.Whatever__c") == "Account.Whatever__c"
