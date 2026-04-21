@@ -140,7 +140,9 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
-## 14. Remaining `_try_planner` handlers — extract to `moby_handlers.py` (Option B, deferred)
+## ~~14. Remaining `_try_planner` handlers — extract to `moby_handlers.py` (Option B, deferred)~~ — DONE (2026-04-09)
+
+**Superseded by agentic loop migration (Task 5).** Instead of extracting handlers to `moby_handlers.py`, all deterministic handlers in `_try_planner` except math and chart-from-table were disabled (dead code preserved). The handlers' domain knowledge is now provided to Claude's agentic loop via hint injection from `parse_query_plan()`. Outer handlers (km-of-assignment, within-km, nearest) also disabled.
 
 **Observation (2026-03-18):** Phase 3 extracted the activity/assignment handlers (3 functions, 62 direct unit tests). The remaining handlers in `_try_planner` (ND, T1D, Stage 1/2, CT3, country sites, nearest sites, pharmacy/overnight, HLA, group count, math) were NOT extracted because they close over `kindex`, `db`, `payload`, `request`, and ~15 tool functions — significantly more complex than the activity handlers. A `PlannerTools` dataclass with 15+ injected callables + expanded `HandlerContext` (adding `kindex`, `db`) would be needed.
 
@@ -152,7 +154,9 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
-## 15. Country-only Moby fast-path — evaluated, not implemented (2026-03-18)
+## ~~15. Country-only Moby fast-path — evaluated, not implemented (2026-03-18)~~ — SUPERSEDED (2026-04-09)
+
+**Superseded by agentic loop migration.** Country handler disabled as part of Task 5. Country queries now routed through Claude's agentic loop with hint injection.
 
 **Observation:** For queries like "sites in Germany" (no extra filters), the existing `_try_planner` country handler already bypasses Claude and runs a direct SOQL query. The `moby_planner.py` `can_short_circuit()` and `can_followup_merge()` cover filter-bearing country queries. The bottleneck is the Salesforce SOQL round-trip (~1–2 s), not Python routing overhead.
 

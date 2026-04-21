@@ -1,8 +1,17 @@
 # app/routers/ai_chat.py
+import os, sys
+
+# Ensure "backend" package is importable whether run from repo root (tests)
+# or from backend/ dir (uvicorn).
+_backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_repo_root = os.path.dirname(_backend_dir)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Literal, Optional, Any, Dict, Tuple
-import os, json, re, math
+import json, re, math
 import threading
 import queue as _std_queue
 import httpx
@@ -56,6 +65,10 @@ MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "12"))
 # The model may use up to this many tokens to reason before responding.
 # max_tokens is automatically raised to budget + 8192 when thinking is enabled.
 CLAUDE_THINKING_BUDGET = int(os.environ.get("CLAUDE_THINKING_BUDGET", "8000"))
+# Agentic loop limits
+MOBY_MAX_AGENT_TURNS = int(os.getenv("MOBY_MAX_AGENT_TURNS", "3"))
+MAX_TOOL_RESULT_TOKENS = int(os.getenv("MAX_TOOL_RESULT_TOKENS", "4000"))
+MOBY_AGENT_TIMEOUT_S = int(os.getenv("MOBY_AGENT_TIMEOUT_S", "30"))
 # Thread-local used by the /chat/stream endpoint to receive token chunks
 # from _claude_chat without changing any function signatures.
 _STREAM_Q: threading.local = threading.local()
@@ -128,7 +141,7 @@ ALLOWED_TABLES = {
 
 # ========= Índice unificado de métricas (SF + site_qual) =========
 
-from time import time
+from time import time, monotonic as _monotonic
 
 _INDEX_CACHE: Dict[str, Any] = {"ts": 0, "index": {}, "sf_fields": {}}
 # Limit for previewing aliases in the system hints (smaller → faster)
@@ -673,8 +686,8 @@ def _pretty_label(key: str) -> str:
     # extra.* y otros
     if k.startswith("extra."):
         return k.split(".",1)[1].replace("_"," ").title()
-    if k in ("site","city","country","account_id"):
-        return {"site":"Account Name","city":"City","country":"Country","account_id":"Account Id"}[k]
+    if k in ("site","city","country","account_id","distance_km"):
+        return {"site":"Account Name","city":"City","country":"Country","account_id":"Account Id","distance_km":"Distance (km)"}[k]
     # Account fields sin prefijo (ShippingCity, ShippingCountry)
     if k == "ShippingCity": return "City"
     if k == "ShippingCountry": return "Country"
@@ -907,9 +920,20 @@ def _normalize_table_for_ui(table: Optional[Dict[str, Any]]) -> Optional[Dict[st
     # Preferimos claves amigables y eliminamos los equivalentes sf.Account.*
     friendly = {
         "sf.Account.Id": "account_id",
+        "sf.AccountId": "account_id",
+        "Account.Id": "account_id",
+        "salesforce_account_id": "account_id",
         "sf.Account.Name": "site",
+        "Account.Name": "site",
+        "account_name": "site",
+        "sf.Name": "site",
+        "name": "site",
         "sf.Account.ShippingCountry": "country",
+        "Account.ShippingCountry": "country",
+        "ShippingCountry": "country",
         "sf.Account.ShippingCity": "city",
+        "Account.ShippingCity": "city",
+        "ShippingCity": "city",
     }
 
     # 1) Recoge el orden original de claves visto en 'cols'
@@ -922,7 +946,7 @@ def _normalize_table_for_ui(table: Optional[Dict[str, Any]]) -> Optional[Dict[st
             present.update(k for k, v in r.items() if v is not None)
     present.update(orig_keys)
 
-    preferred = [k for k in ("account_id", "site", "country", "city") if k in present]
+    preferred = [k for k in ("account_id", "site", "country", "city", "distance_km") if k in present]
 
     # 3) Elimina duplicados y mapea sf.Account.* → amigables
     def _normalize_key(k: str) -> str:
@@ -1158,24 +1182,57 @@ def tool_nearest_filtered_sites(
     import math
     from app.models.site import Site as SiteModel
 
-    # 1. Geocode location via Google Geocoding API
-    google_key = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
-    region = os.environ.get("GOOGLE_REGION_BIAS", "")
+    # 1. Geocode location — try geonames_cities DB first (free, fast), Google API as fallback
     geo_lat, geo_lon, formatted = None, None, location
-    if google_key:
-        try:
-            with httpx.Client(timeout=10.0) as gcli:
-                gr = gcli.get(
-                    "https://maps.googleapis.com/maps/api/geocode/json",
-                    params={"address": location, "key": google_key, "region": region},
-                )
-                gj = gr.json()
-                if gj.get("results"):
-                    loc = gj["results"][0]["geometry"]["location"]
-                    geo_lat, geo_lon = float(loc["lat"]), float(loc["lng"])
-                    formatted = gj["results"][0].get("formatted_address", location)
-        except Exception as e:
-            _dbg("WARN: geocode failed: %s", e)
+
+    # 1a. Try geonames_cities table (cities500.txt — ~200k cities with coords)
+    try:
+        if db:
+            from app.models.geonames import GeonameCity
+            # Parse "City, Country" or just "City"
+            parts = [p.strip() for p in location.split(",")]
+            city_name = parts[0]
+            # Query by name, order by population DESC (largest city wins)
+            q = db.query(GeonameCity).filter(
+                GeonameCity.name.ilike(city_name)
+            ).order_by(GeonameCity.population.desc())
+            # If country hint provided, filter by it
+            if len(parts) > 1:
+                country_hint = parts[-1].strip()
+                from app.utils.country_norms import resolve_countries
+                resolved = resolve_countries(country_hint)
+                if resolved:
+                    iso2 = resolved[0].get("iso2", "")
+                    if iso2:
+                        q = q.filter(GeonameCity.country_code == iso2)
+            geo_city = q.first()
+            if geo_city and geo_city.latitude and geo_city.longitude:
+                geo_lat, geo_lon = float(geo_city.latitude), float(geo_city.longitude)
+                formatted = f"{geo_city.name}, {geo_city.country_code}"
+                _dbg("NEAREST: geocoded '%s' via geonames_cities → %s (%.4f, %.4f, pop=%s)",
+                     location, formatted, geo_lat, geo_lon, geo_city.population)
+    except Exception as e:
+        _dbg("WARN: geonames geocode failed: %s", e)
+
+    # 1b. Fallback to Google Geocoding API (if geonames didn't find it)
+    if geo_lat is None:
+        google_key = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+        region = os.environ.get("GOOGLE_REGION_BIAS", "")
+        if google_key:
+            try:
+                with httpx.Client(timeout=10.0) as gcli:
+                    gr = gcli.get(
+                        "https://maps.googleapis.com/maps/api/geocode/json",
+                        params={"address": location, "key": google_key, "region": region},
+                    )
+                    gj = gr.json()
+                    if gj.get("results"):
+                        loc = gj["results"][0]["geometry"]["location"]
+                        geo_lat, geo_lon = float(loc["lat"]), float(loc["lng"])
+                        formatted = gj["results"][0].get("formatted_address", location)
+                        _dbg("NEAREST: geocoded '%s' via Google API → %s", location, formatted)
+            except Exception as e:
+                _dbg("WARN: Google geocode failed: %s", e)
     if geo_lat is None:
         return {"error": f"Could not geocode '{location}'."}
 
@@ -3461,23 +3518,14 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
-            "name": "sql_query",
-            "description": "Run a read-only SQL SELECT over Postgres (RDS). Use ONLY for tabular facts.",
-            "parameters": {
-                "type":"object",
-                "properties":{
-                    "sql":{"type":"string","description":"SQL SELECT with named params (e.g. :country)"},
-                    "params":{"type":"object","additionalProperties": True}
-                },
-                "required":["sql"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "salesforce_query",
-            "description": "Run a SOQL SELECT on Opportunity (and Account.*). Only allowed fields.",
+            "name": "soql_query",
+            "description": (
+                "Run a SOQL SELECT on Opportunity (and Account.*). "
+                "When to use: COUNT/GROUP BY aggregations, traversal relationships (e.g. C_Member__r.*), "
+                "or fields not in the Explorer catalog. "
+                "When NOT to use: Do NOT use for site filtering — use explorer_search instead. "
+                "Do NOT use for qualification data — use explorer_search with qual.* filters."
+            ),
             "parameters": {
                 "type":"object",
                 "properties":{
@@ -3572,7 +3620,7 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "render_chart",
-            "description": "Return a chart spec that the frontend will render directly.",
+            "description": "Return a chart spec that the frontend will render directly. When NOT to use: for data retrieval — get data first with explorer_search, then visualize with this tool.",
             "parameters": {
                 "type":"object",
                 "properties":{
@@ -3591,8 +3639,12 @@ TOOLS_SPEC = [
         "function": {
             "name": "explorer_search",
             "description": (
-                "Search clinical trial sites using a FilterGroup (qual.*, sf.* and site.* fields). "
-                "Use for ANY site query that involves filtering by country, city, qual checklist fields, SF metrics, or combinations. "
+                "DEFAULT tool for any question about clinical trial sites. "
+                "Searches sites using FilterGroup with sf.* (Salesforce), qual.* (qualification), "
+                "site.* (geography), and extra.* (assignments, activities) fields. "
+                "When to use: ANY question about sites — filtering, listing, searching. This should be your FIRST choice. "
+                "When NOT to use: Only skip this for SOQL aggregations (use soql_query) or member institutions (use members_search). "
+                "Supports nested AND/OR logic. "
                 "CRITICAL: ALWAYS express every filter as a rule — NEVER pass an empty filters object. "
                 "Country filter: {field:'site.country', operator:'equals', value:'ES'} (ISO-2 codes). "
                 "City filter: {field:'site.city', operator:'equals', value:'Barcelona'}. "
@@ -3638,7 +3690,7 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "explorer_within_drive_km",
-            "description": "Find neighboring sites within a driving distance (km) from a base Salesforce Account, using the Explorer service. Use this for 'within X km', 'nearby', 'distance' queries.",
+            "description": "Find neighboring sites within a driving distance (km) from a base Salesforce Account, using the Explorer service. Use this for 'within X km', 'nearby', 'distance' queries. When NOT to use: for straight-line distance — use nearest_filtered_sites. For general search — use explorer_search.",
             "parameters": {
                 "type":"object",
                 "properties":{
@@ -3655,11 +3707,14 @@ TOOLS_SPEC = [
         "function": {
             "name": "nearest_filtered_sites",
             "description": (
-                "Find nearest clinical sites to a city/address, optionally filtered by qual.* and sf.* fields. "
+                "Find nearest clinical sites to a city/address, optionally filtered by qual.*, sf.*, and extra.* fields. "
                 "Returns sites sorted by straight-line distance (km). "
-                "Use when user asks for 'nearest sites to X', 'closest to X', 'centers near X', 'sites within N km of X with Y'. "
-                "Do NOT use explorer_within_drive_km for location-name queries — that tool requires a Salesforce Account ID. "
-                "Use this tool when the origin is a city name, address, or landmark."
+                "Supports ALL filter types in ONE call: qual.* (qualifications), sf.* (Salesforce fields), site.* (country/city), "
+                "and extra.* (assignments — use extra.AssignmentsNames not_contains 'X' to exclude sites in a study, "
+                "or extra.AssignmentsCount is_empty for sites not in any assignment). "
+                "Use when user asks for 'nearest sites to X', 'closest to X', 'sites near X not in Y study'. "
+                "IMPORTANT: combine proximity + filters in ONE call — do NOT make separate calls. "
+                "When NOT to use: for general site search without proximity — use explorer_search."
             ),
             "parameters": {
                 "type": "object",
@@ -3691,30 +3746,19 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "rank_sites",
-            "description": "Top-N ranking of sites by a metric. ALWAYS use this for ranking queries. Returns account_id, site name, country, city, and the metric value. Works with both SF fields and site_qual keys/aliases (e.g., 'patients under 18', 'newly diagnosed', 'Stage 2').",
+            "description": (
+                "Top-N ranking of sites by a metric. ALWAYS use this for ranking queries. "
+                "Returns account_id, site name, country, city, and the metric value. "
+                "Works with both SF fields and site_qual keys/aliases (e.g., 'patients under 18', 'newly diagnosed', 'Stage 2'). "
+                "When NOT to use: for filtering sites without ranking — use explorer_search."
+            ),
             "parameters": {
                 "type":"object",
                 "properties":{
                     "metric":{"type":"string","description":"Alias or raw key (e.g., 'patients under 18', 'newly diagnosed under 18', 'new T1D <18', 'C_Number_of_T1D_Patients_currently_U_18__c')"},
                     "top_n":{"type":"integer","default":5},
-                    "order":{"type":"string","enum":["asc","desc"],"default":"desc"}
-                },
-                "required":["metric"]
-            }
-        }
-    },
-    {
-        "type":"function",
-        "function":{
-            "name":"rank_sites_by_group",
-            "description":"Top-N ranking PER GROUP (e.g., top 3 per country, top 5 per city). ONLY use when user explicitly says 'per country' or 'per city' or 'by country' or 'by city'. For global rankings (e.g., 'top 5 sites'), use rank_sites instead. Works with both SF fields and site_qual keys/aliases. Returns account_id, site name, country, city, and the metric value per group.",
-            "parameters":{
-                "type":"object",
-                "properties":{
-                    "metric":{"type":"string","description":"Alias or raw key (e.g., 'patients under 18', 'newly diagnosed', 'Stage 2', 'C_Number_of_T1D_Patients_currently_U_18__c')"},
-                    "group_by":{"type":"string","enum":["country","city"],"default":"country"},
-                    "top_n":{"type":"integer","default":3},
-                    "order":{"type":"string","enum":["asc","desc"],"default":"desc"}
+                    "order":{"type":"string","enum":["asc","desc"],"default":"desc"},
+                    "group_by":{"type":"string","enum":["country","city"],"description":"If provided, ranks top-N PER GROUP (e.g., top 3 per country). Omit for global ranking."}
                 },
                 "required":["metric"]
             }
@@ -3724,44 +3768,21 @@ TOOLS_SPEC = [
         "type":"function",
         "function":{
             "name":"group_count",
-            "description":"Count sites grouped by country/city with optional site_qual filter.",
+            "description": (
+                "Count or aggregate sites grouped by country/city. "
+                "When to use: site counts per country/city, averages/sums of metrics per group, ratio of sites with a field. "
+                "When NOT to use: for listing individual sites — use explorer_search."
+            ),
             "parameters":{
                 "type":"object",
                 "properties":{
                     "by":{"type":"array","items":{"type":"string","enum":["country","city"]}},
-                    "where":{"type":"object"}
+                    "where":{"type":"object","description":"Optional site_qual filter for counting."},
+                    "aggregation":{"type":"string","enum":["count","sum","avg","ratio"],"default":"count","description":"Type of aggregation. 'count' counts sites, 'sum'/'avg' aggregate a metric, 'ratio' computes ratio_exists."},
+                    "metric":{"type":"string","description":"Required when aggregation is sum/avg/ratio. The metric key to aggregate."},
+                    "source":{"type":"string","enum":["explorer","salesforce"],"default":"explorer","description":"Data source. 'salesforce' counts SF Accounts directly (SubAccount Clinical, active)."}
                 },
                 "required":["by"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "group_count_agg",
-            "description": "Aggregations per country/city (avg/sum on site_qual metrics or ratio_exists).",
-            "parameters":{
-                "type":"object",
-                "properties":{
-                    "by":{"type":"array","items":{"type":"string","enum":["country","city"]}},
-                    "metric":{"type":"string"},
-                    "agg":{"type":"string","enum":["avg","sum","ratio_exists"],"default":"avg"}
-                },
-                "required":["by","agg"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "group_count_sf",
-            "description": "Count Salesforce Accounts grouped by country/city (ALWAYS filters SubAccount Clinical and active).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "by": {"type": "array", "items": {"type": "string", "enum": ["country","city"]}}
-                },
-                "required": ["by"]
             }
         }
     },
@@ -3848,16 +3869,29 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
-            "name": "group_agg_sf",
-            "description": "Aggregate Salesforce Opportunity field by country/city (sum/max/avg), using Account geography.",
+            "name": "sf_aggregate",
+            "description": (
+                "Aggregate Salesforce Opportunity fields — either grouped by geography or as a time series. "
+                "When to use: sum/avg/max of SF fields by country/city, or trends over time (month/quarter/year). "
+                "When NOT to use: for site-level data — use explorer_search. For qualification data — use explorer_search with qual.* filters."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "by": {"type": "array", "items": {"type": "string", "enum": ["country","city"]}},
-                    "field": {"type": "string"},
-                    "agg": {"type": "string", "enum": ["sum","max","avg"], "default": "avg"}
+                    "mode": {"type": "string", "enum": ["aggregate", "time_series"], "default": "aggregate",
+                             "description": "'aggregate' groups by country/city; 'time_series' groups by time period."},
+                    "field": {"type": "string", "description": "SF Opportunity field API name to aggregate."},
+                    "agg": {"type": "string", "enum": ["sum","max","avg"], "default": "avg"},
+                    "by": {"type": "array", "items": {"type": "string", "enum": ["country","city"]},
+                           "description": "Required for mode=aggregate. Group by country/city."},
+                    "date_field": {"type": "string", "default": "CloseDate",
+                                   "description": "For mode=time_series: the date field to group by."},
+                    "period": {"type": "string", "enum": ["month","quarter","year"], "default": "month",
+                               "description": "For mode=time_series: time granularity."},
+                    "last_n": {"type": "integer",
+                               "description": "For mode=time_series: limit to last N periods."}
                 },
-                "required": ["by","field"]
+                "required": ["field"]
             }
         }
     },
@@ -3916,24 +3950,6 @@ TOOLS_SPEC = [
     {
         "type":"function",
         "function":{
-            "name":"time_series_sf",
-            "description":"Time series over Opportunity (SF) for a numeric field (sum/max/avg) grouped by month/quarter/year.",
-            "parameters":{
-                "type":"object",
-                "properties":{
-                    "field":{"type":"string"},
-                    "date_field":{"type":"string","default":"CloseDate"},
-                    "period":{"type":"string","enum":["month","quarter","year"],"default":"month"},
-                    "agg":{"type":"string","enum":["sum","max","avg"],"default":"sum"},
-                    "last_n":{"type":"integer"}
-                },
-                "required":["field"]
-            }
-        }
-    },
-    {
-        "type":"function",
-        "function":{
             "name":"sql_query_fill_sf",
             "description":"Run SQL (must return account_id) and fill Account.* fields in batch from Salesforce.",
             "parameters":{
@@ -3988,6 +4004,7 @@ TOOLS_SPEC = [
                 "member institutions, membership levels, proposed/validated network roles "
                 "(CS/DxLab/LAB/CTS/Patient Organization), country leads, board members, "
                 "institutional contacts, or sub-accounts linked to a member. "
+                "When NOT to use: for clinical trial sites — use explorer_search. "
                 "Examples: "
                 "'how many member institutions?' → filters={logic:'AND',rules:[]}. "
                 "'members in Italy' → filters={logic:'AND',rules:[{field:'site.country',operator:'equals',value:'Italy'}]}. "
@@ -4031,7 +4048,7 @@ POSTGRES (warehouse):
     - For YES/NO strings, normalize to LOWER and compare to 'yes'.
 
 SALESFORCE (runtime):
-- salesforce_query supports: Opportunity, Account, Contact, AccountContactRelation
+- soql_query supports: Opportunity, Account, Contact, AccountContactRelation
   - Opportunity: patient metrics, trials, qualification/profiling (primary for sites)
   - Account: **PRIMARY SOURCE for site lists, counts, and geography** (ShippingCountry, ShippingCity)
   - Contact: direct contact queries (name, email, phone, title, department)
@@ -4053,8 +4070,9 @@ DOMAIN GLOSSARY — INNODIA abbreviations and acronyms (memorize these):
 - **Stage 1** = Pre-symptomatic Stage 1 → sf.C_Number_of_Stage1_Individuals_followed__c
 - **Stage 2** = Pre-symptomatic Stage 2 → sf.C_Number_of_Stage2_Individuals_followed__c
 - **Screened** = Individuals screened in total → sf.C_Number_of_Individuals_screened_intotal__c
-- **CTS** = Clinical Trial Site. Account flag: INNODIA_Clinical_Trial_Site__c = true (also C_Accredited_Clinical_Trial_Site__c for accredited ones)
-- **CS** = Clinical Site. Account flag: Clinical_Site_CS__c = true
+- **CTS** = Clinical Trial Site. Account flag: INNODIA_Clinical_Trial_Site__c = true (also C_Accredited_Clinical_Trial_Site__c for accredited ones). Subset of the clinical-site universe — only sites that passed CTS validation.
+- **CS** = Clinical Site (abbreviation). Account flag: Clinical_Site_CS__c = true. A specific CS-validated subset.
+- **"Clinical Site"** (natural-language, NOT the CS abbreviation) = the full universe of clinical sub-accounts, defined by `RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical'`. Use this broad filter when the user says "clinical site(s)" or just "site(s)" without a CTS/CS qualifier. The narrower CTS and CS flags above are strict subsets of this universe.
 - **DxLab** = Diagnostic Lab. Account flag: C_Deliver_Clinical_Grade_Services__c = true
 - **RP** = Referral Partner. Account flag: C_Referral_Clinical_Partner__c = true
 - **PO** = Patient Organization. Account flag: C_Contribute_as_a_Patient_Organization__c = true
@@ -4082,47 +4100,80 @@ SF OBJECTS AVAILABLE:
 DATA SOURCES & SCHEMA (do not expose credentials)
 {SCHEMA_HINT}
 
-TOOLS — WHEN TO USE WHAT
+## Tool Selection Decision Tree
 
-**CRITICAL ROUTING RULES:**
+Follow this tree for EVERY query. Start at the top.
 
-🔴 **GOLDEN RULE**: Use Postgres (sql_query) ONLY for site_qual questions. Everything else MUST use Salesforce.
-- “Activities” are Salesforce Opportunities with RecordType.DeveloperName='Activity' (or Type='Activity'). NEVER use site_qual for Activities.
-- Contacts (PI/SC) and anything about Accounts/Opportunities MUST query Salesforce first.
+1. Is this about MEMBER INSTITUTIONS (not clinical trial sites)?
+   → YES: Use `members_search`
+   → NO: Continue to 2
 
-1. **Postgres (sql_query) - ONLY FOR site_qual qualification checklist data:**
-   - Questions from qualification uploads (e.g., "overnight stay", "onsite pharmacy", "examination rooms")
-   - Keys like "3.x__..." (e.g., "3.5.2__overnight_stay")
-   - Qualification comments search
-   - **NEVER use for**: site lists, site counts, geography, patient metrics, contacts, trials
+2. Is this a math operation on the last table (sum, average, count)?
+   → YES: The system handles this automatically — just describe the operation
+   → NO: Continue to 3
 
-2. **Salesforce (salesforce_query) - For EVERYTHING ELSE:**
-   - Site lists, counts, geography → Query Account (RecordType.DeveloperName='SubAccount', C_Type__c='Clinical')
-   - Patient metrics, Stage 1/2, screening → Query Opportunity
-   - Contacts, PI, Study Coordinators → Query Contact/AccountContactRelation
-   - Country/City → ALWAYS use Account.ShippingCountry/ShippingCity (NEVER sites.country/city)
-   - **ALWAYS filter inactive**: (Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)
+3. Is this about clinical trial SITES (filtering, listing, searching)?
+   → YES: Use `explorer_search` (DEFAULT — handles sf.*, qual.*, site.*, extra.* fields)
+   → NO: Continue to 4
 
-3. **Example Postgres queries (site_qual ONLY):**
-   - "Sites with overnight stay" → sql_query: SELECT sites.salesforce_account_id, sq.data->>'3.5.2__overnight_stay' FROM sites JOIN site_qual sq ...
-   - "Search qualification comments" → qual_search(text='...')
-   
-4. **Example Salesforce queries (everything else):**
-   - "How many sites?" → salesforce_query: SELECT COUNT(Id) FROM Account WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' ...
-   - "Sites in Spain" → salesforce_query: SELECT Id, Name, ShippingCity, ShippingCountry FROM Account WHERE ... AND ShippingCountry='Spain'
-   - "Patient metrics" → salesforce_query: SELECT Account.Name, C_Number_of_T1D_Patients_currently_U_18__c FROM Opportunity ...
+4. Does the query mention a city/location AND proximity (near, closest, within X km)?
+   → YES: Use `nearest_filtered_sites` — include ALL other conditions as filters in the SAME call
+   → Example: "sites near Berlin with HLA typing not in any assignment" →
+     nearest_filtered_sites(location="Berlin", filters={{logic:"AND", rules:[...all conditions...]}})
+   → By existing site (Account ID): Use `explorer_within_drive_km`
+   → NO proximity mentioned: Continue to 5
 
-**TOOL REFERENCE (simplified):**
-- salesforce_query → Use for 95% of queries: sites, counts, geography, patients, contacts, trials
-- sql_query → Use ONLY for site_qual qualification questions that don't need SF fields (standalone qual queries)
-- explorer_search → Use when combining qual.* AND sf.* filters in a single query (replaces sql_query+salesforce_query separately)
+5. Is this a SOQL aggregation (COUNT, AVG, GROUP BY) that explorer_search cannot handle?
+   → YES: Use `soql_query`
+   → NO: Continue to 6
+
+6. Is this about contacts, coordinators, or PIs?
+   → YES: Use `salesforce_account_contacts` or `study_coordinators_with_activities`
+   → NO: Continue to 7
+
+7. Is this about rankings (top N by metric)?
+   → YES: Use `rank_sites`
+   → NO: Continue to 8
+
+8. Is this about distributions (sites per country, averages by group)?
+   → YES: Use `group_count`
+   → NO: Use `soql_query` as a fallback for custom queries
+
+IMPORTANT: When in doubt, use `explorer_search`. It is the most versatile tool.
+IMPORTANT: You can call multiple tools in one turn and chain results across turns.
+IMPORTANT: If an answer requires data, you MUST call at least one appropriate tool to fetch real rows. Do not invent numbers.
+IMPORTANT: When calling a tool, ALSO include a brief text summary alongside the tool call (2-3 sentences). This enables faster responses. Example: call explorer_search AND write "Here are the 9 German sites. Hamburg has the highest ND count (70), while Hannover leads in Stage 1 (12)."
+
+## How to Write Responses
+
+Write like a knowledgeable colleague briefing someone, not like a search engine returning results. Your responses should:
+
+1. **Lead with the key insight** — what's the headline? "There are 9 German sites, but only 3 have overnight stays." Not "Here are the results."
+2. **Highlight notable data points** — top/bottom values, outliers, patterns. "Copenhagen stands out with 5,500 T1D patients — 5x more than the next site."
+3. **Use natural grouping** — by country, by capability, by size. "The Belgian sites cluster around Brussels (4 within 25km), while the Dutch sites are spread across 3 cities."
+4. **Be concise** — 2-4 sentences for simple queries, up to a short paragraph for complex ones. The table has the details; your text provides the story.
+5. **Use HTML formatting** — <p>, <strong>, <em> for emphasis. Never use markdown.
+6. **Mention the count** — always state how many results were found.
+7. **Don't list every result** — that's what the table is for. Pick the 2-3 most interesting ones.
+
+Bad: "<p>Found 15 result(s).</p>"
+Good: "<p><strong>15 sites</strong> near Hamburg are not in any Baricade study. The closest is <strong>WilhelmStift</strong> (12.5 km), followed by Karlsburg (243 km) and Copenhagen (289 km). Results span 5 countries — Germany has the most (4 sites).</p>"
+
+TOOL REFERENCE:
+- explorer_search → DEFAULT for any site question: filtering, listing, searching sites (combines qual.* + sf.* + site.* in one query)
+- soql_query → SOQL aggregations (COUNT/GROUP BY), traversals (C_Member__r.*), fields not in Explorer. ALWAYS filter inactive: (Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null). Country/City → ALWAYS use Account.ShippingCountry/ShippingCity (NEVER sites.country/city)
 - qual_search → Semantic search over qualification comments
 - salesforce_account_extras → PI, CS flags, assignments, new diagnoses per Account
 - salesforce_account_contacts → Contact lists (PI, Study Coordinator, etc.)
-- rank_sites → Top-N sites by metric (auto-detects SF vs site_qual)
-- render_chart → Generate bar/line/pie charts (call after explorer_search to visualize results)
- 
-IMPORTANT: If an answer requires data, you MUST call at least one appropriate tool to fetch real rows. Do not invent numbers.
+- rank_sites → Top-N sites by metric (with optional group_by for per-country/city ranking)
+- group_count → Count/aggregate sites grouped by country/city
+- sf_aggregate → Aggregate SF fields by geography or time series
+- render_chart → Generate bar/line/pie charts (call after data fetch to visualize results)
+- nearest_filtered_sites → Sites near a city/address (Haversine distance)
+- explorer_within_drive_km → Sites within driving distance of a known Account
+- members_search → Member institution queries
+
+GOLDEN RULE: Use Postgres ONLY for site_qual questions. Everything else MUST use Salesforce. Activities, Contacts, Accounts, Opportunities → always Salesforce.
 
 GUARDRAILS
 - Read-only only. Always use named parameters in SQL examples.
@@ -4184,197 +4235,75 @@ DEFAULT COLUMNS (unless the user asks otherwise)
 - Newly diagnosed last year: <18 and ≥18
 - Current patients: <18 and ≥18
 **ALWAYS include an identifier**:
-- When using salesforce_query with Account: include Account.Id (the backend will surface it as sf.Account.Id/account_id).
-- When using sql_query for qualification data: SELECT sites.salesforce_account_id AS account_id and include it in the table.
+- When using soql_query with Account: include Account.Id (the backend will surface it as sf.Account.Id/account_id).
+- When using soql_query for qualification data: SELECT sites.salesforce_account_id AS account_id and include it in the table.
 
-QUERY ROUTING EXAMPLES (critical - follow these patterns exactly):
+DOMAIN REFERENCE — FIELD KEYS AND QUERY PATTERNS
 
-**BLOCK 1: Basic site queries (ALWAYS Salesforce Account, NEVER Postgres sites)**
-• "How many sites?" / "Total sites" / "Total count" → salesforce_query: SELECT COUNT(Id) total FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical' AND (Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)
-• "Show sites in Spain" / "All sites in [country]" → salesforce_query: SELECT Id, Name, ShippingCity, ShippingCountry FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical' AND ShippingCountry = 'Spain' AND (Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null) ORDER BY Name
-• "How many sites per country?" / "Sites by country" → salesforce_query: SELECT ShippingCountry country, COUNT(Id) sites FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical' AND ShippingCountry != null AND (Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null) GROUP BY ShippingCountry ORDER BY COUNT(Id) DESC
-• "Sites per city" → salesforce_query: SELECT ShippingCity city, ShippingCountry country, COUNT(Id) sites FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical' AND ShippingCity != null AND (Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null) GROUP BY ShippingCity, ShippingCountry ORDER BY COUNT(Id) DESC
-  **CRITICAL**: NEVER use Postgres sites table for these queries. ALWAYS use Salesforce Account. The sites table is incomplete (only qualification uploads).
+**CRITICAL**: NEVER use Postgres sites table for basic site counts/lists/geography. ALWAYS use Salesforce Account. The sites table only has qualification uploads.
 
-**BLOCK 2: Patient metrics (ALWAYS Salesforce Opportunity fields)**
-• "Average T1D patients under 18 per site" → salesforce_query: SELECT AVG(C_Number_of_T1D_Patients_currently_U_18__c) FROM Opportunity WHERE C_Number_of_T1D_Patients_currently_U_18__c != null
-• "Top 5 sites with most T1D patients under 18" → rank_sites(metric='T1D patients under 18', top_n=5, order='desc')
-• "Sites with more than 10 new T1D diagnoses" → salesforce_query with WHERE C_Number_of_new_T1D_diagnosed_U_18__c > 10 OR C_Number_of_new_T1D_diagnosed_O_18__c > 10
-
-**BLOCK 3: Qualification checklist questions (ONLY use Postgres for these)**
-• "Overnight stay facilities" → sql_query: SELECT s.salesforce_account_id, s.name, sq.data->>'3.5.2__overnight_stay' FROM sites s JOIN site_qual sq ON s.id = sq.site_id WHERE sq.data->>'3.5.2__overnight_stay' ILIKE 'Yes'
-• "Ongoing clinical trials" → sql_query: SELECT s.salesforce_account_id, sq.data->>'3.1__count_ongoing_clinical_trials' FROM sites s JOIN site_qual sq ON s.id = sq.site_id WHERE sq.data->>'3.1__count_ongoing_clinical_trials' ...
-• "On-site pharmacy" → sql_query: SELECT s.salesforce_account_id, s.name, sq.data->>'3.6__is_your_pharmacy_on_site_or_off_campus' FROM sites s JOIN site_qual sq ON s.id = sq.site_id WHERE sq.data->>'3.6__is_your_pharmacy_on_site_or_off_campus' ILIKE 'On-site%'
-• "Search comments for X" → qual_search(text='X')
-  **IMPORTANT**: These are THE ONLY queries that should use sql_query. Everything else uses Salesforce.
-
-**BLOCK 4: HLA typing and Clinical Trials (Salesforce field, NOT site_qual)**
-• "Sites with HLA typing" / "% with HLA typing per country" → salesforce_query: C_Is_HLA_typing_performed__c field from Opportunity
-• "Ongoing clinical trials" / "Phase I/II/III trials" → salesforce_query: Check fields C_Phase_I_Type1__c, C_Phase_II_Type1__c, C_Phase_III_Type1__c (counts) or C_List_of_trial_name_or_sponsors_Type1__c (names).
-• NEVER use site_qual for HLA typing or Clinical Trials unless asking for 'interest in conducting' checklists.
-
-**BLOCK 5: Stage 1/2 and screening**
-• "Sites with Stage 1 or Stage 2 individuals" / "sites in a screening program" / "show Stage 1/2 sites" / "sites following Stage 1 or 2 patients"
-  → explorer_search(filters={{logic:'OR', rules:[
-      {{field:'sf.C_Number_of_Stage1_Individuals_followed__c', operator:'>', value:0}},
-      {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:0}}
-    ]}})
-  NOTE: Stage 1/2 fields live on Account (NOT Opportunity): C_Number_of_Stage1_Individuals_followed__c, C_Number_of_Stage2_Individuals_followed__c
-• "Top sites by Stage 2" → rank_sites(metric='Stage 2', top_n=10)
-• "Average Stage 2 per country" → salesforce_query: SELECT Account.ShippingCountry, AVG(C_Number_of_Stage2_Individuals_followed__c) FROM Opportunity GROUP BY Account.ShippingCountry
-
-**BLOCK 6: Time series (Salesforce)**
-• "Opportunity amount by quarter/month" → time_series_sf(field='Amount', period='quarter'|'month', last_n=8)
-
-**BLOCK 7: Contacts (Salesforce)**
-• "Who is the PI for [site]?" → First get Account.Id, then salesforce_account_extras(account_id)
-• "Study Coordinators in Belgium" → salesforce_account_contacts with title_contains='Study Coordinator' and filter by country
-
-**BLOCK 8: Combined SF-only queries**
-• "Sites in Spain with HLA typing and >10 patients" → salesforce_query with WHERE Account.ShippingCountry='Spain' AND C_Is_HLA_typing_performed__c='Yes' AND (C_Number_of_T1D_Patients_currently_U_18__c + C_Number_of_T1D_Patients_currently_O_18__c) > 10
-
-**BLOCK 9: Combined qual + SF queries → USE explorer_search**
-Use `explorer_search` when the query mixes qualification checklist fields (qual.*) AND/OR Salesforce metrics (sf.*) AND/OR site location (site.*).
-This tool calls the Explorer's filter engine which handles the JOIN internally — do NOT use sql_query + salesforce_query separately for these.
-
-COUNTRY/CITY FILTERS: Always add them as explicit rules — NEVER pass empty filters when a country or city is mentioned.
-ALWAYS use ISO-2 country codes in site.country rules: ES=Spain, IT=Italy, FR=France, DE=Germany, GB=UK, BE=Belgium, NL=Netherlands, PT=Portugal, PL=Poland, CZ=Czech Republic, SE=Sweden, DK=Denmark, NO=Norway, FI=Finland, AT=Austria, CH=Switzerland, IE=Ireland.
-• "Sites in Spain" / "show me all Spanish sites" / "all centers in Spain"
-  → explorer_search(filters={{logic:'AND', rules:[
-      {{field:'site.country', operator:'equals', value:'ES'}}
-    ]}})
-• "Sites in Germany and Italy"
-  → explorer_search(filters={{logic:'AND', rules:[
-      {{logic:'OR', rules:[
-        {{field:'site.country', operator:'equals', value:'DE'}},
-        {{field:'site.country', operator:'equals', value:'IT'}}
-      ]}}
-    ]}})
-• "Sites in Spain" (with no other filters) → still use explorer_search with the country rule, NOT empty filters.
-  WRONG: explorer_search(filters={{}})  ← NEVER do this when a country is mentioned
-  RIGHT: explorer_search(filters={{logic:'AND', rules:[{{field:'site.country', operator:'equals', value:'Spain'}}]}})
-
-• "Sites with on-site pharmacy AND ND patients ≥18 > 50"
-  → explorer_search(filters={{logic:'AND', rules:[
-      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}},
-      {{field:'sf.C_Number_of_new_T1D_diagnosed_O_18__c', operator:'>', value:50}}
-    ]}})
-
-• "Sites with overnight stay AND Stage2 > 10 in Spain"
-  → explorer_search(filters={{logic:'AND', rules:[
-      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}},
-      {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:10}},
-      {{field:'site.country', operator:'equals', value:'Spain'}}
-    ]}})
-
-• "Sites with pharmacy OR overnight stay"
-  → explorer_search(filters={{logic:'OR', rules:[
-      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}},
-      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}}
-    ]}})
-
-• "Sites in Italy that have a pharmacy AND more than 100 T1D patients currently over 18"
-  → explorer_search(filters={{logic:'AND', rules:[
-      {{field:'site.country', operator:'equals', value:'Italy'}},
-      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}},
-      {{field:'sf.C_Number_of_T1D_Patients_currently_O_18__c', operator:'>', value:100}}
-    ]}})
-
-KEY qual field keys for explorer_search (use these exact values in the field property):
-- Pharmacy on site: qual.3_6__is_your_pharmacy_on_site_or_off_campus  (value: 'On-site' or 'On-site pharmacy')
-- Overnight stay: qual.3_5_2__overnight_stay  (value: 'Yes')
-- Number of exam rooms: qual.3_3__number_of_examination_rooms  (operator: '>', value: numeric)
-- Ongoing clinical trials: qual.3_1__count_ongoing_clinical_trials
+explorer_search FIELD KEYS:
+- qual.3_6__is_your_pharmacy_on_site_or_off_campus (value: 'On-site')
+- qual.3_5_2__overnight_stay (value: 'Yes')
+- qual.3_3__number_of_examination_rooms (operator: '>', value: numeric)
+- qual.3_1__count_ongoing_clinical_trials
+- sf.C_Number_of_new_T1D_diagnosed_O_18__c (ND ≥18)
+- sf.C_Number_of_new_T1D_diagnosed_U_18__c (ND <18)
+- sf.C_Number_of_T1D_Patients_currently_O_18__c (current T1D ≥18)
+- sf.C_Number_of_T1D_Patients_currently_U_18__c (current T1D <18)
+- sf.C_Number_of_Stage2_Individuals_followed__c (Stage 2)
+- sf.C_Number_of_Stage1_Individuals_followed__c (Stage 1)
+- sf.C_Is_HLA_typing_performed__c (value: 'Yes')
+- sf.C_Profiling_Complete__c (profiling completion status)
+- sf.INNODIA_Clinical_Trial_Site__c (boolean — CTS flag)
+- sf.Clinical_Site_CS__c (boolean — CS flag)
+- sf.C_Referral_Clinical_Partner__c (boolean — RP flag)
+- extra.AssignmentsCount (number — how many assignments a site has)
+- extra.AssignmentsNames (comma-separated list of assignment/activity names)
+- qual.3_8__can_you_do_hla_typing (values: "Yes", "No") — HLA typing capacity
+- qual.3_8__znt8 (values: "Yes", "No") — ZnT8 autoantibody testing
+- qual.3_8__insulin (values: "Yes", "No") — Insulin autoantibody testing
+- qual.3_8__gad65 (values: "Yes", "No") — GAD65 autoantibody testing
+- qual.3_8__ia_2 (values: "Yes", "No") — IA-2 autoantibody testing
+- qual.3_8__c_peptide (values: "Yes", "No") — C-peptide testing
+- site.country (ISO-2 codes), site.city (city name string)
+- sf.Account.ShippingCountry OR site.country (ISO-2 codes)
 Use INDEX above for other qual field keys (format: alias => qual.<key>).
 
-KEY sf field keys for explorer_search:
-- ND patients ≥18: sf.C_Number_of_new_T1D_diagnosed_O_18__c
-- ND patients <18: sf.C_Number_of_new_T1D_diagnosed_U_18__c
-- Current T1D ≥18: sf.C_Number_of_T1D_Patients_currently_O_18__c
-- Current T1D <18: sf.C_Number_of_T1D_Patients_currently_U_18__c
-- Stage 2: sf.C_Number_of_Stage2_Individuals_followed__c
-- Stage 1: sf.C_Number_of_Stage1_Individuals_followed__c
-- HLA typing: sf.C_Is_HLA_typing_performed__c  (value: 'Yes')
-- Country: sf.Account.ShippingCountry  OR  site.country
+COUNTRY/CITY FILTERS in explorer_search:
+- Always add country/city as explicit rules — NEVER pass empty filters when a location is mentioned.
+- Use ISO-2 codes: ES=Spain, IT=Italy, FR=France, DE=Germany, GB=UK, BE=Belgium, NL=Netherlands, PT=Portugal, PL=Poland, CZ=Czech Republic, SE=Sweden, DK=Denmark, NO=Norway, FI=Finland, AT=Austria, CH=Switzerland, IE=Ireland.
+- Multi-country → nest in OR sub-group: {{logic:'OR', rules:[{{field:'site.country',operator:'equals',value:'DE'}},{{field:'site.country',operator:'equals',value:'IT'}}]}}
 
-**BLOCK 9b: Complex grouped filter logic (nested AND/OR)**
-Rules in explorer_search can contain nested sub-groups {{logic, rules}} for full boolean logic.
-Use this for queries that mix country and clinical criteria with mixed AND/OR semantics.
+NESTED AND/OR LOGIC in explorer_search:
+- Rules can contain nested sub-groups {{logic, rules}} for full boolean logic.
+- "Spain OR Italy, but only with overnight stay" → AND at top, OR sub-group for countries.
+- Expression style: logic:'1 AND 2 OR 3' with flat rules (AND binds tighter; use nested groups for explicit parenthesization).
 
-• "Sites in Spain OR Italy, but only with overnight stay"
-  → The "but only" means the overnight constraint applies to ALL results (AND at top).
-  → The country choice is OR (either Spain or Italy counts).
-  → explorer_search(filters={{logic:'AND', rules:[
-      {{logic:'OR', rules:[
-        {{field:'site.country', operator:'equals', value:'ES'}},
-        {{field:'site.country', operator:'equals', value:'IT'}}
-      ]}},
-      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}}
-    ]}})
+AFTER explorer_search → call render_chart to produce a chart if requested.
+FOLLOW-UP → if user says "of those, only in Spain", call explorer_search again adding the new rule.
 
-• "(Germany AND overnight stay) OR (France AND pediatric support)"
-  → Two independent profiles; either one qualifies a site.
-  → explorer_search(filters={{logic:'OR', rules:[
-      {{logic:'AND', rules:[
-        {{field:'site.country', operator:'equals', value:'DE'}},
-        {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}}
-      ]}},
-      {{logic:'AND', rules:[
-        {{field:'site.country', operator:'equals', value:'FR'}},
-        {{field:'qual.3_5_2__overnight_stay', operator:'is_not_empty'}}
-      ]}}
-    ]}})
+SOQL PATTERNS (for soql_query):
+- Site counts: SELECT COUNT(Id) FROM Account WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' AND (Account_Inactive__c=false OR Account_Inactive__c=null) AND (Subaccount_Inactive__c=false OR Subaccount_Inactive__c=null)
+- Sites by country: same + GROUP BY ShippingCountry ORDER BY COUNT(Id) DESC
+- Patient metrics: SELECT from Opportunity with Account.RecordType.DeveloperName='SubAccount'
+- HLA typing: C_Is_HLA_typing_performed__c from Opportunity (NEVER use site_qual for HLA)
+- Phase I/II/III: C_Phase_I_Type1__c, C_Phase_II_Type1__c, C_Phase_III_Type1__c (counts) or C_List_of_trial_name_or_sponsors_Type1__c (names)
+- Time series: sf_aggregate(mode='time_series', field='Amount', period='quarter'|'month', last_n=8)
+- Stage 1/2 fields live on Account (NOT Opportunity)
+- Contacts: salesforce_account_contacts with title_contains filter; or salesforce_account_extras for PI/assignments per Account
 
-• "Spain or Italy with Stage 2 > 0, or any German site"
-  → (ES OR IT) AND Stage2>0, OR just DE
-  → explorer_search(filters={{logic:'OR', rules:[
-      {{logic:'AND', rules:[
-        {{logic:'OR', rules:[
-          {{field:'site.country', operator:'equals', value:'ES'}},
-          {{field:'site.country', operator:'equals', value:'IT'}}
-        ]}},
-        {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:0}}
-      ]}},
-      {{field:'site.country', operator:'equals', value:'DE'}}
-    ]}})
+ACTIVITY QUERIES (via Assignment__c):
+Activities = Opportunities with RecordType.DeveloperName='RT_Activity'.
+Link chain: Activity (Opportunity) ← C_Opportunity_Name__c — Assignment__c — C_Account__c → Account (Site).
 
-• "Show records matching filter 1 AND 2, or filter 3" (expression style with flat rules)
-  → Use numbered expression in logic when rules are flat (no nesting needed).
-  → explorer_search(filters={{logic:'1 AND 2 OR 3', rules:[
-      {{field:'site.country', operator:'equals', value:'ES'}},
-      {{field:'qual.3_5_2__overnight_stay', operator:'equals', value:'Yes'}},
-      {{field:'sf.C_Number_of_Stage1_Individuals_followed__c', operator:'>', value:0}}
-    ]}})
-  NOTE: '1 AND 2 OR 3' evaluates as '(1 AND 2) OR 3' (AND binds tighter). Use nested groups for explicit parenthesization.
-
-AFTER explorer_search → you can call render_chart on the returned rows to produce a chart.
-FOLLOW-UP on explorer_search results → if user says "of those, only in Spain", call explorer_search again adding the new rule to the same filters.
-
-**BLOCK 10: Direct Account/Contact/Assignment queries (when needed)**
-• "Show me all clinical subaccounts" → salesforce_query: SELECT Id, Name, ParentId, RecordType.DeveloperName, C_Type__c FROM Account WHERE RecordType.DeveloperName = 'SubAccount' AND C_Type__c = 'Clinical'
-  NOTE: Use BLOCK 9 (explorer_search) for any query that combines qual.* with sf.* — do not use sql_query+salesforce_query separately.
-• "List all contacts with email" → salesforce_query: SELECT Id, Name, Email, Phone, Title, Department, AccountId FROM Contact WHERE Email != null
-• "Show account hierarchy for [account]" → salesforce_query: SELECT Id, Name, ParentId, C_Type__c FROM Account WHERE ParentId = '[parent_id]'
-  NOTE: Use Account queries for all site lists/counts/geography (BLOCK 1). Use Opportunity for patient metrics (BLOCK 2). NEVER use Postgres sites table for basic counts.
-• "Show assignments for [account/opportunity]" → salesforce_query: SELECT Id, Name, Assignment_Type__c, C_Assignment_Stage__c, C_MCA_Status__c, C_Payment_Done__c, C_Account__r.Name, C_Contact_Name__r.Name FROM Assignment__c WHERE C_Account__c = '[account_id]'
-• "Assignments pending payment" → salesforce_query: SELECT Id, Name, C_Assignment_Stage__c, C_Payment_Done__c, C_Account__r.Name FROM Assignment__c WHERE C_Payment_Done__c = false
-• "ND by country" → salesforce_query: SELECT Account.ShippingCountry, SUM(C_Number_of_new_T1D_diagnosed_O_18__c), SUM(C_Number_of_new_T1D_diagnosed_U_18__c) FROM Opportunity WHERE ... GROUP BY Account.ShippingCountry
-• "DxLab sites" → salesforce_query: SELECT Id, Name, ShippingCountry FROM Account WHERE C_Deliver_Clinical_Grade_Services__c = true AND (Account_Inactive__c = false OR Account_Inactive__c = null)
-• "CTS sites accredited" → salesforce_query: SELECT Id, Name, ShippingCountry FROM Account WHERE INNODIA_Clinical_Trial_Site__c = true AND C_Accredited_Clinical_Trial_Site__c = true
-
-**BLOCK 11: Activity → Sites queries (via Assignment__c)**
-Activities are Opportunities with RecordType.DeveloperName = 'RT_Activity'.
-Sites participate in an Activity through Assignment__c records (Account_Assignment type).
-The link chain is: Activity (Opportunity) ← C_Opportunity_Name__c — Assignment__c — C_Account__c → Account (Site).
-
-KNOWN ACTIVITIES (exact Opportunity names — use LIKE for partial matches):
-- "DETECT Pilot Sites" | "DETECT French Roll Out" | "DETECT Italian Roll Out"
-- "Fabulinus CTS Team - Part A" | "Fabulinus CTS Team - Part B" | "FABULINUS Referral Partner Network"
-- "Baricade Delay (JAJJ)" | "Baricade Preserve (JAJK)" | "Beta Preserve"
-- "Diagnode-3 RP Team" | "Safeguard Trial Clinical Sites"
+KNOWN ACTIVITIES (use LIKE for partial matches):
+- DETECT: "DETECT Pilot Sites" | "DETECT French Roll Out" | "DETECT Italian Roll Out"
+- Fabulinus: "Fabulinus CTS Team - Part A" | "Part B" | "FABULINUS Referral Partner Network"
+- Baricade: "Baricade Delay (JAJJ)" | "Baricade Preserve (JAJK)" | "Beta Preserve"
+- Others: "Diagnode-3 RP Team" | "Safeguard Trial Clinical Sites"
 
 SOQL PATTERN for "sites in activity X":
-```
 SELECT C_Account__r.Id, C_Account__r.Name, C_Account__r.ShippingCountry, C_Account__r.ShippingCity,
        C_Assignment_Stage__c, Assignment_Type__c, C_Opportunity_Name__r.Name
 FROM Assignment__c
@@ -4382,86 +4311,18 @@ WHERE C_Opportunity_Name__r.Name LIKE '%X%'
 AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity'
 AND RecordType.DeveloperName = 'Account_Assignment'
 ORDER BY C_Account__r.ShippingCountry, C_Account__r.Name
-```
 
-AMBIGUITY HANDLING:
-• If name matches multiple activities (e.g. "Fabulinus" → Part A + Part B + RP Network):
-  → Return ALL grouped by activity name. Do NOT ask for clarification unless the user explicitly wants only one.
-  → Add a summary bullet: "Found X sites across N activities: [activity names]"
-• If "Detect" is queried: return all 3 DETECT activities grouped, with a count per sub-activity.
+If name matches multiple activities (e.g. "Fabulinus") → return ALL grouped by activity name, do NOT ask for clarification.
+TABLE COLUMNS for activity queries: Activity, Site, Country, City, Assignment Stage.
 
-EXAMPLES:
-• "Sites in Detect" / "Which sites participate in Detect?"
-  → salesforce_query: SELECT C_Account__r.Id, C_Account__r.Name, C_Account__r.ShippingCountry, C_Account__r.ShippingCity, C_Opportunity_Name__r.Name, C_Assignment_Stage__c FROM Assignment__c WHERE C_Opportunity_Name__r.Name LIKE '%DETECT%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity' AND RecordType.DeveloperName = 'Account_Assignment' ORDER BY C_Opportunity_Name__r.Name, C_Account__r.ShippingCountry
+PROXIMITY QUERIES:
+- nearest_filtered_sites: by city name/address, supports filters and max_km. Distances are Haversine (straight-line).
+- explorer_within_drive_km: by known Account ID, driving distance. Do NOT use for city-name queries.
+After proximity results, remind user they can click the Open in Explorer button to view on the map.
 
-• "Sites in Fabulinus Part A"
-  → salesforce_query: ...WHERE C_Opportunity_Name__r.Name LIKE '%Fabulinus%Part A%'...
-
-• "Sites in Fabulinus" (ambiguous → return both parts)
-  → salesforce_query: ...WHERE C_Opportunity_Name__r.Name LIKE '%Fabulinus%' AND RecordType.DeveloperName = 'Account_Assignment'...
-  → Group results in the answer by activity name (Part A / Part B / RP Network)
-
-• "How many sites in Baricade?"
-  → salesforce_query: SELECT C_Opportunity_Name__r.Name activity, COUNT(Id) sites FROM Assignment__c WHERE C_Opportunity_Name__r.Name LIKE '%Baricade%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity' AND RecordType.DeveloperName = 'Account_Assignment' GROUP BY C_Opportunity_Name__r.Name
-
-• "All activities and their site counts"
-  → salesforce_query: SELECT C_Opportunity_Name__r.Name activity, COUNT(Id) sites FROM Assignment__c WHERE C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity' AND RecordType.DeveloperName = 'Account_Assignment' GROUP BY C_Opportunity_Name__r.Name ORDER BY COUNT(Id) DESC
-
-• "Is [site name] in Fabulinus?"
-  → salesforce_query: SELECT Id, C_Opportunity_Name__r.Name FROM Assignment__c WHERE C_Account__r.Name LIKE '%[site]%' AND C_Opportunity_Name__r.Name LIKE '%Fabulinus%' AND C_Opportunity_Name__r.RecordType.DeveloperName = 'RT_Activity'
-
-TABLE COLUMNS for activity queries: Activity, Site, Country, City, Assignment Stage (C_Assignment_Stage__c)
-
-**BLOCK 12: Nearest sites to a location → nearest_filtered_sites**
-Use when user asks for sites near/close to a city, address, or reference point (with or without filters).
-Do NOT use explorer_within_drive_km for city-name queries — that requires a Salesforce Account ID.
-
-• "Nearest 5 sites to Barcelona"
-  → nearest_filtered_sites(location='Barcelona', top_n=5)
-
-• "Closest sites to Berlin with on-site pharmacy"
-  → nearest_filtered_sites(location='Berlin', filters={{logic:'AND', rules:[
-      {{field:'qual.3_6__is_your_pharmacy_on_site_or_off_campus', operator:'equals', value:'On-site'}}
-    ]}}, top_n=10)
-
-• "Sites within 300km of Paris with Stage2 > 5"
-  → nearest_filtered_sites(location='Paris', filters={{logic:'AND', rules:[
-      {{field:'sf.C_Number_of_Stage2_Individuals_followed__c', operator:'>', value:5}}
-    ]}}, max_km=300)
-
-• "Centros más cercanos a Madrid con ND > 20"
-  → nearest_filtered_sites(location='Madrid', filters={{logic:'AND', rules:[
-      {{field:'sf.C_Number_of_new_T1D_diagnosed_O_18__c', operator:'>', value:20}}
-    ]}})
-
-• "Sites near San Raffaele Hospital"
-  → nearest_filtered_sites(location='San Raffaele Hospital Milan')
-
-NOTE: Distances are straight-line (Haversine), not driving. For driving distances from a known site, use explorer_within_drive_km.
-After results appear, remind user they can click 🎯 Open in Explorer to view on the interactive map.
-
-**BLOCK 13: Chart generation → render_chart (CRITICAL)**
-When the user asks for a bar chart, pie chart, line chart, or any visualization, you MUST:
-1. Call the appropriate data tool (salesforce_query / explorer_search / sql_query) to get rows
-2. ALWAYS call render_chart with the data — do NOT return only a table
-
-EXAMPLES (mandatory render_chart after data fetch):
-• "Bar chart of ND adults per country"
-  → salesforce_query: SELECT Account.ShippingCountry country, SUM(C_Number_of_new_T1D_diagnosed_O_18__c) nd_o18 FROM Opportunity WHERE StageName NOT IN ('Inactive','Closed Lost') AND Account.RecordType.DeveloperName='SubAccount' AND Account.C_Type__c='Clinical' AND C_Number_of_new_T1D_diagnosed_O_18__c > 0 GROUP BY Account.ShippingCountry ORDER BY 2 DESC
-  → render_chart(kind="bar", data=[rows], xKey="country", yKeys=["nd_o18"], meta={{"title":"Newly Diagnosed T1D Adults per Country"}})
-
-• "Pie chart of sites per country"
-  → salesforce_query: SELECT ShippingCountry country, COUNT(Id) sites FROM Account WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' AND (Account_Inactive__c=false OR Account_Inactive__c=null) GROUP BY ShippingCountry ORDER BY 2 DESC
-  → render_chart(kind="pie", data=[rows], xKey="country", yKeys=["sites"], meta={{"title":"Sites per Country"}})
-
-• "Grouped bar chart Stage 1 vs Stage 2 by country"
-  → salesforce_query: SELECT Account.ShippingCountry country, SUM(C_Number_of_Stage1_Individuals_followed__c) stage1, SUM(C_Number_of_Stage2_Individuals_followed__c) stage2 FROM Opportunity WHERE StageName NOT IN ('Inactive','Closed Lost') AND Account.RecordType.DeveloperName='SubAccount' GROUP BY Account.ShippingCountry ORDER BY 2 DESC
-  → render_chart(kind="bar", data=[rows], xKey="country", yKeys=["stage1","stage2"], meta={{"title":"Stage 1 vs Stage 2 by Country"}})
-
-• "gráfico de barras de sitios por país" / "Dame un gráfico…"
-  → Same as pie/bar chart examples above — render_chart is ALWAYS required
-
-⛔ NEVER return ONLY a table when the user asks for a chart — always call render_chart after fetching data.
+CHART GENERATION (render_chart):
+When user asks for a chart/visualization, you MUST: (1) fetch data with soql_query or explorer_search, (2) call render_chart with the data.
+NEVER return ONLY a table when a chart is requested — always call render_chart after fetching data.
 
 STYLE
 - Be direct and neutral. Fall back gracefully between SF and Postgres and mention it briefly in bullets.
@@ -4487,7 +4348,7 @@ GROUNDING & UNCERTAINTY RULES (mandatory — follow at all times)
 
 1. **Never fabricate data**: Only report numbers and facts retrieved via tool calls (Salesforce, Postgres, or the local sites DB). If a tool returns no rows, say "No data found" or "No sites match those criteria." Do NOT estimate, invent, or extrapolate numbers.
 
-2. **No-results response**: When explorer_search, salesforce_query, or sql_query returns 0 rows, respond concisely:
+2. **No-results response**: When explorer_search or soql_query returns 0 rows, respond concisely:
    - "No sites match those criteria." (for site/filter queries)
    - "No data found for that query." (for metric queries)
    Do NOT add hedging phrases like "it appears there may be…" or "perhaps try…" unless you have a concrete alternative to suggest.
@@ -4546,6 +4407,46 @@ QUERY ROUTING for members:
 - "contacts at [institution]" → members_search with name filter + include_detail=true
 - "board members / country leads" → members_search + include_detail=true; filter by contact flag
 - "how many sites does [member] have" → members_search + check extra.SubAccountsCount
+
+## Common Query Patterns (for explorer_search)
+
+### "Sites in [country]"
+Filter: {{field: "site.country", operator: "equals", value: "ISO2_CODE"}}
+Example for Germany: {{field: "site.country", operator: "equals", value: "DE"}}
+
+### "Sites with [qualification feature]"
+Use qual.* filter. For YES/NO fields use operator "contains" value "yes" (not "is_not_empty").
+
+### "Sites near [city]"
+Use nearest_filtered_sites with city parameter (not explorer_search).
+
+### "Sites near [city] not in [study/activity]"
+Use nearest_filtered_sites with location AND filters in ONE call. Do NOT make separate calls.
+Example: "sites near Brussels not in INNODIA Master" →
+nearest_filtered_sites(location="Brussels", filters={{logic:"AND", rules:[{{field:"extra.AssignmentsNames", operator:"not_contains", value:"INNODIA Master"}}]}})
+
+### "Sites near [city] not in any assignment"
+nearest_filtered_sites(location="city", filters={{logic:"AND", rules:[{{field:"extra.AssignmentsCount", operator:"is_empty"}}]}})
+
+### "Sites not in any assignment"
+Filter: {{field: "extra.AssignmentsCount", operator: "is_empty"}}
+
+### "Sites not in [specific study/activity]"
+Filter: {{field: "extra.AssignmentsNames", operator: "not_contains", value: "study name"}}
+
+### "Sites in assignment X"
+Filter: {{field: "extra.AssignmentsNames", operator: "contains", value: "X"}}
+
+### "How many sites per country"
+Use group_count with group_by="country".
+
+### "Top N sites by [metric]"
+Use rank_sites with the sf.* or qual.* metric field and limit=N.
+
+### Multi-condition example
+"German sites with overnight stays not in any assignment, ranked by ND" →
+explorer_search with filters: site.country=DE AND qual.3_5_2__overnight_stay contains "Yes" AND extra.AssignmentsCount is_empty
+Then present results sorted by ND values, or call rank_sites for formal ranking.
 """
 
 def _is_complex_query(text: str) -> bool:
@@ -4711,7 +4612,7 @@ def _claude_chat(
     system_text = "\n\n".join(system_parts) if system_parts else None
 
     # 3. Build API call kwargs with prompt caching
-    # The system prompt (~4 600 tokens) and 31-tool TOOLS_SPEC are large static payloads
+    # The system prompt (~4 600 tokens) and TOOLS_SPEC (~18 tools) are large static payloads
     # that are identical across every request — perfect candidates for ephemeral caching.
     # Cache hits cost ~10% of normal input tokens and return ~2× faster.
     kwargs: Dict[str, Any] = {
@@ -4825,6 +4726,181 @@ def _claude_chat(
 
     return OpenAICompatibleResponse(OpenAICompatibleMessage(content_str, tool_calls if tool_calls else None))
 
+
+# ====== Agentic loop ======
+
+def _agentic_loop(
+    msgs: List[Dict[str, Any]],
+    tool_ctx: "ToolContext",
+    *,
+    use_thinking: bool = False,
+) -> Dict[str, Any]:
+    """
+    Bounded agentic loop: up to MOBY_MAX_AGENT_TURNS turns of
+    Claude tool-use → dispatch → feed results back.
+
+    On the final turn, forces text-only response (no tools).
+
+    Returns dict with keys: text, turns_used, tool_calls_made,
+    last_table, last_visualization, last_explorer_filters.
+    """
+    import hashlib
+
+    from backend.app.routers.moby_tools import ToolContext, dispatch_tool
+
+    start_time = _monotonic()
+    seen_hashes: set = set()
+    dm_called = False  # Distance Matrix tools can only be called once per message
+    _DM_TOOL_NAMES = {"nearest_filtered_sites", "explorer_within_drive_km"}
+    tool_calls_made: List[Dict[str, Any]] = []
+    text_out: Optional[str] = None
+
+    last_table = tool_ctx.last_table
+    last_visualization = tool_ctx.last_visualization
+    last_explorer_filters = tool_ctx.last_explorer_filters
+
+    max_turns = MOBY_MAX_AGENT_TURNS
+
+    for turn in range(1, max_turns + 1):
+        # Timeout guard
+        elapsed = _monotonic() - start_time
+        if elapsed > MOBY_AGENT_TIMEOUT_S:
+            _dbg("Agentic loop timeout after %.1fs at turn %d", elapsed, turn)
+            break
+
+        is_final = (turn == max_turns)
+
+        # Extended thinking only on turn 1
+        think = use_thinking if turn == 1 else False
+
+        _dbg("Agentic loop turn %d/%d (final=%s, thinking=%s)", turn, max_turns, is_final, think)
+
+        try:
+            resp = _claude_chat(msgs, tool_choice="auto", force_no_tools=is_final, use_thinking=think)
+        except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as e:
+            _dbg("Anthropic API error in agentic loop turn %d: %s", turn, e)
+            text_out = f"<p>Service temporarily unavailable. Please try again later. ({str(e)[:50]})</p>"
+            break
+
+        assistant_msg = resp.choices[0].message
+
+        # No tool calls → extract text and exit
+        if not assistant_msg.tool_calls:
+            text_out = (assistant_msg.content or "").strip()
+            _dbg("Agentic loop turn %d: text response (%d chars), exiting", turn, len(text_out))
+            break
+
+        # Append assistant message with tool_calls to conversation
+        msgs.append({
+            "role": "assistant",
+            "content": assistant_msg.content or "",
+            "tool_calls": [tc.model_dump() for tc in assistant_msg.tool_calls],
+        })
+
+        # Dispatch each tool call
+        for tc in assistant_msg.tool_calls:
+            name = tc.function.name
+            args_json = tc.function.arguments or "{}"
+            args = json.loads(args_json)
+            tool_call_id = tc.id
+
+            # Dedup: skip if same tool+args already called
+            call_hash = hashlib.md5(f"{name}:{args_json}".encode()).hexdigest()
+            if call_hash in seen_hashes:
+                _dbg("Agentic loop: DEDUP skip %s (same args)", name)
+                msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps({"error": f"Duplicate call to {name} with same arguments — skipped. Use different parameters or summarize what you have."}),
+                })
+                continue
+            seen_hashes.add(call_hash)
+
+            # Distance Matrix cost protection: only one DM tool call per user message
+            if name in _DM_TOOL_NAMES:
+                if dm_called:
+                    _dbg("Agentic loop: DM tool %s blocked (already called a DM tool)", name)
+                    msgs.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": json.dumps({"error": "Distance Matrix tool already called this turn. Use the results from the previous call."}),
+                    })
+                    continue
+                dm_called = True
+
+            _dbg("Agentic loop turn %d: TOOL %s args=%s", turn, name, args)
+
+            # Truncate large args for tracking
+            tool_calls_made.append({"tool": name, "turn": turn})
+
+            # Update tool_ctx for this specific call
+            tool_ctx.args = args
+            tool_ctx.tool_call_id = tool_call_id
+
+            tool_result = dispatch_tool(name, tool_ctx)
+
+            # Truncate oversized tool results in msgs immediately (before next Claude turn)
+            # Handlers append to ctx.msgs — find the last tool message and truncate if needed
+            _char_limit = MAX_TOOL_RESULT_TOKENS * 4
+            for _m in reversed(msgs):
+                if _m.get("role") == "tool" and _m.get("tool_call_id") == tool_call_id:
+                    _content = _m.get("content", "")
+                    if len(_content) > _char_limit:
+                        try:
+                            _parsed = json.loads(_content)
+                            if isinstance(_parsed, dict) and "rows" in _parsed:
+                                _rows = _parsed["rows"]
+                                if isinstance(_rows, list) and len(_rows) > 50:
+                                    _parsed["rows"] = _rows[:50]
+                                    _parsed["_truncated"] = f"Showing 50 of {len(_rows)} rows"
+                                    _m["content"] = json.dumps(_parsed, default=str)
+                        except Exception:
+                            pass
+                    break
+
+            # Update shared state (guarded — preserve previous if handler didn't set)
+            if tool_result.last_table is not None:
+                last_table = tool_result.last_table
+                tool_ctx.last_table = last_table
+            if tool_result.last_visualization is not None:
+                last_visualization = tool_result.last_visualization
+                tool_ctx.last_visualization = last_visualization
+            if tool_result.last_explorer_filters is not None:
+                last_explorer_filters = tool_result.last_explorer_filters
+                tool_ctx.last_explorer_filters = last_explorer_filters
+
+        # Fast exit: if tool(s) returned a good table AND Claude included a meaningful
+        # text summary alongside the tool call, skip the synthesis turn (saves 3-8s).
+        # If no companion text, let Claude do turn 2 to write a proper human-like summary.
+        if last_table and last_table.get("rows"):
+            companion_text = (assistant_msg.content or "").strip()
+            if companion_text and len(companion_text) > 40:
+                text_out = companion_text
+                _dbg("Agentic loop: fast exit after turn %d — table + companion text (%d chars)", turn, len(companion_text))
+                break
+
+        # Send progress event if streaming
+        token_q = getattr(_STREAM_Q, "q", None)
+        if token_q is not None:
+            try:
+                progress = json.dumps({
+                    "turn": turn,
+                    "tools": [tc.function.name for tc in assistant_msg.tool_calls],
+                })
+                token_q.put(f"__PROGRESS__{progress}")
+            except Exception:
+                pass
+
+    return {
+        "text": text_out,
+        "turns_used": turn,
+        "tool_calls_made": tool_calls_made,
+        "last_table": last_table,
+        "last_visualization": last_visualization,
+        "last_explorer_filters": last_explorer_filters,
+    }
+
+
 # ====== Endpoint ======
 def _sf_escape_value(v: str) -> str:
     try:
@@ -4842,6 +4918,7 @@ def chat_stream_api(payload: ChatRequest, request: Request, db: Session = Depend
 
     Event format:
       data: {"type":"token","text":"<html chunk>"}
+      data: {"type":"progress","turn":1,"tools":["explorer_search"]}
       data: {"type":"done","answer":"...","table":{...},...}
       data: {"type":"error","message":"..."}
     """
@@ -4874,7 +4951,11 @@ def chat_stream_api(payload: ChatRequest, request: Request, db: Session = Depend
                 break
             if chunk is None:
                 break
-            yield f"data: {json.dumps({'type':'token','text':chunk})}\n\n"
+            # Progress events from agentic loop (prefixed with __PROGRESS__)
+            if isinstance(chunk, str) and chunk.startswith("__PROGRESS__"):
+                yield f"data: {chunk[12:]}\n\n"  # already JSON with "type":"progress"
+            else:
+                yield f"data: {json.dumps({'type':'token','text':chunk})}\n\n"
 
         t.join(timeout=10)
         if "error" in result_holder:
@@ -5064,14 +5145,14 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _me:
             _dbg("WARN: planner math handler failed: %s", _me)
 
-        # INTENCIÓN DIRECTA: "show on map / ver en el mapa" → direct to 🎯 Explorer button
-        try:
-            if re.search(r"\b(map|mapa)\b", s) and re.search(r"\b(show|ver|display|open|muestra|see|view)\b", s):
-                return {
-                    "answer": "<p>Click <strong>🎯 Open in Explorer (filter)</strong> below the table to view these sites on the interactive map and table.</p>"
-                }
-        except Exception as _e:
-            _dbg("WARN: planner show-on-map handler failed: %s", _e)
+        # REMOVED: show-on-map handler — migrated to Claude agentic loop
+        # try:
+        #     if re.search(r"\b(map|mapa)\b", s) and re.search(r"\b(show|ver|display|open|muestra|see|view)\b", s):
+        #         return {
+        #             "answer": "<p>Click <strong>🎯 Open in Explorer (filter)</strong> below the table to view these sites on the interactive map and table.</p>"
+        #         }
+        # except Exception as _e:
+        #     _dbg("WARN: planner show-on-map handler failed: %s", _e)
 
         # EARLY: "show as [grouped] bar chart" with last_table provided → convert table directly (no LLM)
         try:
@@ -5102,102 +5183,83 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         except Exception as _e:
             _dbg("WARN: planner EARLY table-to-chart failed: %s", _e)
 
-        # EARLY: "sites per country" + chart word → pie/bar chart (catch before is_chart_followup exit)
-        try:
-            _early_chart_country = (
-                re.search(r"\b(chart|bar|pie|graph|gr[aá]fico|barras|visuali[sz]e|plot)\b", s) and
-                re.search(r"\b(sites?|sitios?|centers?|centres?|clinical|cl[ií]nico[s]?|distributed)\b", s) and
-                re.search(r"\b(country|countries|pa[ií]s|pa[ií]ses|por\s+pa[ií]s|per\s+country|by\s+country)\b", s) and
-                not re.search(r"\bhla\b|\bstage\b|\bnd\b|activit|assignment|\bnewly\b|\bdiagnos\b|\bexplorer\b|\bsearch\s+for\b", s)
-            )
-            if _early_chart_country and sf:
-                # Use sf.query_all directly (FROM Account needs special handling — skip tool_salesforce_query validator)
-                _soql_ec = (
-                    "SELECT ShippingCountry, COUNT(Id) "
-                    "FROM Account "
-                    "WHERE RecordType.DeveloperName='SubAccount' "
-                    "AND C_Type__c='Clinical' "
-                    "AND ShippingCountry != null "
-                    "AND (Account_Inactive__c=false OR Account_Inactive__c=null) "
-                    "AND (Subaccount_Inactive__c=false OR Subaccount_Inactive__c=null) "
-                    "GROUP BY ShippingCountry "
-                    "ORDER BY COUNT(Id) DESC"
-                )
-                _raw_ec = sf.query_all(_soql_ec)
-                _recs_ec = _raw_ec.get("records", []) if isinstance(_raw_ec, dict) else []
-                _rows_ec = [
-                    {"country": _r.get("ShippingCountry", ""),
-                     "sites": int(_r.get("expr0") or _r.get("COUNT(Id)") or 0)}
-                    for _r in _recs_ec if _r.get("ShippingCountry")
-                ]
-                if _rows_ec:
-                    _kind_ec = "pie" if re.search(r"\b(pie|circular|dona|donut|ring)\b", s) else "bar"
-                    _total_ec = sum(r["sites"] for r in _rows_ec)
-                    _tbl_ec = _normalize_table_for_ui({
-                        "columns": [{"key": "country", "label": "Country"}, {"key": "sites", "label": "Sites"}],
-                        "rows": _rows_ec,
-                    })
-                    _viz_ec = tool_render_chart(_kind_ec, _rows_ec, "country", ["sites"],
-                                               {"title": "Clinical Sites per Country"}, {})
-                    _dbg("Planner EARLY sites-per-country chart (%s): %d countries", _kind_ec, len(_rows_ec))
-                    return {
-                        "answer": f"<p>{_total_ec} sites across {len(_rows_ec)} countries.</p>",
-                        "table": _tbl_ec,
-                        "visualization": _viz_ec.get("visualization"),
-                    }
-        except Exception as _e:
-            _dbg("WARN: planner EARLY sites-per-country chart failed: %s", _e)
+        # ═══════════════════════════════════════════════════════════════════════
+        # ALL DETERMINISTIC HANDLERS BELOW DISABLED — migrated to Claude agentic loop.
+        # The following handlers are preserved as dead code for domain logic reference.
+        # They were disabled on 2026-04-09 as part of the agentic loop migration (Task 5).
+        #
+        # Disabled handlers:
+        #   - Sites-per-country chart
+        #   - HLA % per country chart
+        #   - Member institutions (MB6, MB7, ST8, QI02, roles, contacts)
+        #   - Study Coordinator / PI / contacts (SC, PI, OC, P04)
+        #   - Percentage of sites in activity/assignment
+        #   - Activity / assignment handlers (moby_handlers.py delegation)
+        #   - Newly Diagnosed (ND) ranking/aggregation
+        #   - T1D currently followed (threshold)
+        #   - T1D patients ranking
+        #   - Stage 1/2 by country aggregation
+        #   - Stage 1/2 site list
+        #   - Phase I/II/III clinical trials
+        #   - Assignment queries (Explorer API)
+        #   - Qual field queries (pharmacy, overnight, HLA, ZnT8, etc.)
+        #   - Profiling date-diff aggregation (GQ16)
+        #   - DR02 qual upload + no geocoordinates
+        #   - Pipeline/status handlers (CTS-validated, profiling, referral, meeting dates)
+        #   - Country sites handler
+        #   - HLA typing in country
+        #   - Sites-per-country chart (secondary)
+        #   - Group count / rank by group
+        # ═══════════════════════════════════════════════════════════════════════
+        return None
 
-        # EARLY: HLA % per country (bar chart) — catch before LLM misroutes to rank_sites_by_group
-        try:
-            if (re.search(r"%\s*of\s*sites", s) and
-                    re.search(r"\bhla\s*typing\b", s) and
-                    re.search(r"\bper\s*country\b|\bby\s*country\b", s) and sf):
-                _soql_tot_e = (
-                    "SELECT ShippingCountry, COUNT(Id) "
-                    "FROM Account "
-                    "WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
-                    "AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
-                    "AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null) "
-                    "AND ShippingCountry != null "
-                    "GROUP BY ShippingCountry"
-                )
-                _tot_e = sf.query_all(_soql_tot_e).get("records", [])
-                _totals_e = {r.get("ShippingCountry"): int(r.get("expr0") or 0) for r in _tot_e}
-                _soql_hla_e = (
-                    "SELECT AccountId, Account.ShippingCountry "
-                    "FROM Opportunity "
-                    "WHERE C_Is_HLA_typing_performed__c = 'Yes' "
-                    "AND Account.ShippingCountry != null"
-                )
-                _recs_hla_e = sf.query_all(_soql_hla_e).get("records", [])  # no GROUP BY — dedup in Python
-                _hla_cnt_e: Dict[str, int] = {}
-                _seen_e: set = set()
-                for _r in _recs_hla_e:
-                    _aid_e = _r.get("AccountId")
-                    _acc_e = _r.get("Account") or {}
-                    _c_e = _acc_e.get("ShippingCountry")
-                    if not _aid_e or not _c_e or _aid_e in _seen_e: continue
-                    _seen_e.add(_aid_e)
-                    _hla_cnt_e[_c_e] = _hla_cnt_e.get(_c_e, 0) + 1
-                _rows_hla_e = []
-                for _country_e, _total_e in _totals_e.items():
-                    _has_e = _hla_cnt_e.get(_country_e, 0)
-                    _ratio_e = round(float(_has_e) / float(_total_e), 4) if _total_e else 0.0
-                    _rows_hla_e.append({"country": _country_e, "with_hla": _has_e,
-                                        "total": _total_e, "ratio": _ratio_e})
-                _rows_hla_e.sort(key=lambda x: x.get("ratio", 0), reverse=True)
-                _tbl_hla_e = {"columns": [{"key":"country","label":"Country"},{"key":"with_hla","label":"With HLA"},
-                                          {"key":"total","label":"Total"},{"key":"ratio","label":"Ratio"}],
-                              "rows": _rows_hla_e}
-                _viz_hla_e = tool_render_chart("bar", _rows_hla_e, "country", ["with_hla"],
-                                              {"title": "Sites with HLA Typing per Country"}, {})
-                _dbg("Planner EARLY HLA %% per country: %d countries", len(_rows_hla_e))
-                return {"answer": f"<p>HLA typing ratio for {len(_rows_hla_e)} countries.</p>",
-                        "table": _normalize_table_for_ui(_tbl_hla_e),
-                        "visualization": _viz_hla_e.get("visualization")}
-        except Exception as _e:
-            _dbg("WARN: planner EARLY HLA %% per country failed: %s", _e)
+        # REMOVED: sites-per-country chart — migrated to Claude agentic loop
+        # try:
+        #     _early_chart_country = (
+        #         re.search(r"\b(chart|bar|pie|graph|gr[aá]fico|barras|visuali[sz]e|plot)\b", s) and
+        #         re.search(r"\b(sites?|sitios?|centers?|centres?|clinical|cl[ií]nico[s]?|distributed)\b", s) and
+        #         re.search(r"\b(country|countries|pa[ií]s|pa[ií]ses|por\s+pa[ií]s|per\s+country|by\s+country)\b", s) and
+        #         not re.search(r"\bhla\b|\bstage\b|\bnd\b|activit|assignment|\bnewly\b|\bdiagnos\b|\bexplorer\b|\bsearch\s+for\b", s)
+        #     )
+        #     if _early_chart_country and sf:
+        #         _soql_ec = (
+        #             "SELECT ShippingCountry, COUNT(Id) "
+        #             "FROM Account "
+        #             "WHERE RecordType.DeveloperName='SubAccount' "
+        #             "AND C_Type__c='Clinical' "
+        #             "AND ShippingCountry != null "
+        #             "AND (Account_Inactive__c=false OR Account_Inactive__c=null) "
+        #             "AND (Subaccount_Inactive__c=false OR Subaccount_Inactive__c=null) "
+        #             "GROUP BY ShippingCountry "
+        #             "ORDER BY COUNT(Id) DESC"
+        #         )
+        #         _raw_ec = sf.query_all(_soql_ec)
+        #         _recs_ec = _raw_ec.get("records", []) if isinstance(_raw_ec, dict) else []
+        #         _rows_ec = [
+        #             {"country": _r.get("ShippingCountry", ""),
+        #              "sites": int(_r.get("expr0") or _r.get("COUNT(Id)") or 0)}
+        #             for _r in _recs_ec if _r.get("ShippingCountry")
+        #         ]
+        #         if _rows_ec:
+        #             _kind_ec = "pie" if re.search(r"\b(pie|circular|dona|donut|ring)\b", s) else "bar"
+        #             _total_ec = sum(r["sites"] for r in _rows_ec)
+        #             _tbl_ec = _normalize_table_for_ui({
+        #                 "columns": [{"key": "country", "label": "Country"}, {"key": "sites", "label": "Sites"}],
+        #                 "rows": _rows_ec,
+        #             })
+        #             _viz_ec = tool_render_chart(_kind_ec, _rows_ec, "country", ["sites"],
+        #                                        {"title": "Clinical Sites per Country"}, {})
+        #             _dbg("Planner EARLY sites-per-country chart (%s): %d countries", _kind_ec, len(_rows_ec))
+        #             return {
+        #                 "answer": f"<p>{_total_ec} sites across {len(_rows_ec)} countries.</p>",
+        #                 "table": _tbl_ec,
+        #                 "visualization": _viz_ec.get("visualization"),
+        #             }
+        # except Exception as _e:
+        #     _dbg("WARN: planner EARLY sites-per-country chart failed: %s", _e)
+
+        # REMOVED: HLA % per country chart — migrated to Claude agentic loop
+        pass
 
         # INTENCIÓN DIRECTA: Member institutions → route to tool_members_search
         try:
@@ -8162,12 +8224,14 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             logic = "AND"
         return {"logic": logic, "rules": rules}
 
+    # REMOVED: km-of-assignment handler — migrated to Claude agentic loop
     # ===== Determinista: within/in a X km OF [Assignment/Study Name] SITES/ACTIVITY =====
     # e.g. "sites within 100 km of Beta Preserve sites"
     #      "sites in a 120 km of any BetaPreserve activity"
     # Detects the "[Name] sites/activity" pattern (assignment/activity name, not a city) and builds
     # a deduplicated table of nearby INNODIA sites sorted by minimum driving distance.
     try:
+        raise Exception("handler disabled")  # noqa: migrated to Claude agentic loop
         qtxt = (payload.messages[-1].content or "") if payload.messages else ""
         # Match "within N km ... of [Name] sites"  (EN: "within 100 km of Beta Preserve sites")
         # Also match Spanish: "a N km de ... [actividad/assignment/estudio] [Name]"
@@ -8645,7 +8709,9 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     except Exception as _e_assign_km:
         _dbg("WARN: within-km-of-assignment handler: %s", _e_assign_km)
 
+    # REMOVED: generic within-km handler — migrated to Claude agentic loop
     try:
+        raise Exception("handler disabled")  # noqa: migrated to Claude agentic loop
         qtxt = (payload.messages[-1].content or "") if payload.messages else ""
         s = qtxt.lower()
         m_dist = re.search(r"(?:within|radius|radio|distancia|a)\s*(\d{2,4})\s*km\b", s)
@@ -8863,8 +8929,10 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     except Exception as _e:
         _dbg("WARN: generic within-km pipeline failed: %s", _e)
 
+    # REMOVED: nearest/closest handler — migrated to Claude agentic loop
     # ===== Determinista: nearest/closest N sites to <city> =====
     try:
+        raise Exception("handler disabled")  # noqa: migrated to Claude agentic loop
         qtxt2 = (payload.messages[-1].content or "") if payload.messages else ""
         s2 = qtxt2.lower()
         # Detect "nearest N sites to <city>" or "closest N sites to <city>" or "N nearest sites to <city>"
@@ -9365,11 +9433,14 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         hints = []
         
         # Si el usuario pide contactos/roles (PI/SC/etc.), no uses planner; deja que el modelo invoque la tool de contactos
-        role_terms = [
-            "study coordinator","study nurse","principal investigator","pi","clinician","project manager","technician",
-            "member representative","contact person","associate scientist","post-doc","phd student","head","fellow"
-        ]
-        if any(t in s for t in role_terms):
+        _role_pat = re.compile(
+            r"\b(?:study\s+coordinator|study\s+nurse|principal\s+investigator"
+            r"|clinician|project\s+manager|technician|member\s+representative"
+            r"|contact\s+person|associate\s+scientist|post-doc|phd\s+student|fellow)\b"
+            r"|\bPI\b",  # PI must be uppercase to avoid matching "typing", "pipeline", etc.
+            re.I
+        )
+        if _role_pat.search(user_utterance):
             _dbg("Fast planner: contact/role intent detected, skipping planner")
             return None
 
@@ -9387,13 +9458,13 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 "Use render_chart with 'data' parameter containing ALL rows from the previous table result. "
                 "The data is available in the tool result from the previous call. "
                 "Choose xKey (dimension like 'country'/'city'/'site') and yKeys (numeric like 'sites'/'count'/'patients'). "
-                "Do NOT call sql_query or salesforce_query again."
+                "Do NOT call soql_query again."
             )
         elif re.search(r"\b(chart|graph|bar|pie|line|visuali[sz]e)\b", user_utterance):
             # Petición de gráfico pero NO hay last_table (nueva conversación o follow-up sin datos)
             hints.append(
                 "📊 **CHART WITHOUT DATA**: User wants a chart but no previous data is available in this session. "
-                "You MUST first query the data (use salesforce_query for sites/counts, or sql_query for qualification data), "
+                "You MUST first query the data (use soql_query for sites/counts, or explorer_search for qualification data), "
                 "and THEN call render_chart with the 'data' parameter containing the rows from that query. "
                 "Do NOT call render_chart with empty or placeholder data."
             )
@@ -9403,7 +9474,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             hints.append(
                 "📍 **NEAREST SITES**: User wants sites near a location. "
                 "You MUST use nearest_filtered_sites(location='<city/address>', top_n=<N>, max_km=<radius>). "
-                "Do NOT use salesforce_query or sql_query for this. "
+                "Do NOT use soql_query for this. "
                 "Example: nearest_filtered_sites(location='Barcelona', top_n=5). "
                 "Add filters={...} only if the user specifies additional field constraints."
             )
@@ -9412,8 +9483,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         elif is_basic_site_query:
             hints.append(
                 "🔴 **CRITICAL ROUTING**: This is a site list/count query. "
-                "You MUST use salesforce_query with Account table. "
-                "RULE: Use Postgres (sql_query) ONLY for site_qual qualification questions (pharmacy, overnight stay, etc.). "
+                "You MUST use soql_query with Account table. "
                 "For site lists/counts/geography, ALWAYS use Salesforce Account: "
                 "SELECT ... FROM Account WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
                 "AND (Account_Inactive__c = false OR Account_Inactive__c = null) "
@@ -9426,13 +9496,13 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 meta = kindex.get(a, {})
                 if meta.get("source") == "sf":
                     hints.append(
-                        f"{a} -> use salesforce_query (field: {meta.get('field')}). "
+                        f"{a} -> use soql_query (field: {meta.get('field')}). "
                         "SOQL rules: do NOT prefix fields with 'sf.'; use Account.ShippingCountry and "
                         "Account.ShippingCity for geography; to filter non-null use '!= null'."
                     )
                 else:
-                    hints.append(f"{a} -> use sql_query. JOIN sites s WITH site_qual sq ON s.id=sq.site_id. Filter on sq.data->>'{meta.get('key')}'. "
-                                 "Use ILIKE for text comparisons (e.g. value ILIKE 'On-site%'). SELECT s.salesforce_account_id AS account_id.")
+                    hints.append(f"{a} -> use explorer_search with qual.* filter (key: qual.{meta.get('key')}). "
+                                 "Use equals/contains operators for text, > for numeric.")
         # Heurística de CONTACT ROLES / TITLES
         role_map = {
             r"study\\s*coordinator": ("Study Coordinator",),
@@ -9499,812 +9569,116 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             _dbg("WARN: force_no_tools conversational call failed: %s", _ctx_e)
             # Fall through to normal tool-based flow
 
-    # Si hay intención de datos → obligamos tool-calls
-    tool_mode = "required" if data_intent else "auto"
-    reinforced_once = False
     # Enable extended thinking for complex multi-condition queries.
     _complex = _is_complex_query(user_utterance)
-    _dbg("ROUND call → tool_choice=%s | data_intent=%s | thinking=%s", tool_mode, data_intent, _complex)
-    try:
-        resp = _claude_chat(msgs, tool_choice=tool_mode, use_thinking=_complex)
-    except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as e:
-        _dbg("Anthropic API error (1st attempt): %s", e)
-        return {"answer": f"<p>Service temporarily unavailable (timeout/connection). Please try again later. ({str(e)[:50]})</p>"}
-    choice = resp.choices[0]
-    assistant_msg = choice.message
-    _dbg("ASSISTANT content len=%s | tool_calls=%s",
-         len(assistant_msg.content or ""), 
-         [tc.function.name for tc in (assistant_msg.tool_calls or [])])
+    _dbg("Agentic loop -> data_intent=%s | thinking=%s", data_intent, _complex)
 
-    # Heurística de intención de datos
-    if not assistant_msg.tool_calls and data_intent and not reinforced_once:
-        _dbg("No tool_calls but data_intent=True  refuerzo de sistema y reintento")
+    # If data_intent is set, inject a reinforcement hint so Claude uses tools
+    if data_intent:
         msgs.append({
             "role": "system",
             "content": (
                 "IMPORTANT: You must call at least one tool to fetch **real data**. "
-                "Prefer salesforce_query for Salesforce fields when available; otherwise "
-                "sql_query (Postgres) for site_qual JSONB metrics. "
+                "Prefer explorer_search as your default tool; use soql_query for SOQL aggregations. "
                 "Return a compact table (Site, Country, City, metric) and, if useful, a bar chart."
             )
         })
-        reinforced_once = True
-        # Retry without thinking — the reinforcement hint is enough for retries
-        try:
-            resp = _claude_chat(msgs, tool_choice="required", use_thinking=False)
-        except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as e:
-            _dbg("Anthropic API error (retry): %s", e)
-            return {"answer": f"<p>Service temporarily unavailable (timeout/connection) during retry. ({str(e)[:50]})</p>"}
-        choice = resp.choices[0]
-        assistant_msg = choice.message
-        _dbg(
-            "RETRY: content len=%s | tool_calls=%s",
-            len(assistant_msg.content or ""),
-            [tc.function.name for tc in (assistant_msg.tool_calls or [])]
-        )
 
-    # 1) Si el asistente pidió herramientas, debemos:
-    #    a) añadir su mensaje al historial
-    #    b) ejecutar cada tool y añadir un mensaje role="tool" con tool_call_id
-    if assistant_msg.tool_calls:
-        # a) Añadimos el mensaje del asistente que contiene tool_calls
-        msgs.append({
-            "role": "assistant",
-            "content": assistant_msg.content or "",
-            "tool_calls": [tc.model_dump() for tc in assistant_msg.tool_calls],  # mantiene el id
-        })
+    # --- Inject planner hints into system prompt for the agentic loop ---
+    try:
+        # parse_query_plan returns MobyPlan: countries=List[str] (ISO2), filters=List[FilterSpec]
+        _hint_plan = parse_query_plan(user_utterance, kindex)
+        _planner_hints = []
+        if _hint_plan.get("countries"):
+            _iso_list = _hint_plan["countries"]  # already List[str] of ISO2 codes
+            _planner_hints.append(f"Detected countries: {', '.join(_iso_list)}. Use site.country filter with these ISO2 codes.")
+        if _hint_plan.get("filters"):
+            _filter_strs = [
+                f"{f.get('field', '?')} {f.get('operator', '?')} {f.get('value', '')}"
+                for f in _hint_plan["filters"]
+            ]
+            _planner_hints.append(f"Suggested filters: {', '.join(_filter_strs)}. Verify these match the user's intent.")
+        if _hint_plan.get("intent") and _hint_plan["intent"] != "other":
+            _planner_hints.append(f"Detected intent: {_hint_plan['intent']}.")
 
-        # b) Ejecutamos herramientas
-        for tc in assistant_msg.tool_calls:
-            name = tc.function.name
-            args = json.loads(tc.function.arguments or "{}")
-            tool_call_id = tc.id
-            _dbg("TOOL CALL → %s args=%s", name, args)
+        if _planner_hints:
+            _hint_block = "\n".join(f"- {h}" for h in _planner_hints)
+            _hint_msg = f"\n\n[SYSTEM HINTS — use as starting points, verify against user's question]\n{_hint_block}"
+            for _m in msgs:
+                if _m.get("role") == "system":
+                    _m["content"] += _hint_msg
+                    break
+            _dbg("Planner hints injected: %d hints", len(_planner_hints))
+    except Exception:
+        pass  # Hints are optional — don't let planner errors break the chat
 
-            if name == "sql_query":
-                try:
-                    _sql_raw = args.get("sql","")
-                    # Schema-exploration queries (jsonb_object_keys, information_schema, etc.) should
-                    # NOT set last_table — just return info to Gemini so it can make a follow-up query
-                    _is_schema_query = bool(re.search(
-                        r"jsonb_object_keys|information_schema|pg_catalog|SHOW TABLES|DESCRIBE\s",
-                        _sql_raw, re.I))
-                    # Reset any previous table/visualization to avoid stale UI when a new tool runs
-                    if not _is_schema_query:
-                        last_table = None
-                        last_visualization = None
-                    out = tool_sql_query(db, _sql_raw, args.get("params") or {})
-                    cols = out.get("columns") or []
-                    dict_rows = [{cols[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
-                    if not _is_schema_query:
-                        last_table = {"columns": [{"key": c, "label": c} for c in cols], "rows": dict_rows}
-                    # --- NUEVO: enriquecer account_id por nombre de sitio si falta ---
-                    try:
-                        rows0 = (last_table.get("rows") or []) if last_table else []
-                        # extrae posibles nombres de sitio
-                        name_keys = [
-                            "site","sites.name","s.name","sf.Account.Name","Account.Name","name","account_name"
-                        ]
-                        wanted = {str(r[k]) for r in rows0 for k in name_keys
-                                  if isinstance(r, dict) and r.get(k)}
-                        if wanted:
-                            q = text("""
-                                SELECT name, salesforce_account_id
-                                FROM public.sites
-                                WHERE name = ANY(:names)
-                            """)
-                            res = db.execute(q, {"names": list(wanted)})
-                            mapping = {row[0]: row[1] for row in res.fetchall() if row[1]}
-                            changed = False
-                            for r in rows0:
-                                if not isinstance(r, dict):
-                                    continue
-                                if "account_id" not in r or not r.get("account_id"):
-                                    nm = next((r.get(k) for k in name_keys if r.get(k)), None)
-                                    acc = mapping.get(str(nm)) if nm is not None else None
-                                    if acc:
-                                        r["account_id"] = acc
-                                        r.setdefault("sf.Account.Id", acc)
-                                        changed = True
-                            if changed:
-                                # Asegura columna al inicio si falta
-                                col_keys = [c.get("key") for c in last_table.get("columns", [])]
-                                if "account_id" not in col_keys:
-                                    last_table["columns"].insert(0, {"key": "account_id", "label": "Account Id"})
-                    except Exception as _e:
-                        _dbg("WARN: enrich account_id by site-name failed: %s", _e)
-                    _dbg("SQL RESULT: %s", json.dumps(out, default=str)[:500])
-                    msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
-                except Exception as e:
-                    import traceback
-                    _dbg("SQL TOOL ERROR: %s\n%s", e, traceback.format_exc())
-                    msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(e)})})
+    # --- Agentic loop replaces the old single-turn tool dispatch ---
+    from backend.app.routers.moby_tools import ToolContext as _TC, dispatch_tool as _dispatch_tool
 
-            elif name == "salesforce_query":
-                try:
-                    # Reset any previous table/visualization to avoid stale UI when a new tool runs
-                    last_table = None
-                    last_visualization = None
-                    if not sf:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                    else:
-                        soql_orig = args.get("soql","")
-                        # REDIRECT: Stage 1/2 site-list queries → explorer_search (reliable path for these fields)
-                        _stage12_pat = r"Stage[_\s]?[12][_\s]?Individuals|Individuals[_\s]+with[_\s]+Stage[_\s]?[12]|Stage[12]_Individuals"
-                        if re.search(_stage12_pat, soql_orig, re.I):
-                            _dbg("SOQL-REDIRECT: Stage1/2 query → redirecting to explorer_search")
-                            _s12_out = tool_explorer_search(
-                                request,
-                                filters={"logic": "OR", "rules": [
-                                    {"field": "sf.C_Number_of_Stage1_Individuals_followed__c", "operator": ">", "value": 0},
-                                    {"field": "sf.C_Number_of_Stage2_Individuals_followed__c", "operator": ">", "value": 0},
-                                ]},
-                                columns=["sf.C_Number_of_Stage1_Individuals_followed__c",
-                                         "sf.C_Number_of_Stage2_Individuals_followed__c"],
-                            )
-                            last_table = {"columns": _s12_out.get("columns") or [], "rows": _s12_out.get("rows") or []}
-                            last_table = _normalize_table_for_ui(last_table)
-                            msgs.append({"role": "tool", "tool_call_id": tool_call_id,
-                                         "content": json.dumps(_s12_out, default=str)})
-                        else:
-                            _validate_soql(soql_orig)
-                            raw = tool_salesforce_query(sf, soql_orig)
-                            # aplanamos para tabla
-                            records = raw.get("records", []) if isinstance(raw, dict) else []
-                            flat_rows, keys = [], set()
-                            # Extraer contexto del SOQL para mejores etiquetas
-                            soql_context = {}
-                            # Detectar aliases explicitamente nombrados en el SOQL
-                            alias_matches = re.findall(r"\b(AVG|COUNT|SUM|MIN|MAX)\([^)]+\)\s+(\w+)", soql_orig, re.I)
-                            for agg_func, alias_name in alias_matches:
-                                alias_lower = alias_name.lower()
-                                if alias_lower in ("total", "count"):
-                                    soql_context[alias_name] = "Total"
-                                elif alias_lower == "sites":
-                                    soql_context[alias_name] = "Sites"
-                                elif alias_lower == "country":
-                                    soql_context[alias_name] = "Country"
-                                elif alias_lower == "avg" or agg_func.upper() == "AVG":
-                                    if "T1D" in soql_orig and "U_18" in soql_orig:
-                                        soql_context[alias_name] = "Average T1D Patients <18"
-                                    elif "T1D" in soql_orig and "O_18" in soql_orig:
-                                        soql_context[alias_name] = "Average T1D Patients ≥18"
-                                    else:
-                                        soql_context[alias_name] = "Average"
-                            # Fallback para expr0, expr1, etc. sin alias explícito
-                            if "AVG(" in soql_orig and "T1D" in soql_orig and "U_18" in soql_orig and "expr0" not in soql_context:
-                                soql_context["expr0"] = "Average T1D Patients <18"
-                            elif "AVG(" in soql_orig and "T1D" in soql_orig and "O_18" in soql_orig and "expr0" not in soql_context:
-                                soql_context["expr0"] = "Average T1D Patients ≥18"
-                            elif "AVG(" in soql_orig and "T1D" in soql_orig and "expr0" not in soql_context:
-                                soql_context["expr0"] = "Average T1D Patients"
-                            elif "COUNT(" in soql_orig and "expr0" not in soql_context:
-                                soql_context["expr0"] = "Total Count"
-                            for r in records:
-                                flat = {}
-                                for k, v in r.items():
-                                    if k == "attributes": continue
-                                    if isinstance(v, dict) and "attributes" in v:
-                                        for kk, vv in v.items():
-                                            if kk == "attributes": continue
-                                            flat[f"sf.Account.{kk}"] = vv
-                                            keys.add(f"sf.Account.{kk}")
-                                    else:
-                                        flat[f"sf.{k}"] = v
-                                        keys.add(f"sf.{k}")
-                                flat_rows.append(flat)
-                            # Columnas con etiquetas "humanas" usando contexto SOQL
-                            sf_fields_map = _INDEX_CACHE.get("sf_fields") or {}
-                            ordered = sorted(keys)
-                            cols = []
-                            for k in ordered:
-                                bare_key = k.replace("sf.", "")
-                                if bare_key.lower() in soql_context:
-                                    label = soql_context[bare_key.lower()]
-                                else:
-                                    label = _pretty_label(k)
-                                cols.append({"key": k, "label": label})
-                            last_table = {"columns": cols, "rows": flat_rows}
-                            last_table = _normalize_table_for_ui(last_table)
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(raw, default=str)})
-                except Exception as e:
-                    msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(e)})})
+    _tool_ctx = _TC(
+        db=db,
+        request=request,
+        sf=sf,
+        last_table=last_table,
+        last_visualization=last_visualization,
+        last_explorer_filters=last_explorer_filters,
+        msgs=msgs,
+        args={},
+        tool_call_id="",
+    )
 
-            elif name == "salesforce_account_extras":
-                    if not sf:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                    else:
-                        out = tool_salesforce_account_extras(sf, args.get("account_id",""))
-                        cols = out.get("columns") or []
-                        dict_rows = [{cols[i]: v for i, v in enumerate(r)} for r in out.get("rows") or []]
-                        last_table = {"columns": [{"key": c, "label": c} for c in cols], "rows": dict_rows}
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
+    loop_result = _agentic_loop(msgs=msgs, tool_ctx=_tool_ctx, use_thinking=_complex)
 
-            elif name == "explorer_set_filters":
-                    out = tool_explorer_set_filters(request, args)
-                    msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out)})
+    last_table = loop_result["last_table"]
+    last_visualization = loop_result["last_visualization"]
+    last_explorer_filters = loop_result["last_explorer_filters"]
+    text_out = loop_result["text"]
 
-            elif name == "salesforce_account_contacts":
-                    if not sf:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                    else:
-                        # Sanitize/auto-resolve account id to prevent malformed SOQL
-                        acc_arg = args.get("account_id", "") or ""
-                        acc_id = acc_arg.strip()
-                        if not _is_valid_sf_id(acc_id, prefix="001"):
-                            inferred = _first_account_id_from_table(last_table)
-                            if _is_valid_sf_id(inferred, prefix="001"):
-                                acc_id = inferred
-                            else:
-                                msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": "Missing or invalid account_id"})})
-                                continue
-                        out = tool_salesforce_account_contacts(
-                            sf,
-                            acc_id,
-                            bool(args.get("include_subaccounts") or False),
-                            args.get("role_contains"),
-                            args.get("roles"),
-                            args.get("title_contains"),
-                            args.get("country"),
-                            args.get("city")
-                        )
-                        last_table = out
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
+    _dbg("Agentic loop done: turns=%d, tools=%s, text=%d chars, has_table=%s",
+         loop_result["turns_used"],
+         [t["tool"] for t in loop_result["tool_calls_made"]],
+         len(text_out or ""),
+         bool(last_table))
 
-            elif name == "salesforce_assignments":
-                    if not sf:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                    else:
-                        out = tool_salesforce_assignments(
-                            sf,
-                            args.get("account_ids") or [],
-                            bool(args.get("active_only") or False),
-                            args.get("last_n_months"),
-                        )
-                        last_table = out
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-
-            elif name == "rank_sites_by_group":
-                    try:
-                        out_table = tool_rank_sites_by_group(
-                            db,
-                            sf,
-                            args.get("metric",""),
-                            (args.get("group_by") or "country"),
-                            int(args.get("top_n") or 3),
-                            args.get("order") or "desc",
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "group_count":
-                    try:
-                        out_table = tool_group_count(
-                            db,
-                            args.get("by") or ["country"],
-                            args.get("where") or {},
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "group_count_agg":
-                    try:
-                        out_table = tool_group_count_agg(
-                            db,
-                            args.get("by") or ["country"],
-                            args.get("metric"),
-                            args.get("agg") or "avg",
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "list_activities":
-                    try:
-                        if not sf:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                        else:
-                            _la_acc = (tool_args or {}).get("account_name_like")
-                            out_table = tool_list_all_activities(sf, account_name_like=_la_acc or None)
-                            last_table = out_table
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activities_with_countries":
-                    try:
-                        if not sf:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                        else:
-                            out_table = tool_activities_with_countries(sf)
-                            last_table = out_table
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activity_counts_by_country":
-                    try:
-                        if not sf:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                        else:
-                            out_table = tool_activity_counts_by_country(sf)
-                            last_table = out_table
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activity_country_matrix":
-                    try:
-                        if not sf:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                        else:
-                            out_table = tool_activity_country_matrix(sf, bool(args.get("stacked") or False))
-                            last_table = out_table
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activities_sites":
-                    try:
-                        out_table = tool_sites_with_any_activity(
-                            sf,
-                            args.get("countries") or [],
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activities_by_name":
-                    try:
-                        out_table = tool_sites_by_activity(
-                            sf,
-                            args.get("name",""),
-                            args.get("countries") or [],
-                            bool(args.get("exact") or False),
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "group_count_sf":
-                    try:
-                        out_table = tool_group_count_sf(
-                            sf,
-                            args.get("by") or ["country"],
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "group_agg_sf":
-                    try:
-                        out_table = tool_group_agg_sf(
-                            sf,
-                            args.get("by") or ["country"],
-                            args.get("field") or "",
-                            args.get("agg") or "avg",
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activities_with_assignments_counts":
-                    try:
-                        if not sf:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                        else:
-                            out_table = tool_activities_with_assignments_counts(
-                                sf,
-                                last_n_days=args.get("last_n_days"),
-                                last_n_months=args.get("last_n_months"),
-                                since=args.get("since"),
-                                until=args.get("until"),
-                            )
-                            last_table = out_table
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "activity_assignments_detailed":
-                    try:
-                        if not sf:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error":"No active Salesforce session"})})
-                        else:
-                            out_table = tool_activity_assignments_detailed(
-                                sf,
-                                args.get("countries") or [],
-                                args.get("activity_contains"),
-                                last_n_days=args.get("last_n_days"),
-                                last_n_months=args.get("last_n_months"),
-                                since=args.get("since"),
-                                until=args.get("until"),
-                            )
-                            last_table = out_table
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "time_series_sf":
-                    try:
-                        out_table = tool_time_series_sf(
-                            sf,
-                            args.get("field",""),
-                            args.get("date_field") or "CloseDate",
-                            args.get("period") or "month",
-                            args.get("agg") or "sum",
-                            args.get("last_n"),
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "sql_query_fill_sf":
-                    try:
-                        out_table = tool_sql_query_fill_sf(
-                            db,
-                            sf,
-                            args.get("sql",""),
-                            args.get("account_fields") or [],
-                            args.get("params") or {},
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "contacts_by_group":
-                    try:
-                        out_table = tool_contacts_by_group(
-                            sf,
-                            args.get("roles") or [],
-                            args.get("title_contains"),
-                            args.get("group_by") or "country",
-                            int(args.get("top_n") or 1),
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "study_coordinators_with_activities":
-                    try:
-                        out_table = tool_study_coordinators_with_activities(
-                            sf,
-                            args.get("account_ids") or [],
-                            args.get("countries") or [],
-                            args.get("title_contains"),
-                            args.get("roles") or [],
-                            bool(args.get("include_subaccounts") or False),
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "qual_search":
-                    try:
-                        out_table = tool_qual_search(
-                            db,
-                            args.get("text",""),
-                            int(args.get("limit") or 50),
-                        )
-                        last_table = out_table
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "manipulate_data":
-                    try:
-                        manipulated = tool_manipulate_data(
-                            last_table,
-                            args.get("operation", "group_others"),
-                            args.get("threshold"),
-                            args.get("value_column"),
-                            args.get("label_column"),
-                        )
-                        # Actualizar last_table con datos manipulados
-                        if "rows" in manipulated:
-                            last_table = manipulated
-                            _dbg("Updated last_table with manipulated data")
-                            # Si ya había un gráfico, re‑render con los mismos ejes para reflejar la agrupación
-                            try:
-                                if last_visualization and isinstance(last_visualization, dict):
-                                    vtype = last_visualization.get("type") or "bar"
-                                    xk = last_visualization.get("xKey") or manipulated.get("label_column")
-                                    yks = last_visualization.get("yKeys") or ([manipulated.get("value_column")] if manipulated.get("value_column") else [])
-                                    data = manipulated.get("rows") or (last_table.get("rows") if isinstance(last_table, dict) else [])
-                                    out_v = tool_render_chart(vtype, data, xk or "country", yks or [])
-                                    last_visualization = out_v.get("visualization")
-                                    _dbg("Re-rendered chart after manipulate_data with same axes")
-                            except Exception as _re:
-                                _dbg("WARN: could not re-render chart: %s", _re)
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(manipulated)})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "render_chart":
-                    # Si no vienen datos O vienen datos inventados (USA, etc.), usar last_table
-                    chart_data = args.get("data")
-                    if not chart_data or len(chart_data) == 0:
-                        # No hay datos, usar last_table
-                        if last_table and last_table.get("rows"):
-                            chart_data = last_table.get("rows")
-                            _dbg("render_chart: Using last_table data (%d rows)", len(chart_data))
-                    elif isinstance(chart_data, list) and len(chart_data) > 0:
-                        # Detectar si son datos inventados (ej: USA, Canada, UK que no están en nuestros datos)
-                        sample_country = chart_data[0].get("Country") or chart_data[0].get("country")
-                        if sample_country and sample_country.upper() in ("USA", "CANADA", "UK"):
-                            # Datos inventados, usar last_table
-                            if last_table and last_table.get("rows"):
-                                chart_data = last_table.get("rows")
-                                _dbg("render_chart: Detected fake data (USA/Canada/UK), using last_table data (%d rows)", len(chart_data))
-                    
-                    out = tool_render_chart(
-                        args.get("kind"),
-                        chart_data,
-                        args.get("xKey"),
-                        args.get("yKeys") or [],
-                        args.get("meta") or {},
-                        args.get("options") or {}
-                    )
-                    last_visualization = out.get("visualization")
-                    # Asegura que la siguiente petición "show table" pueda usar exactamente los datos del gráfico
-                    try:
-                        xk = args.get("xKey")
-                        yks = args.get("yKeys") or []
-                        data = chart_data or []
-                        if xk and isinstance(data, list):
-                            cols = [{"key": str(xk), "label": _pretty_label(str(xk))}] + [
-                                {"key": str(y), "label": _pretty_label(str(y))} for y in yks
-                            ]
-                            last_table = {"columns": cols, "rows": data}
-                    except Exception as _e:
-                        _dbg("WARN: could not cache viz table for show table: %s", _e)
-                    msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out)})
-
-            elif name == "explorer_search":
-                    try:
-                        _raw_filters = args.get("filters")
-                        _rules = (_raw_filters.get("rules") or []) if isinstance(_raw_filters, dict) else []
-                        _injected_cols = list(args.get("columns") or [])  # may be extended during auto-inject
-                        # Auto-inject filters when Gemini sends empty {} — detect intent from user message
-                        if not _rules and not (isinstance(_raw_filters, dict) and _raw_filters.get("logic")):
-                            _last_user = ""
-                            for _m in reversed(msgs):
-                                if _m.get("role") == "user":
-                                    _last_user = str(_m.get("content") or "").lower()
-                                    break
-                            _injected_rules = []
-                            _injected_logic = "AND"
-                            # Stage 1/2 → OR filter (sites with Stage 1 OR Stage 2 > 0)
-                            if re.search(r"\bstage\s*[12]\b|\bscreening.program\b|\bpre.?symptomatic\b", _last_user):
-                                _injected_rules = [
-                                    {"field": "sf.C_Number_of_Stage1_Individuals_followed__c", "operator": ">", "value": 0},
-                                    {"field": "sf.C_Number_of_Stage2_Individuals_followed__c", "operator": ">", "value": 0},
-                                ]
-                                _injected_logic = "OR"
-                                # Auto-add Stage 1/2 columns if not already in request
-                                for _sf_col in ["sf.C_Number_of_Stage1_Individuals_followed__c", "sf.C_Number_of_Stage2_Individuals_followed__c"]:
-                                    if _sf_col not in _injected_cols:
-                                        _injected_cols.append(_sf_col)
-                            else:
-                                _country_map = {
-                                    "spain":"Spain","france":"France","germany":"Germany","italy":"Italy",
-                                    "portugal":"Portugal","uk":"United Kingdom","england":"United Kingdom",
-                                    "belgium":"Belgium","netherlands":"Netherlands","austria":"Austria",
-                                    "sweden":"Sweden","norway":"Norway","denmark":"Denmark","finland":"Finland",
-                                    "poland":"Poland","czech":"Czech Republic","hungary":"Hungary",
-                                    "greece":"Greece","croatia":"Croatia","romania":"Romania","bulgaria":"Bulgaria",
-                                    "switzerland":"Switzerland","ireland":"Ireland","slovakia":"Slovakia",
-                                }
-                                for k, v in _country_map.items():
-                                    if re.search(rf"\b{k}\b", _last_user):
-                                        _injected_rules.append({"field": "site.country", "operator": "equals", "value": v})
-                                        break
-                                if re.search(r"\bpharmac", _last_user):
-                                    _injected_rules.append({"field": "qual.3_6__is_your_pharmacy_on_site_or_off_campus", "operator": "equals", "value": "On-site"})
-                                if re.search(r"\bovernight", _last_user):
-                                    _injected_rules.append({"field": "qual.3_5_2__overnight_stay", "operator": "equals", "value": "Yes"})
-                            if _injected_rules:
-                                _dbg("FILTER-INJECT: empty filters → injecting %d rules (logic=%s) from user msg", len(_injected_rules), _injected_logic)
-                                _raw_filters = {"logic": _injected_logic, "rules": _injected_rules}
-                            else:
-                                _dbg("FILTER-INJECT: empty filters, no keywords detected → passing empty (all sites)")
-                        used_filters = _raw_filters if isinstance(_raw_filters, dict) and _raw_filters else {"logic": "AND", "rules": []}
-                        out = tool_explorer_search(
-                            request,
-                            filters=used_filters,
-                            columns=_injected_cols,
-                        )
-                        last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
-                        last_table = _normalize_table_for_ui(last_table)
-                        last_explorer_filters = used_filters  # guardar para follow-ups
-                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
-                    except Exception as ee:
-                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "nearest_filtered_sites":
-                    try:
-                        out = tool_nearest_filtered_sites(
-                            request,
-                            location=args.get("location", ""),
-                            filters=args.get("filters") or {"logic": "AND", "rules": []},
-                            top_n=int(args.get("top_n") or 10),
-                            max_km=float(args.get("max_km") or 1000),
-                            db=db,
-                        )
-                        last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
-                        last_table = _normalize_table_for_ui(last_table)
-                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
-                    except Exception as ee:
-                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "explorer_within_drive_km":
-                    # Autorrellena base_account_id desde la última tabla si no vino
-                    base_id = args.get("base_account_id") or _first_account_id_from_table(last_table)
-                    if not base_id:
-                        msgs.append({
-                            "role":"tool","tool_call_id": tool_call_id,
-                            "content": json.dumps({"error":"Missing base_account_id and no previous results to infer it"})
-                        })
-                    else:
-                        try:
-                            out = tool_explorer_within_drive_km(
-                                request,
-                                base_account_id=base_id,
-                                max_km=float(args.get("max_km") or 120),
-                                filters=args.get("filters") or {},
-                                columns=args.get("columns") or [],
-                            )
-                            last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
-                            last_table = _normalize_table_for_ui(last_table)
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
-                        except Exception as ee:
-                            msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})                 
-
-            elif name == "rank_sites":
-                    try:
-                        out_table = tool_rank_sites(
-                            db,
-                            sf,
-                            args.get("metric",""),
-                            int(args.get("top_n") or 5),
-                            args.get("order") or "desc",
-                        )
-                        last_table = out_table
-                        # no devolvemos toda la tabla por el canal "tool" (ya va en last_table),
-                        # basta con confirmar ok para cerrar la ronda correctamente
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"ok": True})})
-                    except Exception as ee:
-                        msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            elif name == "members_search":
-                    try:
-                        _mf = args.get("filters") or {"logic": "AND", "rules": []}
-                        _include_detail = bool(args.get("include_detail", False))
-                        out = tool_members_search(request, filters=_mf, include_detail=_include_detail)
-                        last_table = {"columns": out.get("columns") or [], "rows": out.get("rows") or []}
-                        last_table = _normalize_table_for_ui(last_table)
-                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(out, default=str)})
-                    except Exception as ee:
-                        msgs.append({"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps({"error": str(ee)})})
-
-            else:
-                msgs.append({"role":"tool","tool_call_id": tool_call_id, "content": json.dumps({"error": f"Unknown tool {name}"})})
-            # Intento de CIERRE: finalizar sin segunda llamada al modelo para evitar context_length_exceeded
-            if last_table:
-                # Preparar resumen numérico y top items
-                rows = last_table.get("rows", [])
-                total_rows = len(rows)
-                cols = last_table.get("columns", [])
-                def is_num(v):
-                    try:
-                        float(str(v).replace(",",""))
-                        return True
-                    except Exception:
-                        return False
-                numeric_col_key = None
-                tokens = ("sites","count","total","patients","value")
-                candidate_keys = [(c.get("key") if isinstance(c, dict) else str(c)) for c in cols]
-                if rows and isinstance(rows[0], dict):
-                    candidate_keys = list({*candidate_keys, *rows[0].keys()})
-                for key in candidate_keys:
-                    if not key: continue
-                    kl = str(key).lower()
-                    if any(t in kl.split(".")[-1] for t in tokens):
-                        vals = [r.get(key) for r in rows if isinstance(r, dict)]
-                        if any(is_num(v) for v in vals):
-                            numeric_col_key = key; break
-                if not numeric_col_key and rows and isinstance(rows[0], dict):
-                    for key in rows[0].keys():
-                        vals = [r.get(key) for r in rows if isinstance(r, dict)]
-                        if any(is_num(v) for v in vals):
-                            numeric_col_key = key; break
-                total = 0.0
-                if numeric_col_key:
-                    try:
-                        total = sum(float(str(r.get(numeric_col_key) or 0).replace(",","")) for r in rows if isinstance(r, dict))
-                    except Exception:
-                        total = 0.0
-                # Dimensión para top (country/city/site)
-                dim_key = None
-                for k in ("country","city","site"):
-                    if any((isinstance(c, dict) and c.get("key") == k) or (isinstance(c, str) and c == k) for c in cols):
-                        dim_key = k; break
-                if not dim_key and rows and isinstance(rows[0], dict):
-                    for k in ("country","city","site"):
-                        if k in rows[0]: dim_key = k; break
-                top_txt = ""
-                if dim_key and numeric_col_key and rows:
-                    try:
-                        top_sorted = sorted([r for r in rows if isinstance(r, dict)], key=lambda x: float(str(x.get(numeric_col_key) or 0).replace(",","")), reverse=True)[:3]
-                        parts = [f"{str(t.get(dim_key))}: {str(t.get(numeric_col_key))}" for t in top_sorted]
-                        if parts:
-                            top_txt = " Top: " + ", ".join(parts[:2]) + (", " + parts[2] if len(parts) > 2 else "") + "."
-                    except Exception:
-                        pass
-                if total and total_rows > 1:
-                    answer_html = f"<p>{int(total) if isinstance(total,float) and total.is_integer() else total} total across {total_rows} groups.{top_txt}</p>"
-                else:
-                    answer_html = f"<p>Found {total_rows} result(s).</p>"
-                out = {"answer": answer_html, "table": _normalize_table_for_ui(last_table)}
-                if last_visualization:
-                    out["visualization"] = last_visualization
-                if last_explorer_filters:
-                    out["last_filters"] = last_explorer_filters
-                return out
-
-    # 2) Respuesta de texto puro (sin tool calls) — Claude respondió con lenguaje natural
-    #    p.ej. follow-ups conversacionales: "how many is that?", "double that number", etc.
-    if not assistant_msg.tool_calls:
-        raw_text = (assistant_msg.content or "").strip()
-        if raw_text:
-            out: Dict[str, Any] = {"answer": raw_text}
-            if last_explorer_filters:
-                out["last_filters"] = last_explorer_filters
-            return out
-
-    # Fallback: si agotamos rondas pero sí hay datos, devolvemos algo útil
+    # Build response
     if last_table:
         rows = last_table.get("rows", [])
-        result: Dict[str, Any] = {"answer": "<p>Here are the results.</p>"}
+        if text_out:
+            answer_html = text_out
+        else:
+            # Fallback: build a basic but informative summary from the table data
+            n = len(rows)
+            cols = [c.get("key","") if isinstance(c,dict) else str(c) for c in last_table.get("columns",[])]
+            # Try to find country distribution
+            countries = {}
+            for r in rows:
+                if isinstance(r, dict):
+                    c = r.get("country","")
+                    if c:
+                        countries[c] = countries.get(c, 0) + 1
+            parts = [f"<p><strong>{n} site{'s' if n != 1 else ''}</strong> found"]
+            if countries and len(countries) <= 8:
+                top_c = sorted(countries.items(), key=lambda x: -x[1])[:3]
+                c_str = ", ".join(f"{c} ({cnt})" for c, cnt in top_c)
+                parts[0] += f" across {len(countries)} {'countries' if len(countries) > 1 else 'country'}: {c_str}"
+                if len(countries) > 3:
+                    parts[0] += f" and {len(countries)-3} more"
+            parts[0] += ".</p>"
+            answer_html = "".join(parts)
+        out: Dict[str, Any] = {"answer": answer_html, "table": _normalize_table_for_ui(last_table)}
+        if last_visualization:
+            out["visualization"] = last_visualization
         if last_explorer_filters:
-            result["last_filters"] = last_explorer_filters
-        # Solo añadir tabla si tiene múltiples filas
-        if rows and len(rows) > 1:
-            result["table"] = _normalize_table_for_ui(last_table)
-        want_chart = bool(re.search(r"\b(bar|chart)\b", (payload.messages[-1].content or "").lower()))
-        if want_chart and "visualization" not in result:
-            cols = [c.get("key") for c in last_table.get("columns", [])]
-            rows = last_table.get("rows", [])
-            non_dim = [k for k in cols if k and k.lower() not in {"site","country","city"}]
-            def _is_numcol(k:str) -> bool:
-                return all(
-                    isinstance(r.get(k), (int,float)) or
-                    str(r.get(k) or "").replace(",","").replace(".","").isdigit()
-                    for r in rows
-                )
-            y_candidates = [k for k in non_dim if _is_numcol(k)]
-            if y_candidates:
-                result["visualization"] = {
-                    "type":"bar",
-                    "xKey":"site" if any((c or "").lower()=="site" for c in cols) else (cols[0] if cols else "site"),
-                    "yKeys":[y_candidates[0]],
-                    "data": rows,
-                    "meta":{"title": f"Top sites by {y_candidates[0]}"},
-                }
-        return result
-    return {"answer": "I couldn't complete the response. Could you rephrase the request?"}
+            out["last_filters"] = last_explorer_filters
+        return out
+
+    if text_out:
+        out = {"answer": text_out}
+        if last_explorer_filters:
+            out["last_filters"] = last_explorer_filters
+        return out
+
+    return {"answer": "I wasn\'t able to answer that. Could you rephrase or break it into smaller questions?"}
 
 # ====== SOQL sanitizer (post-model, pre-validate) ======
 def _sanitize_soql_basic(soql: str) -> str:

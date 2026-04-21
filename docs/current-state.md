@@ -317,6 +317,13 @@ SF_SESSION_COOKIE="..." python scripts/test_moby_questions.py --id B01 D03
 
 ## Areas That Need Additional Inspection
 
+### Moby Agentic Loop Migration (Task 5 — 2026-04-09) — CONFIRMED
+- **`_try_planner()` shrunk**: only math-on-last-table and chart-from-last-table handlers remain active. All other ~25 deterministic handlers (ND, T1D, Stage, country, member, SC/PI, activity, qual, pipeline, nearest, km-of-assignment, HLA, phase, assignment, profiling, etc.) are disabled via early `return None` after the chart handler. Dead code preserved below for domain logic reference.
+- **Outer handlers disabled**: km-of-assignment, generic within-km, and nearest/closest handlers (outside `_try_planner`, in `chat_api`) disabled via `raise Exception("handler disabled")` in their try blocks. Code preserved in except fall-through.
+- **Planner hint injection**: After `_try_planner` returns None and before `_agentic_loop()`, `parse_query_plan()` from `moby_planner.py` extracts countries, filters, and intent from the user query. These are injected as `[SYSTEM HINTS]` into the system message for Claude's agentic loop, giving it domain-aware starting points without deterministic control.
+- **Phase 1+2 Structured Planner preserved**: the `parse_query_plan` / `can_followup_merge` / `can_short_circuit` pipeline (outside `_try_planner`) still active for followup merges and high-confidence short-circuits.
+- **Tests**: 535/535 pass. No handler-specific tests needed skipping (test_moby_handlers.py tests extracted handler functions in `moby_handlers.py` directly, not `_try_planner` call sites).
+
 ### `salesforce_explorer.py` — Large File (~4700 lines)
 The file contains two separate route groups (`salesforce_router` and `explorer_router`), the entire filter engine, three proximity endpoints, and all SF query helpers. Key sections not read in full:
 - Lines 200–2400: `_build_account_map`, `_sf_query_all`, `_ensure_describes`, `_flatten_filter_rules`, `_infer_qual_fields`, map bootstrap (`/api/salesforce/map/bootstrap`), and describe-cache logic

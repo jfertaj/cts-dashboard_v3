@@ -59,6 +59,11 @@ export async function askAI(
  * Calls `onToken(chunk)` for each text fragment Claude generates,
  * then returns the complete ChatResponse when the stream finishes.
  */
+export type ProgressEvent = {
+  turn: number;
+  tools: string[];
+};
+
 export async function askAIStream(
   prompt: string,
   lastTable?: TablePayload | null,
@@ -66,6 +71,7 @@ export async function askAIStream(
   onToken?: (text: string) => void,
   history?: Array<{role: "user" | "assistant"; content: string}>,
   signal?: AbortSignal,
+  onProgress?: (progress: ProgressEvent) => void,
 ): Promise<ChatResponse> {
   const payload: any = {
     messages: history && history.length > 0
@@ -106,6 +112,8 @@ export async function askAIStream(
 
       if (data.type === "token") {
         onToken?.(data.text ?? "");
+      } else if (data.type === "progress") {
+        onProgress?.(data as ProgressEvent);
       } else if (data.type === "done") {
         const { type: _t, ...rest } = data;
         finalResult = rest as ChatResponse;

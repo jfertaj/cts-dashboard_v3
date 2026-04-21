@@ -205,6 +205,8 @@ _OP_SYNONYM = {
     "lte": "<=",
     "gt": ">",
     "lt": "<",
+    "is_null": "is_empty",
+    "is_not_null": "is_not_empty",
 }
 
 _OP_MAP = {

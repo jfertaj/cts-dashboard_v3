@@ -668,6 +668,12 @@ def parse_query_plan(
 
         confidence = _score_confidence(intent, countries, filters, col_resolved, unresolved)
 
+        # Detect proximity/location intent — these must NOT short-circuit via explorer_search
+        has_proximity = bool(re.search(
+            r"\b(near(?:est)?|clos(?:est|e\s+to)|within\s+\d+\s*km|proximity|cercano|próximo|nahe|vicino)\b",
+            text, re.I
+        ))
+
         return {
             "intent":              intent,
             "countries":           countries,
@@ -679,6 +685,7 @@ def parse_query_plan(
             "confidence":          confidence,
             "raw_text":            text,
             "last_filters_reused": last_filters_reused,
+            "has_proximity":       has_proximity,
         }
 
     except Exception:
@@ -740,7 +747,11 @@ def can_short_circuit(plan: MobyPlan) -> bool:
       - At least one filter OR at least one country resolved
       - No unresolved terms
       - Table output (not chart/map)
+      - No proximity/location intent (those need nearest_filtered_sites, not explorer_search)
     """
+    # Proximity queries must go through the agentic loop — explorer_search doesn't do distance
+    if plan.get("has_proximity"):
+        return False
     return (
         plan.get("confidence", 0) >= 0.80
         and plan.get("intent") == "table_query"
@@ -787,13 +798,14 @@ _VALID_OPERATORS: frozenset = frozenset({
     "contains", "not_contains", "starts_with", "ends_with",
     "in", "not_in",
     "is_empty", "is_not_empty",
+    "is_null", "is_not_null",  # synonyms for is_empty/is_not_empty
     "between",
 })
 
 _VALID_FIELD_PREFIXES = ("site.", "sf.", "qual.", "account_name", "country", "city", "extra.")
 
 # Operators that don't require a value
-_VALUELESS_OPERATORS = frozenset({"is_empty", "is_not_empty"})
+_VALUELESS_OPERATORS = frozenset({"is_empty", "is_not_empty", "is_null", "is_not_null"})
 
 
 def validate_filter_group(fg: Any, depth: int = 0) -> List[str]:

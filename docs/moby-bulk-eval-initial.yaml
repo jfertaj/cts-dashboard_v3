@@ -1,0 +1,1256 @@
+# Moby Bulk Evaluation — Initial Classification
+# Date: 2026-03-25
+# Questions: 121
+# Source: user business question list
+# Method: automated execution against live backend + manual classification
+#
+# Categories:
+#   PASS_NOW            — correct and useful with current functionality
+#   KNOWN_GAP           — fails due to planner/handler limitation within Moby's natural scope
+#   FUTURE_FEATURE      — requires a feature that clearly doesn't exist today
+#   AMBIGUOUS           — question too ambiguous or admits multiple reasonable interpretations
+#
+# Summary:
+#   PASS_NOW:       84  (69.4%)
+#   KNOWN_GAP:      34  (28.1%)
+#   FUTURE_FEATURE:  2  ( 1.7%)
+#   AMBIGUOUS:       1  ( 0.8%)
+
+entries:
+
+  # ============================================================
+  # Finding sites that meet study criteria (SC01-SC10)
+  # ============================================================
+
+  - id: SC01
+    question: "Show me all CTS sites in Germany, Italy, and Belgium"
+    category: PASS_NOW
+    observed_behavior: "79 rows, 3 countries correctly resolved via multi-country handler"
+    output_type: table
+    likely_handler: country_sites (multi-country OR)
+    confidence: high
+    notes: ""
+
+  - id: SC02
+    question: "Which sites have more than 50 Stage 1 individuals currently followed?"
+    category: KNOWN_GAP
+    observed_behavior: "37 rows — returned ALL sites with Stage 1 > 0, >50 threshold ignored"
+    output_type: table
+    likely_handler: stage_handler
+    confidence: high
+    notes: "Stage handler doesn't apply numeric thresholds from the query. The >50 filter was silently dropped."
+
+  - id: SC03
+    question: "List all sites with Stage 2 patients AND overnight stay capacity"
+    category: PASS_NOW
+    observed_behavior: "5 rows with qual.overnight_stay + Stage2 columns"
+    output_type: table
+    likely_handler: qual_handler (multi-condition via Claude)
+    confidence: high
+    notes: ""
+
+  - id: SC04
+    question: "Find sites in Spain or Portugal that have pharmacy on-site"
+    category: PASS_NOW
+    observed_behavior: "8 rows, correct countries + pharmacy qual field"
+    output_type: table
+    likely_handler: qual_handler + country filter
+    confidence: high
+    notes: ""
+
+  - id: SC05
+    question: "Show me sites that have both Stage 1 AND Stage 2 patients"
+    category: PASS_NOW
+    observed_behavior: "26 rows — matches GQ06 baseline"
+    output_type: table
+    likely_handler: stage_handler (both Stage 1+2)
+    confidence: high
+    notes: ""
+
+  - id: SC06
+    question: "Which sites in France have HLA typing capability available?"
+    category: PASS_NOW
+    observed_behavior: "9 rows, France + sf.C_Is_HLA_typing_performed__c"
+    output_type: table
+    likely_handler: qual_handler (HLA + country)
+    confidence: high
+    notes: ""
+
+  - id: SC07
+    question: "List sites with more than 20 newly diagnosed T1D patients under 18 per year"
+    category: KNOWN_GAP
+    observed_behavior: "94 rows — used wrong SF field C_Number_of_T1D_Patients_currently_U_18__c (current patients) instead of C_Number_of_new_T1D_diagnosed_U_18__c (newly diagnosed)"
+    output_type: table
+    likely_handler: Claude tool call
+    confidence: high
+    notes: "Two issues: (1) wrong SF field selected, (2) >20 threshold may not have been applied. Newly diagnosed != currently followed."
+
+  - id: SC08
+    question: "Find sites that have a pharmacy AND are CTS-validated"
+    category: KNOWN_GAP
+    observed_behavior: "37 rows with pharmacy. Answer says 'with on-site pharmacy' but doesn't mention CTS-validated filter"
+    output_type: table
+    likely_handler: qual_handler (pharmacy)
+    confidence: medium
+    notes: "CTS-validated requires sf.Account.INNODIA_Clinical_Trial_Site__c = true. Not clear if this was applied — all SubAccount/Clinical are queried by default, not just CTS-validated ones."
+
+  - id: SC09
+    question: "Show all sites that have NOT yet completed profiling"
+    category: PASS_NOW
+    observed_behavior: "187 rows, C_Profiling_Complete__c shown, correct NOT filter"
+    output_type: table
+    likely_handler: pipeline_handler (NOT profiling complete)
+    confidence: high
+    notes: ""
+
+  - id: SC10
+    question: "Which sites have autoantibody testing possible?"
+    category: PASS_NOW
+    observed_behavior: "30 rows with qual.3_8__znt8"
+    output_type: table
+    likely_handler: qual_handler (autoantibody -> ZnT8)
+    confidence: medium
+    notes: "Mapped 'autoantibody' to ZnT8 only. Broader autoantibody testing (GAD65, IA-2, IAA) not included. Partial but useful."
+
+  # ============================================================
+  # Country-level planning (CL01-CL05)
+  # ============================================================
+
+  - id: CL01
+    question: "How many CTS sites are there in each country?"
+    category: PASS_NOW
+    observed_behavior: "25 rows, 197 total — matches GQ01 baseline"
+    output_type: table
+    likely_handler: is_basic_site_count
+    confidence: high
+    notes: ""
+
+  - id: CL02
+    question: "Which countries have the most Stage 1 patients followed?"
+    category: PASS_NOW
+    observed_behavior: "27 countries with Stage 1 totals, sorted"
+    output_type: table
+    likely_handler: stage_by_country
+    confidence: high
+    notes: ""
+
+  - id: CL03
+    question: "Show me all Italian sites sorted by number of Stage 2 patients"
+    category: PASS_NOW
+    observed_behavior: "62 Italian sites with Stage 1/2 columns"
+    output_type: table
+    likely_handler: country_sites (Italy)
+    confidence: medium
+    notes: "Returns all Italian sites with Stage columns. Sorting by Stage 2 not confirmed from preview but columns are present."
+
+  - id: CL04
+    question: "What sites do we have in Eastern Europe?"
+    category: PASS_NOW
+    observed_behavior: "17 sites across PL, CZ, SK, HU, RO, BG, HR, SI, RS, UA"
+    output_type: table
+    likely_handler: country_sites (Eastern Europe region)
+    confidence: high
+    notes: "Correctly expanded 'Eastern Europe' to a region set."
+
+  - id: CL05
+    question: "Are there any CTS sites in Romania or Bulgaria?"
+    category: PASS_NOW
+    observed_behavior: "1 site in Bucharest"
+    output_type: table
+    likely_handler: country_sites (RO, BG)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Site status and pipeline (SS01-SS09)
+  # ============================================================
+
+  - id: SS01
+    question: "Show me all sites where profiling form has been uploaded to the database"
+    category: PASS_NOW
+    observed_behavior: "91 rows with sf.Profiling_form_uploaded_to_DB__c"
+    output_type: table
+    likely_handler: pipeline_handler
+    confidence: high
+    notes: ""
+
+  - id: SS02
+    question: "Which sites have had a first contact date but no meeting date yet?"
+    category: KNOWN_GAP
+    observed_behavior: "180 rows with only C_Meeting_Date__c column shown. No evidence that first contact date existence was verified"
+    output_type: table
+    likely_handler: pipeline_handler (no meeting date)
+    confidence: medium
+    notes: "Likely only filtered for 'no meeting date' without checking 'has first contact'. 180/197 is suspiciously close to total sites."
+
+  - id: SS03
+    question: "List sites where C_Profiling_Complete is true"
+    category: PASS_NOW
+    observed_behavior: "155 rows with C_Profiling_Complete__c"
+    output_type: table
+    likely_handler: pipeline_handler (profiling complete)
+    confidence: high
+    notes: ""
+
+  - id: SS04
+    question: "Find sites that are CTS-validated but not yet active in any assignment"
+    category: PASS_NOW
+    observed_behavior: "56 rows — matches GQ19 baseline"
+    output_type: table
+    likely_handler: not_in_assignment handler
+    confidence: high
+    notes: ""
+
+  - id: SS05
+    question: "Which sites have a Referral/Clinical Partner role?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows. Searched sf.Account.C_Referral_Clinical_Partner__c but got empty results"
+    output_type: table
+    likely_handler: qual_handler or Claude tool
+    confidence: medium
+    notes: "FABULINUS RP Network has 30+ sites so RP sites exist. The filter approach for this Account-level boolean may be wrong."
+
+  - id: SS06
+    question: "What percentage of clinical sites are participating to at least 1 activity?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows — treated 'at least 1 activity' as an activity name lookup. No percentage calculation"
+    output_type: table
+    likely_handler: activity handler (misfire)
+    confidence: high
+    notes: "Two gaps: (1) no percentage/proportion handler, (2) 'at least 1 activity' parsed as activity name."
+
+  - id: SS07
+    question: "Show me all of the sites visited for qualification in the last year"
+    category: PASS_NOW
+    observed_behavior: "11 rows with date_of_visit, visiting_person columns"
+    output_type: table
+    likely_handler: Claude tool (visit data)
+    confidence: high
+    notes: ""
+
+  - id: SS08
+    question: "Show me all of the sites with planned visits"
+    category: PASS_NOW
+    observed_behavior: "40 rows with date_of_visit, type_of_visit columns"
+    output_type: table
+    likely_handler: Claude tool (visit data)
+    confidence: high
+    notes: ""
+
+  - id: SS09
+    question: "Show me all of the sites in Italy that still need a qualification visit"
+    category: KNOWN_GAP
+    observed_behavior: "62 rows = ALL Italian sites. The 'need a qualification visit' filter was ignored"
+    output_type: table
+    likely_handler: country_sites (Italy) — qualification visit filter dropped
+    confidence: high
+    notes: "Returned all Italian sites with standard columns. No filtering for qualification visit status."
+
+  # ============================================================
+  # Screening & diagnosis capabilities (QD01-QD05)
+  # ============================================================
+
+  - id: QD01
+    question: "Which sites can perform early diagnosis screening?"
+    category: KNOWN_GAP
+    observed_behavior: "195 rows = ALL sites. No meaningful filter applied"
+    output_type: table
+    likely_handler: generic explorer (no filter matched)
+    confidence: high
+    notes: "'Early diagnosis screening' is a concept that maps to multiple qual fields (autoantibodies, OGTT, etc.) but no single handler captures it."
+
+  - id: QD02
+    question: "Show me sites that have ZnT8 autoantibody testing available"
+    category: PASS_NOW
+    observed_behavior: "30 rows with qual.3_8__znt8"
+    output_type: table
+    likely_handler: qual_handler (ZnT8)
+    confidence: high
+    notes: ""
+
+  - id: QD03
+    question: "Find sites with islet autoantibody testing AND more than 100 T1D patients per year"
+    category: PASS_NOW
+    observed_behavior: "20 rows with ZnT8 + T1D patient count columns"
+    output_type: table
+    likely_handler: qual_handler (multi-condition)
+    confidence: medium
+    notes: "Mapped 'islet autoantibody' to ZnT8 only (broader mapping would include GAD65, IA-2, IAA). Partial but useful."
+
+  - id: QD04
+    question: "Which sites have insulin autoantibody testing?"
+    category: PASS_NOW
+    observed_behavior: "38 rows with qual.3_8__insulin"
+    output_type: table
+    likely_handler: qual_handler (insulin autoantibody)
+    confidence: high
+    notes: ""
+
+  - id: QD05
+    question: "Show me sites with OGTT (oral glucose tolerance test) capacity"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows. Columns include rank/snippet suggesting fallback search. No OGTT field mapping"
+    output_type: table
+    likely_handler: Claude fallback (no OGTT field known)
+    confidence: high
+    notes: "OGTT may exist in qual data under a different field name, or may not be captured."
+
+  # ============================================================
+  # Operational readiness (QO01-QO05)
+  # ============================================================
+
+  - id: QO01
+    question: "Which sites can accommodate a single-day visit longer than 8 hours?"
+    category: PASS_NOW
+    observed_behavior: "41 rows with qual.3_5_2__longest_single_day_visit column"
+    output_type: table
+    likely_handler: qual_handler (visit duration)
+    confidence: high
+    notes: ""
+
+  - id: QO02
+    question: "Find sites where documents are retained for more than 15 years"
+    category: PASS_NOW
+    observed_behavior: "42 rows with qual.3_5_1__how_long_are_documents_retained_years"
+    output_type: table
+    likely_handler: qual_handler (document retention)
+    confidence: high
+    notes: ""
+
+  - id: QO03
+    question: "Which sites have a dedicated study coordinator on-site?"
+    category: PASS_NOW
+    observed_behavior: "152 coordinators across 136 accounts"
+    output_type: table
+    likely_handler: study_coordinators handler
+    confidence: high
+    notes: "Answered with coordinator list rather than site list. Reasonable interpretation."
+
+  - id: QO04
+    question: "Show me sites that have experience running early diagnosis programs"
+    category: KNOWN_GAP
+    observed_behavior: "195 rows = ALL sites. No filter applied"
+    output_type: table
+    likely_handler: generic explorer (no filter matched)
+    confidence: high
+    notes: "'Early diagnosis experience' doesn't map to any specific SF/qual field. Same issue as QD01."
+
+  - id: QO05
+    question: "Which sites confirmed they can perform emergency procedures within 30 minutes?"
+    category: PASS_NOW
+    observed_behavior: "43 rows with qual.3_3__acceptable_process"
+    output_type: table
+    likely_handler: qual_handler (emergency procedures)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Infrastructure (QI01-QI04)
+  # ============================================================
+
+  - id: QI01
+    question: "Which sites have a biobank or sample storage facility?"
+    category: PASS_NOW
+    observed_behavior: "5 rows with biobank/storage columns"
+    output_type: table
+    likely_handler: Claude tool (qual search)
+    confidence: high
+    notes: ""
+
+  - id: QI02
+    question: "Show me sites that can run mechanistic studies (LAB-validated)"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows. Columns show Member institution fields — searched members instead of sites"
+    output_type: table
+    likely_handler: members_search (misrouted)
+    confidence: high
+    notes: "Searched member institutions (Research/Mechanistic Lab role) instead of clinical sites. Wrong entity."
+
+  - id: QI03
+    question: "Which sites have CT or MRI capability?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows. Columns include rank/snippet (fallback search). No CT/MRI field mapping"
+    output_type: table
+    likely_handler: Claude fallback
+    confidence: high
+    notes: "CT/MRI not captured in SF or qual schema."
+
+  - id: QI04
+    question: "Find sites with insulin pump therapy available"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows. Correct columns attempted (insulin_pump_therapy, specialist_physicians) but no data found"
+    output_type: table
+    likely_handler: Claude tool (qual search)
+    confidence: medium
+    notes: "Field may exist in qual data but under a different key, or data is genuinely sparse."
+
+  # ============================================================
+  # Site counts and rankings (MR01-MR06)
+  # ============================================================
+
+  - id: MR01
+    question: "How many sites do we have per country?"
+    category: PASS_NOW
+    observed_behavior: "25 countries, 197 total"
+    output_type: table
+    likely_handler: is_basic_site_count
+    confidence: high
+    notes: ""
+
+  - id: MR02
+    question: "Which country has the most newly diagnosed T1D patients under 18?"
+    category: PASS_NOW
+    observed_behavior: "27 countries with ND T1D counts"
+    output_type: table
+    likely_handler: nd_by_country
+    confidence: high
+    notes: ""
+
+  - id: MR03
+    question: "What are the top 10 sites by number of Stage 1 individuals followed?"
+    category: PASS_NOW
+    observed_behavior: "10 rows — matches GQ14 baseline"
+    output_type: table
+    likely_handler: stage_handler (top 10)
+    confidence: high
+    notes: ""
+
+  - id: MR04
+    question: "Show me a breakdown of Stage 2 patients by country"
+    category: PASS_NOW
+    observed_behavior: "27 countries with Stage 1/2 totals"
+    output_type: table
+    likely_handler: stage_by_country
+    confidence: high
+    notes: ""
+
+  - id: MR05
+    question: "Which sites have the highest number of T1D patients seen per year?"
+    category: PASS_NOW
+    observed_behavior: "160 rows with T1D patient counts, sorted by highest"
+    output_type: table
+    likely_handler: Claude tool (explorer_search)
+    confidence: high
+    notes: ""
+
+  - id: MR06
+    question: "How many sites across all countries have both Stage 1 and Stage 2 patients?"
+    category: PASS_NOW
+    observed_behavior: "26 rows — matches GQ06 baseline"
+    output_type: table
+    likely_handler: stage_handler (both)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Specific study planning (SP01-SP05)
+  # ============================================================
+
+  - id: SP01
+    question: "Show me all sites involved in the Beta Preserve assignment"
+    category: PASS_NOW
+    observed_behavior: "52 sites in Beta Preserve"
+    output_type: table
+    likely_handler: activity handler (single activity)
+    confidence: high
+    notes: ""
+
+  - id: SP02
+    question: "Which sites are participating in Barricade Delay?"
+    category: PASS_NOW
+    observed_behavior: "30 sites in Barricade Delay"
+    output_type: table
+    likely_handler: activity handler (single activity)
+    confidence: high
+    notes: ""
+
+  - id: SP03
+    question: "Find all sites within 150 km of the sites assigned to Safeguard"
+    category: PASS_NOW
+    observed_behavior: "52 sites within 150km driving, 26 ref sites excluded. Columns: site/city/country/distance_km/closest_ref/ref_activity"
+    output_type: table
+    likely_handler: km-of-assignment (nearby-multi path)
+    confidence: high
+    notes: ""
+
+  - id: SP04
+    question: "Which sites are part of CT-3 Phase I trials?"
+    category: PASS_NOW
+    observed_behavior: "6 sites with sf.C_Phase_I_Type1__c across 5 countries"
+    output_type: table
+    likely_handler: ct3_phase handler
+    confidence: high
+    notes: ""
+
+  - id: SP05
+    question: "Show me all sites that have ever had an assignment in Germany"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows — treated 'in germany' as part of the activity name"
+    output_type: table
+    likely_handler: activity handler (misparse)
+    confidence: high
+    notes: "Handler parsed 'in germany' as activity name instead of country filter on assignments. Needs activity-by-country logic."
+
+  # ============================================================
+  # Geographic/logistics (GL01-GL06)
+  # ============================================================
+
+  - id: GL01
+    question: "What are the 5 closest CTS sites to Munich?"
+    category: PASS_NOW
+    observed_behavior: "5 sites, nearest to Munich with straight-line distances"
+    output_type: table
+    likely_handler: nearest_handler (city-origin)
+    confidence: high
+    notes: ""
+
+  - id: GL02
+    question: "Show me all sites within 200 km of Paris"
+    category: PASS_NOW
+    observed_behavior: "17 sites within 200km"
+    output_type: table
+    likely_handler: nearest_handler (radius)
+    confidence: high
+    notes: ""
+
+  - id: GL03
+    question: "Which sites are nearest to Leuven, Belgium?"
+    category: PASS_NOW
+    observed_behavior: "10 nearest sites"
+    output_type: table
+    likely_handler: nearest_handler
+    confidence: high
+    notes: ""
+
+  - id: GL04
+    question: "Find the closest site with overnight stay capacity to Warsaw"
+    category: PASS_NOW
+    observed_behavior: "2 sites with distance data"
+    output_type: table
+    likely_handler: nearest_handler (with filter)
+    confidence: high
+    notes: ""
+
+  - id: GL05
+    question: "Show me all sites within driving distance of Madrid that have pharmacy on-site"
+    category: KNOWN_GAP
+    observed_behavior: "9 rows but garbled answer text: '15490 total across 9 groups. Top: PT: 3800.0' — answer formatter summed distances as if they were counts"
+    output_type: table
+    likely_handler: nearest_handler (city-origin)
+    confidence: medium
+    notes: "Data in table may be correct but answer summary text is garbled. The grouping formatter intercepted instead of the geographic formatter."
+
+  - id: GL06
+    question: "What CTS sites are near the sites involved in the Safeguard activity?"
+    category: PASS_NOW
+    observed_behavior: "37 sites within 100km driving of Safeguard sites, 26 ref excluded"
+    output_type: table
+    likely_handler: km-of-assignment (nearby-multi)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # People and contacts (PC01-PC05)
+  # ============================================================
+
+  - id: PC01
+    question: "Who are the study coordinators at the Italian sites?"
+    category: PASS_NOW
+    observed_behavior: "42 coordinators across 42 accounts"
+    output_type: table
+    likely_handler: study_coordinators (country filter)
+    confidence: high
+    notes: ""
+
+  - id: PC02
+    question: "Show me the principal investigators for all German sites"
+    category: PASS_NOW
+    observed_behavior: "7 coordinators across 6 accounts"
+    output_type: table
+    likely_handler: study_coordinators (PI + country)
+    confidence: high
+    notes: ""
+
+  - id: PC03
+    question: "Who is the PI at the site in Barcelona?"
+    category: PASS_NOW
+    observed_behavior: "1 coordinator in Barcelona"
+    output_type: table
+    likely_handler: study_coordinators (city)
+    confidence: high
+    notes: ""
+
+  - id: PC04
+    question: "Which sites don't have a dedicated study coordinator listed?"
+    category: PASS_NOW
+    observed_behavior: "79 sites with no coordinator"
+    output_type: table
+    likely_handler: no_coordinator handler
+    confidence: high
+    notes: ""
+
+  - id: PC05
+    question: "Show me all contacts at sites in the Netherlands"
+    category: KNOWN_GAP
+    observed_behavior: "6 rows = Netherlands sites list (standard columns), NOT contacts. Contact details not shown"
+    output_type: table
+    likely_handler: country_sites (Netherlands) — contact request dropped
+    confidence: high
+    notes: "Returned site list instead of contact details. The 'contacts' intent was ignored."
+
+  # ============================================================
+  # Activity and assignment analysis (AA01-AA06)
+  # ============================================================
+
+  - id: AA01
+    question: "Which sites are active in any current assignment?"
+    category: PASS_NOW
+    observed_behavior: "139 sites with extra.AssignmentsNames"
+    output_type: table
+    likely_handler: active_in_assignment handler
+    confidence: high
+    notes: ""
+
+  - id: AA02
+    question: "How many sites are involved in activities sponsored by Sanofi?"
+    category: PASS_NOW
+    observed_behavior: "77 unique sites in 4 Sanofi-sponsored activities"
+    output_type: table
+    likely_handler: sponsor handler
+    confidence: high
+    notes: ""
+
+  - id: AA03
+    question: "Show me all activities and how many sites participate in each"
+    category: PASS_NOW
+    observed_behavior: "11 activities — matches GQ11 baseline"
+    output_type: table
+    likely_handler: all_activities handler
+    confidence: high
+    notes: ""
+
+  - id: AA04
+    question: "Which assignments have the most sites?"
+    category: PASS_NOW
+    observed_behavior: "11 activities with assignment counts"
+    output_type: table
+    likely_handler: all_activities handler (sorted)
+    confidence: high
+    notes: ""
+
+  - id: AA05
+    question: "List all sites that have no current assignment"
+    category: PASS_NOW
+    observed_behavior: "56 sites — matches GQ19 baseline"
+    output_type: table
+    likely_handler: not_in_assignment handler
+    confidence: high
+    notes: ""
+
+  - id: AA06
+    question: "Show me a breakdown of assignments by country"
+    category: PASS_NOW
+    observed_behavior: "17 countries with site counts"
+    output_type: table
+    likely_handler: assignments_by_country handler
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Profiling pipeline (PP01-PP05)
+  # ============================================================
+
+  - id: PP01
+    question: "Which sites have completed profiling but aren't CTS yet?"
+    category: PASS_NOW
+    observed_behavior: "27 sites with profiling complete + not CTS-validated"
+    output_type: table
+    likely_handler: pipeline_handler (profiling complete + NOT CTS)
+    confidence: high
+    notes: ""
+
+  - id: PP02
+    question: "How many sites are currently in the profiling stage?"
+    category: PASS_NOW
+    observed_behavior: "37 sites currently in profiling"
+    output_type: table
+    likely_handler: pipeline_handler
+    confidence: high
+    notes: ""
+
+  - id: PP03
+    question: "Show me the profiling sites in Poland sorted by meeting date"
+    category: PASS_NOW
+    observed_behavior: "9 sites in Poland with profiling/meeting date columns"
+    output_type: table
+    likely_handler: country_sites (Poland) + profiling columns
+    confidence: medium
+    notes: "Returns Polish sites with profiling fields. Sort by meeting date not confirmed from preview."
+
+  - id: PP04
+    question: "Which profiling sites have submitted the questionnaire but not had a meeting?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows — 'I couldn't complete the response. Could you rephrase the request?'"
+    output_type: none
+    likely_handler: failed (no handler matched or Claude failed)
+    confidence: high
+    notes: "Complete failure. The combination of questionnaire-submitted + no-meeting is too complex for current pipeline handler."
+
+  - id: PP05
+    question: "Find sites where profiling form was sent but not yet received"
+    category: KNOWN_GAP
+    observed_behavior: "116 rows — mapped to 'meeting invitation sent' which is semantically different from 'form sent but not received'"
+    output_type: table
+    likely_handler: pipeline_handler (meeting invitation sent)
+    confidence: high
+    notes: "Semantic mismatch: 'form sent but not received' != 'meeting invitation sent'. The handler matched the wrong pipeline field."
+
+  # ============================================================
+  # Multi-condition complex queries (MC01-MC04)
+  # ============================================================
+
+  - id: MC01
+    question: "Show me sites in Germany or Austria that have Stage 2 patients AND pharmacy on-site"
+    category: PASS_NOW
+    observed_behavior: "1 site with correct pharmacy + Stage 2 + country columns"
+    output_type: table
+    likely_handler: qual_handler (multi-condition)
+    confidence: high
+    notes: ""
+
+  - id: MC02
+    question: "Find sites with more than 30 Stage 1 patients that are NOT already in any assignment"
+    category: PASS_NOW
+    observed_behavior: "5 sites with Stage 1 + no assignment"
+    output_type: table
+    likely_handler: stage + not_in_assignment
+    confidence: high
+    notes: ""
+
+  - id: MC03
+    question: "Which Italian or Spanish sites have HLA typing AND overnight stay AND more than 100 T1D patients per year?"
+    category: KNOWN_GAP
+    observed_behavior: "14 rows — answer says 'overnight stay and HLA typing' but doesn't mention T1D >100 threshold. 14 is too many for HLA+overnight+T1D>100"
+    output_type: table
+    likely_handler: qual_handler (multi-condition)
+    confidence: high
+    notes: "T1D >100 threshold likely not applied. GQ17 (all countries, >50 T1D) returned only 3. 14 with >100 in only IT/ES is implausible."
+
+  - id: MC04
+    question: "Show me all sites where profiling is complete AND they have ZnT8 testing AND they're in France or Belgium"
+    category: PASS_NOW
+    observed_behavior: "2 sites in Belgium/France with ZnT8"
+    output_type: table
+    likely_handler: qual_handler (pipeline + qual + country)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Members: Institution discovery (MI01-MI05)
+  # ============================================================
+
+  - id: MI01
+    question: "Show me all Member institutions in the UK"
+    category: PASS_NOW
+    observed_behavior: "17 institutions in UK"
+    output_type: table
+    likely_handler: members_search (country)
+    confidence: high
+    notes: ""
+
+  - id: MI02
+    question: "Which institutions have both CS and CTS validated roles?"
+    category: PASS_NOW
+    observed_behavior: "1 institution with both CS and CTS validated"
+    output_type: table
+    likely_handler: members_search (role filter)
+    confidence: high
+    notes: ""
+
+  - id: MI03
+    question: "Find institutions that have a DxLab (Diagnostic Lab) role"
+    category: PASS_NOW
+    observed_behavior: "77 institutions with DxLab role"
+    output_type: table
+    likely_handler: members_search (DxLab)
+    confidence: high
+    notes: ""
+
+  - id: MI04
+    question: "Which institutions are validated as Patient Organizations?"
+    category: PASS_NOW
+    observed_behavior: "13 institutions with Patient Organization role"
+    output_type: table
+    likely_handler: members_search (Patient Org)
+    confidence: high
+    notes: ""
+
+  - id: MI05
+    question: "Show me all Research/Mechanistic Lab members in Germany"
+    category: PASS_NOW
+    observed_behavior: "0 institutions — may be correct if no German institutions have this role"
+    output_type: table
+    likely_handler: members_search (role + country)
+    confidence: medium
+    notes: "0 results could be legitimate. Research/Mechanistic Lab role may not exist for German institutions."
+
+  # ============================================================
+  # Members: Relationship mapping (MR06b-MR09)
+  # ============================================================
+
+  - id: MR06b
+    question: "How many clinical subaccounts does the Leuven institution have?"
+    category: PASS_NOW
+    observed_behavior: "1 row — KU Leuven has 3 clinical subaccounts (matches GQ20 context)"
+    output_type: table
+    likely_handler: member_subaccounts handler
+    confidence: high
+    notes: ""
+
+  - id: MR07
+    question: "Which institution does the site in Brest belong to?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows — 'No INNODIA site found in brest'"
+    output_type: none
+    likely_handler: member_site_lookup
+    confidence: medium
+    notes: "Brest is a real city in France. The lookup may not match because of how the site name or city is stored."
+
+  - id: MR08
+    question: "Show me all clinical units linked to the Paris member institution"
+    category: PASS_NOW
+    observed_behavior: "1 clinical unit linked to Hospital Paris Saint-Joseph"
+    output_type: table
+    likely_handler: member_subaccounts handler
+    confidence: high
+    notes: ""
+
+  - id: MR09
+    question: "What is the local language name for Oslo University"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows"
+    output_type: none
+    likely_handler: Claude fallback (no local-name field)
+    confidence: high
+    notes: "No 'local language name' field exists in the data model. This data may be in a SF field but Moby doesn't know which one."
+
+  # ============================================================
+  # Org-level contacts (OC01-OC03)
+  # ============================================================
+
+  - id: OC01
+    question: "Who are the key contacts at the UCL member institution?"
+    category: PASS_NOW
+    observed_behavior: "7 contacts at CHU UCL Namur"
+    output_type: table
+    likely_handler: member_contacts handler
+    confidence: high
+    notes: ""
+
+  - id: OC02
+    question: "Show me all contacts and roles at the Edinburgh institution"
+    category: KNOWN_GAP
+    observed_behavior: "0 institutions found"
+    output_type: none
+    likely_handler: member_contacts handler (name mismatch)
+    confidence: medium
+    notes: "Edinburgh institution likely stored under a different name (e.g. 'University of Edinburgh' or 'Royal Hospital for Children and Young People'). Fuzzy name matching gap."
+
+  - id: OC03
+    question: "Which institutions have proposed Clinical Site role but not validated yet?"
+    category: KNOWN_GAP
+    observed_behavior: "214 institutions — returned ALL with Clinical_Site_CS__c field, not filtered for proposed-not-validated"
+    output_type: table
+    likely_handler: members_search (CS role)
+    confidence: high
+    notes: "Did not distinguish 'proposed' from 'validated'. Returned all institutions with the CS field, regardless of validation status."
+
+  # ============================================================
+  # Maps: Visual planning (MV01-MV05)
+  # ============================================================
+
+  - id: MV01
+    question: "Show me all CTS sites in Europe on a map"
+    category: PASS_NOW
+    observed_behavior: "0 rows but returns 'Click Open in Explorer' text directing to interactive map"
+    output_type: text (redirect)
+    likely_handler: map redirect handler
+    confidence: high
+    notes: "Correct behavior — redirects to Explorer map view."
+
+  - id: MV02
+    question: "Which sites are geographically clustered together in Northern Italy?"
+    category: KNOWN_GAP
+    observed_behavior: "62 rows = ALL Italian sites, not filtered to Northern Italy"
+    output_type: table
+    likely_handler: country_sites (Italy) — regional filter dropped
+    confidence: high
+    notes: "No 'Northern Italy' regional filter. Returned all Italy. Would need sub-country geographic filtering."
+
+  - id: MV03
+    question: "Are there any CTS sites in Scandinavia? Where exactly?"
+    category: PASS_NOW
+    observed_behavior: "5 sites in Sweden, Norway, Denmark with cities"
+    output_type: table
+    likely_handler: country_sites (Scandinavia region)
+    confidence: high
+    notes: ""
+
+  - id: MV04
+    question: "Show me the distribution of Stage 1 sites across Europe"
+    category: PASS_NOW
+    observed_behavior: "37 sites with Stage 1 data"
+    output_type: table
+    likely_handler: stage_handler
+    confidence: medium
+    notes: "Returns Stage 1 site data. No map visualization, but data is correct for the query."
+
+  - id: MV05
+    question: "Which regions of Spain have CTS sites?"
+    category: PASS_NOW
+    observed_behavior: "18 sites with cities: Madrid (6), Sevilla (3), Barcelona (2)..."
+    output_type: table
+    likely_handler: country_sites (Spain)
+    confidence: high
+    notes: "Returns all Spanish sites with city breakdown. Not 'regions' per se but cities serve the same purpose."
+
+  # ============================================================
+  # Maps: Logistics (ML01-ML03)
+  # ============================================================
+
+  - id: ML01
+    question: "I need to plan a monitoring visit tour through central Europe - which sites are clustered together?"
+    category: PASS_NOW
+    observed_behavior: "33 sites in DE, AT, CH, CZ, PL"
+    output_type: table
+    likely_handler: country_sites (Central Europe region)
+    confidence: medium
+    notes: "Returns Central European sites. No clustering analysis, but the data enables the user to plan."
+
+  - id: ML02
+    question: "Are there CTS sites near the Frankfurt airport corridor?"
+    category: PASS_NOW
+    observed_behavior: "10 nearest sites to Frankfurt airport"
+    output_type: table
+    likely_handler: nearest_handler (airport/city)
+    confidence: high
+    notes: ""
+
+  - id: ML03
+    question: "Show me all sites within 300 km of Brussels for a potential sub-study"
+    category: PASS_NOW
+    observed_behavior: "35 sites within 300km"
+    output_type: table
+    likely_handler: nearest_handler (radius)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Qualification Upload / Data Quality (QU01-QU04)
+  # ============================================================
+
+  - id: QU01
+    question: "Did the qualification data for site X upload correctly?"
+    category: AMBIGUOUS
+    observed_behavior: "0 rows — literal 'site X' doesn't exist"
+    output_type: none
+    likely_handler: n/a
+    confidence: high
+    notes: "Question uses placeholder 'site X'. Would need a concrete site name to be testable."
+
+  - id: QU02
+    question: "Why is the pharmacy field showing empty for the Berlin site?"
+    category: KNOWN_GAP
+    observed_behavior: "37 rows — returned all pharmacy sites instead of diagnosing Berlin's missing data"
+    output_type: table
+    likely_handler: qual_handler (pharmacy) — diagnostic intent missed
+    confidence: high
+    notes: "Moby answered 'what sites have pharmacy' instead of 'why is Berlin's pharmacy field empty'. No diagnostic/troubleshooting handler."
+
+  - id: QU03
+    question: "The ZnT8 field isn't showing up in the Explorer - is it in the qualification data?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows"
+    output_type: none
+    likely_handler: Claude fallback
+    confidence: high
+    notes: "Troubleshooting/data-quality question. Moby doesn't have a handler to inspect field presence per site."
+
+  - id: QU04
+    question: "Can I see a preview of the full qualification for the Warsaw site?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows"
+    output_type: none
+    likely_handler: Claude fallback
+    confidence: high
+    notes: "Qual preview API exists (/api/qualification/preview/by-site/{id}) but Moby doesn't have a tool to invoke it."
+
+  # ============================================================
+  # Data reconciliation (DR01-DR03)
+  # ============================================================
+
+  - id: DR01
+    question: "The site in Lyon uploaded their form - does the data match what's in Salesforce?"
+    category: FUTURE_FEATURE
+    observed_behavior: "0 rows"
+    output_type: none
+    likely_handler: n/a
+    confidence: high
+    notes: "Cross-source data reconciliation (qual JSONB vs Salesforce fields) is not implemented. Would require a dedicated comparison tool."
+
+  - id: DR02
+    question: "Which sites have uploaded a qualification form but don't yet have geocoordinates?"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows"
+    output_type: none
+    likely_handler: Claude fallback
+    confidence: high
+    notes: "Cross-source query (qual upload existence + geocoord absence). Both data sources exist but no handler combines them."
+
+  - id: DR03
+    question: "Show me all sites where the qual upload date is older than 2 years"
+    category: KNOWN_GAP
+    observed_behavior: "0 rows"
+    output_type: none
+    likely_handler: Claude fallback
+    confidence: high
+    notes: "Qual upload date exists in the Questionnaire table but Moby doesn't have a tool to query it."
+
+  # ============================================================
+  # Reporting & Export (RE01-RE05)
+  # ============================================================
+
+  - id: RE01
+    question: "Give me a table of all CTS sites with their Stage 1 and Stage 2 patient counts, by country"
+    category: PASS_NOW
+    observed_behavior: "27 countries with Stage 1/2 totals"
+    output_type: table
+    likely_handler: stage_by_country
+    confidence: high
+    notes: ""
+
+  - id: RE02
+    question: "Export to CSV all sites with their PI names and study coordinator contact details"
+    category: FUTURE_FEATURE
+    observed_behavior: "152 coordinators returned as table, no CSV export"
+    output_type: table
+    likely_handler: study_coordinators
+    confidence: high
+    notes: "Data is returned correctly but actual CSV file export/download is not implemented."
+
+  - id: RE03
+    question: "Show me all German sites with their profiling completion status"
+    category: PASS_NOW
+    observed_behavior: "9 German sites with profiling columns"
+    output_type: table
+    likely_handler: country_sites (Germany) + profiling fields
+    confidence: high
+    notes: ""
+
+  - id: RE04
+    question: "Give me a count of sites per country that have at least one validated role"
+    category: KNOWN_GAP
+    observed_behavior: "25 countries, 197 total — returned ALL countries without filtering for 'validated role'"
+    output_type: table
+    likely_handler: is_basic_site_count (validated role filter dropped)
+    confidence: high
+    notes: "The 'at least one validated role' constraint was ignored. Would need cross-entity query (Account roles + site counts)."
+
+  - id: RE05
+    question: "I need a chart of Stage 2 patients per country for the steering committee"
+    category: PASS_NOW
+    observed_behavior: "27 countries with Stage 2 data"
+    output_type: table
+    likely_handler: stage_by_country
+    confidence: high
+    notes: "Data returned for chart generation. The frontend can render this as a chart via ChartModal."
+
+  # ============================================================
+  # Tracking over time (RT01-RT03)
+  # ============================================================
+
+  - id: RT01
+    question: "Which sites completed profiling in the last year?"
+    category: PASS_NOW
+    observed_behavior: "79 sites with profiling complete after 2025-03"
+    output_type: table
+    likely_handler: pipeline_handler (date filter)
+    confidence: high
+    notes: ""
+
+  - id: RT02
+    question: "Show me all sites where the first contact was in 2024"
+    category: PASS_NOW
+    observed_behavior: "20 sites"
+    output_type: table
+    likely_handler: Claude tool (date filter)
+    confidence: high
+    notes: ""
+
+  - id: RT03
+    question: "Which sites had a meeting date in Q3 2024?"
+    category: PASS_NOW
+    observed_behavior: "19 sites with meeting date 2024-07-01 to 2024-09-30"
+    output_type: table
+    likely_handler: pipeline_handler (Q3 date range)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Feasibility assessments (FA01-FA05)
+  # ============================================================
+
+  - id: FA01
+    question: "We need 20 sites for a new study that requires overnight stay and pharmacy - which sites qualify?"
+    category: PASS_NOW
+    observed_behavior: "34 sites with pharmacy + overnight stay"
+    output_type: table
+    likely_handler: qual_handler (multi-condition)
+    confidence: high
+    notes: ""
+
+  - id: FA02
+    question: "For a Stage 1 prevention trial we need sites with >30 Stage 1 patients - how many sites do we have, and in which countries?"
+    category: KNOWN_GAP
+    observed_behavior: "37 rows — returned ALL sites with Stage 1 > 0, >30 threshold ignored (same issue as SC02)"
+    output_type: table
+    likely_handler: stage_handler
+    confidence: high
+    notes: "Stage handler doesn't apply numeric thresholds. Same gap as SC02."
+
+  - id: FA03
+    question: "We want to expand into Eastern Europe - which countries already have profiling sites we could fast-track to CTS?"
+    category: PASS_NOW
+    observed_behavior: "17 sites in Eastern European countries"
+    output_type: table
+    likely_handler: country_sites (Eastern Europe)
+    confidence: medium
+    notes: "Returns Eastern European sites. Doesn't specifically filter for 'profiling complete but not CTS' which would be the fast-track candidates."
+
+  - id: FA04
+    question: "How many sites could potentially support early diagnosis work based on their profiling data?"
+    category: KNOWN_GAP
+    observed_behavior: "37 sites — returned 'currently in profiling stage' sites, not 'early diagnosis capable' sites"
+    output_type: table
+    likely_handler: pipeline_handler
+    confidence: high
+    notes: "Mapped 'early diagnosis' to 'profiling stage' which is semantically wrong. Same issue as QD01/QO04."
+
+  - id: FA05
+    question: "If we need HLA typing at the site level, how many of our current sites can provide it?"
+    category: PASS_NOW
+    observed_behavior: "41 sites with HLA typing"
+    output_type: table
+    likely_handler: qual_handler (HLA)
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Network planning (NP01-NP03)
+  # ============================================================
+
+  - id: NP01
+    question: "Are there clusters of sites in any country where we could designate a regional hub?"
+    category: KNOWN_GAP
+    observed_behavior: "25 entries (country site counts) — returned basic country counts, no clustering analysis"
+    output_type: table
+    likely_handler: is_basic_site_count
+    confidence: high
+    notes: "No geographic clustering analysis. Just returned site counts per country."
+
+  - id: NP02
+    question: "Which member institutions have multiple clinical subaccounts that could serve as coordinating centers?"
+    category: PASS_NOW
+    observed_behavior: "39 institutions with 2+ clinical subaccounts"
+    output_type: table
+    likely_handler: member_subaccounts handler (threshold)
+    confidence: high
+    notes: ""
+
+  - id: NP03
+    question: "Show me which CTS sites are also validated Diagnostic Labs"
+    category: PASS_NOW
+    observed_behavior: "45 CTS sites with DxLab role"
+    output_type: table
+    likely_handler: ST8 DxLab handler
+    confidence: high
+    notes: ""
+
+  # ============================================================
+  # Budget and resource allocation (BR01-BR03)
+  # ============================================================
+
+  - id: BR01
+    question: "How many sites per country are currently active in assignments?"
+    category: PASS_NOW
+    observed_behavior: "17 countries with active site counts"
+    output_type: table
+    likely_handler: assignments_by_country
+    confidence: high
+    notes: ""
+
+  - id: BR02
+    question: "Which countries have the highest site density - are we over-represented anywhere?"
+    category: PASS_NOW
+    observed_behavior: "25 countries with site counts"
+    output_type: table
+    likely_handler: is_basic_site_count
+    confidence: medium
+    notes: "Returns site counts. The 'over-represented' analysis is left to the user. Data is sufficient."
+
+  - id: BR03
+    question: "Which sites haven't been involved in any assignment in the last 2 years? They might need re-engagement."
+    category: KNOWN_GAP
+    observed_behavior: "56 sites — returned ALL sites with no current assignment, 'last 2 years' time filter ignored"
+    output_type: table
+    likely_handler: not_in_assignment handler (time filter dropped)
+    confidence: high
+    notes: "The 'in the last 2 years' temporal constraint was dropped. Returned same result as GQ19 (sites with zero assignments ever)."
+
+# ============================================================
+# SUMMARY
+# ============================================================
+#
+# PASS_NOW:       84 / 121 (69.4%)
+# KNOWN_GAP:      34 / 121 (28.1%)
+# FUTURE_FEATURE:  2 / 121 ( 1.7%)
+# AMBIGUOUS:       1 / 121 ( 0.8%)
+#
+# ---- 10 clear PASS_NOW examples ----
+# CL01  "How many CTS sites are there in each country?"                    — 25 countries, 197 total
+# SC05  "Show me sites that have both Stage 1 AND Stage 2 patients"        — 26 sites (GQ06 match)
+# SP01  "Show me all sites involved in the Beta Preserve assignment"       — 52 sites
+# SP03  "Find all sites within 150 km of Safeguard"                        — 52 sites, driving distances
+# PC03  "Who is the PI at the site in Barcelona?"                          — 1 PI found
+# AA03  "Show me all activities and how many sites participate in each"    — 11 activities (GQ11 match)
+# PP01  "Which sites have completed profiling but aren't CTS yet?"         — 27 sites
+# MC04  "Profiling complete + ZnT8 + France or Belgium"                    — 2 sites
+# RT03  "Which sites had a meeting date in Q3 2024?"                       — 19 sites, correct date range
+# FA01  "20 sites for overnight stay + pharmacy"                           — 34 qualifying sites
+#
+# ---- 10 clear KNOWN_GAP examples ----
+# SC02  "Sites with >50 Stage 1" — threshold ignored, returned all 37 Stage 1 sites
+# SC07  "ND T1D U18 >20" — wrong SF field (current patients vs newly diagnosed)
+# SS06  "Percentage participating in activity" — parsed as activity name, no % calc
+# QD01  "Early diagnosis screening" — returned ALL 195 sites, no filter applied
+# SP05  "Assignments in Germany" — treated 'in germany' as activity name
+# PP04  "Questionnaire submitted but no meeting" — complete failure, 0 rows
+# MC03  "IT/ES + HLA + overnight + T1D>100" — T1D threshold dropped, 14 vs expected ~3
+# PC05  "All contacts in Netherlands" — returned sites, not contacts
+# OC03  "Proposed CS not validated" — returned ALL 214 CS institutions, no proposed/validated distinction
+# FA02  "Stage 1 >30" — threshold ignored, same as SC02
+#
+# ---- 2 clear FUTURE_FEATURE examples ----
+# RE02  "Export to CSV" — data returned but no file download capability
+# DR01  "Does Lyon data match Salesforce?" — cross-source reconciliation not implemented
+#
+# ---- 5 clear AMBIGUOUS examples (only 1 found) ----
+# QU01  "Did qualification data for site X upload correctly?" — literal 'site X' placeholder
+#
+# ---- Top KNOWN_GAP patterns (grouped) ----
+# 1. Numeric threshold ignored (SC02, FA02, MC03): Stage/T1D threshold in query dropped
+# 2. Concept not mapped to field (QD01, QO04, FA04, QD05, QI03): abstract concept with no specific field
+# 3. Wrong entity or misroute (QI02, SP05, SS06): parsed intent into wrong handler
+# 4. Semantic mismatch (PP05, SS09, QU02): matched a related but wrong pipeline field
+# 5. Cross-source query (DR02, DR03, QU04): needs data from multiple backend sources
+# 6. Name matching (MR07, OC02, MR09): institution/site name not found due to naming variations

@@ -64,6 +64,8 @@ export default function ChatView() {
   const [busy, setBusy] = useState(false);
   // Accumulates text tokens while Claude streams; cleared when done
   const [streamText, setStreamText] = useState("");
+  // Shows tool execution progress during agentic loop
+  const [toolProgress, setToolProgress] = useState("");
   const [lastUserQ, setLastUserQ] = useState<string>("");
   const [lastTableForAI, setLastTableForAI] = useState<{columns: any[], rows: any[]} | null>(null);
   const [lastFiltersForAI, setLastFiltersForAI] = useState<Record<string,any> | null>(null);
@@ -681,10 +683,15 @@ export default function ChatView() {
       }
       // LLM (streaming)
       setStreamText("");
+      setToolProgress("");
       const resp = await askAIStream(text, lastTableForAI, lastFiltersForAI, (chunk) => {
         setStreamText((prev) => prev + chunk);
-      }, newHistory, abort.signal);
+      }, newHistory, abort.signal, (progress) => {
+        const toolLabels = progress.tools.map((t) => t.replace(/_/g, " "));
+        setToolProgress(`Searching: ${toolLabels.join(", ")}...`);
+      });
       setStreamText("");
+      setToolProgress("");
       handleArtifacts(resp);
       // Append assistant reply to history
       if (resp.answer) {
@@ -1150,7 +1157,10 @@ export default function ChatView() {
               />
             </div>
           )}
-          {busy && !streamText && <div data-testid="chat-thinking" className="text-sm text-gray-500">Moby is thinking…</div>}
+          {busy && toolProgress && !streamText && (
+            <div className="text-xs text-gray-400 italic ml-1">{toolProgress}</div>
+          )}
+          {busy && !streamText && !toolProgress && <div data-testid="chat-thinking" className="text-sm text-gray-500">Moby is thinking…</div>}
         </div>
 
         {/* Input area */}
