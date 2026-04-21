@@ -57,8 +57,8 @@ if [ ! -f "$BACKEND_DIR/.env" ]; then
 fi
 VITE_GOOGLE_MAPS_API_KEY=$(grep '^GOOGLE_MAPS_API_KEY=' "$BACKEND_DIR/.env" | head -1 | cut -d= -f2 | tr -d "\"'" || echo "")
 
-log() { printf "\n\033[1;34m==> %s\033[0m\n" "$*"; }
-ok()  { printf "\033[1;32m✓  %s\033[0m\n" "$*"; }
+log() { printf "\n\033[1;34m==> %s\033[0m\n" "$*" >&2; }
+ok()  { printf "\033[1;32m✓  %s\033[0m\n" "$*" >&2; }
 
 # ── ECR login ─────────────────────────────────────────────────────────────────
 log "ECR login"
