@@ -111,17 +111,19 @@ def _extract_filters(text: str) -> tuple[List[FilterSpec], List[str]]:
             "raw_term": m_nd.group(0).strip(),
         })
 
-    # Pharmacy on-site (qualifier required; bare "pharmacy" → unresolved)
-    if re.search(r"\bpharmac", s):
-        if re.search(r"\bon[\s\-]?site\b|\bon\s+campus\b", s):
-            filters.append({
-                "field":    _PHARMACY_FIELD,
-                "operator": "equals",
-                "value":    "On-site",
-                "raw_term": "pharmacy on-site",
-            })
-        else:
-            unresolved.append("pharmacy (on-site or off-campus not specified)")
+    # Pharmacy: in the clinical-trial-site domain "pharmacy" without a
+    # qualifier is virtually always asking for on-site pharmacy capability
+    # (off-campus is a degenerate case, never the typical need). Default to
+    # on-site so the agentic loop can proceed instead of short-circuiting to
+    # a clarification prompt that blocks legitimate queries like FA01
+    # ("sites with overnight stay and pharmacy").
+    if re.search(r"\bpharmac", s) and not re.search(r"\boff[\s\-]?(?:site|campus)\b", s):
+        filters.append({
+            "field":    _PHARMACY_FIELD,
+            "operator": "equals",
+            "value":    "On-site",
+            "raw_term": "pharmacy on-site (default)",
+        })
 
     # Overnight stay
     if re.search(r"\bovernight\b", s):

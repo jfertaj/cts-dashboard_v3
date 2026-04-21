@@ -902,6 +902,14 @@ def _safe_field(field: str) -> str:
             return field
         raise HTTPException(400, f"Campo no existe en Account: {base}")
     if field not in ALLOWED_FIELDS:
+        # Claude / curated config sometimes omits the "Account." prefix for
+        # Account-level flags (e.g. "INNODIA_Clinical_Trial_Site__c" instead
+        # of "Account.INNODIA_Clinical_Trial_Site__c"). Accept the bare form
+        # when the prefixed variant is allowed — it lets agentic callers use
+        # the same identifier they see in the SYSTEM_PROMPT glossary.
+        prefixed = f"Account.{field}"
+        if prefixed in ALLOWED_FIELDS or (_exists_on_account(field) and not _exists_on_opportunity(field)):
+            return prefixed
         raise HTTPException(400, f"Campo no permitido: {field}")
     if not _exists_on_opportunity(field):
         if _exists_on_account(field):

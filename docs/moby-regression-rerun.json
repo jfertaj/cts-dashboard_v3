@@ -1,0 +1,123 @@
+[
+  {
+    "id": "SC01",
+    "question": "Show me all CTS sites in Germany, Italy, and Belgium",
+    "expected_rows": 79,
+    "elapsed_s": 44.8,
+    "verdict": "PASS",
+    "reason": "expected ~79, got 44",
+    "status": "OK",
+    "rows": 44,
+    "has_table": true,
+    "answer_preview": "44 CTS sites found across the three countries — Italy dominates with 30 sites, Belgium has 8, and Germany has 6. Italy's strongest sites are concentrated in Milan, Rome, Torino, Padova, and Palermo. Notable standouts include Ospedale Pediatrico Bambino Gesù (Rome) with 130 newly diagnosed (ND) patie"
+  },
+  {
+    "id": "SC06",
+    "question": "Which sites in France have HLA typing capability available?",
+    "expected_rows": 9,
+    "elapsed_s": 22.4,
+    "verdict": "FAIL",
+    "reason": "expected ~9 rows, got 0 | '9 French sites confirm HLA typing capability. They span 7 cities, with Paris contributing 2 sites (Necker and Georges-Pompidou). CHU Lenval in Nice st'",
+    "status": "OK",
+    "rows": 0,
+    "has_table": false,
+    "answer_preview": "9 French sites confirm HLA typing capability. They span 7 cities, with Paris contributing 2 sites (Necker and Georges-Pompidou). CHU Lenval in Nice stands out with the highest ND &lt;18 count (60), while CHU de Montpellier leads in current T1D ≥18 patients (5,000). Several sites focus exclusively on"
+  },
+  {
+    "id": "SC09",
+    "question": "Show all sites that have NOT yet completed profiling",
+    "expected_rows": 187,
+    "elapsed_s": 17.1,
+    "verdict": "PASS",
+    "reason": "expected ~187, got 207",
+    "status": "OK",
+    "rows": 207,
+    "has_table": true,
+    "answer_preview": "I notice the results are returning sites where `C_Profiling_Complete__c` is actually **populated** (with future/recent dates), which suggests the filter may be returning all sites or the field logic is inverted. Let me re-check — the query returned 207 rows, many with profiling dates set. The correc"
+  },
+  {
+    "id": "SC10",
+    "question": "Which sites have autoantibody testing possible?",
+    "expected_rows": 30,
+    "elapsed_s": 54.6,
+    "verdict": "PASS",
+    "reason": "expected ~30, got 38",
+    "status": "OK",
+    "rows": 38,
+    "has_table": true,
+    "answer_preview": "38 sites across the INNODIA network have autoantibody testing available, spanning 13 countries. Italy leads with the most sites (10), followed by Spain (6) and Germany (3). The vast majority support the full panel — GAD65, IA-2, Insulin, ZnT8, and C-peptide — though a few sites (e.g. Niguarda Hospit"
+  },
+  {
+    "id": "CL05",
+    "question": "Are there any CTS sites in Romania or Bulgaria?",
+    "expected_rows": 1,
+    "elapsed_s": 14.2,
+    "verdict": "FAIL",
+    "reason": "expected ~1 rows, got 0 | 'There are no CTS (Clinical Trial Site) validated sites in either Romania or Bulgaria within the INNODIA network.\\n\\nNeither country currently has any si'",
+    "status": "OK",
+    "rows": 0,
+    "has_table": false,
+    "answer_preview": "There are no CTS (Clinical Trial Site) validated sites in either Romania or Bulgaria within the INNODIA network.\n\nNeither country currently has any sites that have passed the CTS validation flag (INNODIA_Clinical_Trial_Site__c = true). If you'd like, I can check whether there are any general clinica"
+  },
+  {
+    "id": "SS01",
+    "question": "Show me all sites where profiling form has been uploaded to the database",
+    "expected_rows": 91,
+    "elapsed_s": 12.4,
+    "verdict": "FAIL",
+    "reason": "expected ~91, got 1 (>1 OOM drop)",
+    "status": "OK",
+    "rows": 1,
+    "has_table": true,
+    "answer_preview": "Let me check the correct field name for profiling form uploaded:"
+  },
+  {
+    "id": "SS03",
+    "question": "List sites where C_Profiling_Complete is true",
+    "expected_rows": 155,
+    "elapsed_s": 120.0,
+    "verdict": "FAIL",
+    "reason": "status=ERROR; timed out",
+    "status": "ERROR",
+    "error": "timed out",
+    "rows": 0,
+    "has_table": false,
+    "answer_preview": ""
+  },
+  {
+    "id": "SS04",
+    "question": "Find sites that are CTS-validated but not yet active in any assignment",
+    "expected_rows": 56,
+    "elapsed_s": 21.2,
+    "verdict": "PASS",
+    "reason": "expected ~56, got 32",
+    "status": "OK",
+    "rows": 32,
+    "has_table": true,
+    "answer_preview": "32 CTS-validated sites are not yet active in any assignment — representing a significant untapped pool across 13 countries. The UK leads with 8 sites (spread across London, Oxford, Sheffield, Cambridge, and Newry), followed by Ireland with 4 sites (Dublin × 3, Galway) and Greece with 3 sites. Severa"
+  },
+  {
+    "id": "RE01",
+    "question": "Give me a table of all CTS sites with their Stage 1 and Stage 2 patient counts, by country",
+    "expected_rows": 27,
+    "elapsed_s": 3.8,
+    "verdict": "PASS",
+    "reason": "expected ~27, got 27",
+    "status": "OK",
+    "rows": 27,
+    "has_table": true,
+    "answer_preview": "Found 27 site(s)."
+  },
+  {
+    "id": "FA01",
+    "question": "We need 20 sites for a new study that requires overnight stay and pharmacy - which sites qualify?",
+    "expected_rows": 34,
+    "elapsed_s": 19.6,
+    "verdict": "FAIL",
+    "reason": "expected ~34, got 2 (>1 OOM drop)",
+    "status": "OK",
+    "rows": 2,
+    "has_table": true,
+    "answer_preview": "Only 2 sites in the INNODIA network currently have both an on-site pharmacy and confirmed overnight stay capability — well short of the 20 you need for the new study.\n\nThe two qualifying sites are Johannes Kepler Universität Linz (Austria, pediatric) and King's College Hospital Diabetes Centre (UK, "
+  }
+]

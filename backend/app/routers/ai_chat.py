@@ -4084,6 +4084,12 @@ DOMAIN GLOSSARY — INNODIA abbreviations and acronyms (memorize these):
 - **GCP** = Good Clinical Practice (certification/training)
 - **MCA** = Multi-Centre Agreement → Assignment.C_MCA_Status__c
 - **Phase I/II/III** = Clinical trial phases → sf.C_Phase_I_Type1__c, C_Phase_II_Type1__c, C_Phase_III_Type1__c (T1D) and NonType1 variants
+- **Profiling** workflow fields (ALL on Opportunity unless noted; several are DATES, not booleans — treat `not null` as "done"):
+  - `C_Profiling_Complete__c` — **DATE** (not boolean). Use `!= null` for "profiling complete", `= null` for "NOT completed".
+  - `Profiling_form_uploaded_to_DB__c` — boolean, true once the qualification form is loaded into the DB.
+  - `C_Form_Questionnaire_sent__c` / `Form_Questionnaire_received__c` — booleans for questionnaire lifecycle.
+  - `C_Date_First_Contact__c` / `C_Meeting_Date__c` — DATE fields; use `not null` / date-range filters.
+  - `C_Profiling_Status__c` (Account) / `StageName` (Opportunity) — free-text pipeline stages.
 - **Activity** = An Opportunity with RecordType.DeveloperName = 'RT_Activity'. Activities are specific programs/trials (Detect, Fabulinus, Baricade, Safeguard, etc.). Sites participate in an Activity via Assignment__c records.
 - **Detect / DETECT** = Activity "DETECT Pilot Sites" + "DETECT French Roll Out" + "DETECT Italian Roll Out" — an early detection program
 - **Fabulinus** = Activity "Fabulinus CTS Team - Part A" + "Fabulinus CTS Team - Part B" + "FABULINUS Referral Partner Network"
@@ -8089,8 +8095,22 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
     # ===== Determinista: "show table" → devolver la última tabla sin llamar al modelo =====
     try:
         last_text = (payload.messages[-1].content or "").lower() if payload.messages else ""
-        asks_table = bool(re.search(r"\b(table|tabla|tabella|tabelle)\b|show\s+.*\btable\b|tabla\s*por\s*favor|mostrar\s+tabla", last_text))
-        if asks_table:
+        # Only match follow-up phrasings that refer to a prior result
+        # ("show table", "as a table", "show as table", "tabla por favor"…).
+        # Previously matched the bare word "table" anywhere, which caught fresh
+        # requests like "give me a table of all CTS sites by country" and
+        # trapped them in the follow-up path that has no data to return.
+        asks_table = bool(re.search(
+            r"(?:\bshow\s+(?:it\s+|that\s+|as\s+|the\s+|me\s+)?(?:as\s+)?(?:a\s+)?(?:table|tabla|tabella|tabelle))"
+            r"|\b(?:as|en|como)\s+(?:a\s+|una\s+)?(?:table|tabla|tabella|tabelle)\b"
+            r"|tabla\s*por\s*favor|mostrar\s+tabla",
+            last_text,
+        ))
+        # Extra safety: only consume the query with the follow-up handler if
+        # there is actually a prior table to reference. No prior state → let
+        # the agentic loop take over and produce fresh data.
+        has_prior_context = bool(payload.last_table and payload.last_table.get("rows"))
+        if asks_table and has_prior_context:
             # 0) Petición explícita de resumen por actividad (ignorar last_table previo)
             if re.search(r"activit", last_text) and re.search(r"by\s+activity\s+name", last_text):
                 tbl = tool_activity_country_matrix(sf, stacked=False)
