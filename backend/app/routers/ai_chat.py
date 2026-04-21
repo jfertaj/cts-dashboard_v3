@@ -8466,15 +8466,29 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                 import hashlib as _hashlib
                 _gkey = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
                 try:
-                    from app.routers.salesforce_explorer import _cache_get as _dmcache_get, _cache_set as _dmcache_set
+                    from app.routers.salesforce_explorer import (
+                        _cache_get as _dmcache_get,
+                        _cache_set as _dmcache_set,
+                        MAX_DISTANCE_MATRIX_ELEMENTS as _DM_MAX_ELEMS,
+                    )
                 except Exception:
                     _dmcache_get = lambda k: None  # type: ignore
-                    _dmcache_set = lambda k, v, ttl=3600: None  # type: ignore
+                    _dmcache_set = lambda k, v, ttl=86400: None  # type: ignore
+                    _DM_MAX_ELEMS = 2000
 
                 def _drive_matrix_sync(origin_ll: tuple, dests_ll: list) -> list:
                     """Sync Distance Matrix: returns list of Optional[float] km (driving).
-                    Batches 25 destinations per request; results are cached 1 h."""
+                    Batches 25 destinations per request; results are cached 24 h.
+                    Refuses to call Google if len(dests_ll) > MAX_DISTANCE_MATRIX_ELEMENTS
+                    (one origin → one element per destination) to mirror the guard rail
+                    applied in the Explorer endpoints."""
                     if not _gkey or not dests_ll:
+                        return [None] * len(dests_ll)
+                    if len(dests_ll) > _DM_MAX_ELEMS:
+                        _dbg(
+                            "DistanceMatrix guard rail tripped in Moby: %s destinations > cap %s — skipping API call",
+                            len(dests_ll), _DM_MAX_ELEMS,
+                        )
                         return [None] * len(dests_ll)
                     o_str = f"{origin_ll[0]},{origin_ll[1]}"
                     out: list = [None] * len(dests_ll)
@@ -8493,7 +8507,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
                                     )
                                     _r.raise_for_status()
                                     _mx = _r.json()
-                                    _dmcache_set(_ck, _mx, ttl=3600)
+                                    _dmcache_set(_ck, _mx, ttl=86400)
                                 except Exception as _dme:
                                     _dbg("DistanceMatrix batch error: %s", _dme)
                                     continue

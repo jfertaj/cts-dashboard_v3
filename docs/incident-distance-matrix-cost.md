@@ -1,6 +1,6 @@
 # INCIDENT: Google Maps Distance Matrix cost spike (~$930 in March 2026)
 
-**Status: ACTIVE — development paused until remediation is complete**
+**Status: P0 code fixes applied 2026-04-21, awaiting prod deploy + Google Cloud quota config. Once both are done the incident can be closed.**
 **Date discovered: 2026-03-25**
 **Severity: HIGH (financial + security)**
 
@@ -68,13 +68,13 @@ This means some legitimate wide searches will now fail with 422. That is intenti
 
 ### P0 — Must fix before resuming normal development
 
-- [ ] **Shared cache for Distance Matrix results** — replace the per-worker `_dm_cache` dict with a shared store (file-based JSON, SQLite, or Redis). This alone would reduce API calls by ~4× in production (4 workers). The cache key is already a good hash (`dm_km:{origin}->{md5(destinations)}`).
+- [x] **Shared cache for Distance Matrix results** (2026-04-21) — `_cache_get`/`_cache_set` in `salesforce_explorer.py` now read/write a new `dm_cache` PostgreSQL table (Alembic revision `c3d4e5f6a7b8`). Shared across the 4 uvicorn workers and survives container restarts. Keys keep the same `dm_km:{origin}->{md5(destinations)}` format. On DB failure the helpers degrade to the original process-local `_dm_cache` dict — API callers never fail because of cache issues.
 
-- [ ] **Increase TTL from 1h to 24–48h** — center/account coordinates change at most weekly. A 24h TTL is safe and reduces repeat calls dramatically. Change the `ttl=3600` in `_cache_set(ck, mx, ttl=3600)` at line ~4012.
+- [x] **Increase TTL from 1h to 24h** (2026-04-21) — `_cache_set` default raised from `ttl=3600` to `ttl=86400` and explicit call sites updated (Explorer `_drive_km_matrix` + Moby `_drive_matrix_sync`). Center coordinates change at most weekly so 24h is well within staleness budget.
 
 - [x] **Apply haversine pre-filter + top-N cap in both endpoints** (2026-03-25) — Both `within-drive-km` and `nearby-multi` now sort candidates by haversine (straight-line) distance and keep only the top `DM_CANDIDATES_PER_BASE` (default 20) nearest candidates per base before calling Distance Matrix. `within-drive-km` previously had NO haversine pre-filter and sent ALL candidates. `nearby-multi` had a broad 2× max_km cut but no top-N cap. New constant: `DM_CANDIDATES_PER_BASE = int(os.getenv("DM_CANDIDATES_PER_BASE", "20"))`. Logs now show: total_candidates → after_prefilter → elements sent to DM.
 
-- [ ] **Cap Moby's Distance Matrix usage** — `ai_chat.py:8026` has a sync Distance Matrix wrapper that bypasses the guard rail. Apply the same element cap there.
+- [x] **Cap Moby's Distance Matrix usage** (2026-04-21) — `_drive_matrix_sync` in `ai_chat.py` now imports `MAX_DISTANCE_MATRIX_ELEMENTS` from `salesforce_explorer.py` and returns `[None] * len(dests)` with a warning log when the destination count exceeds the cap. Same guard rail as the Explorer endpoints.
 
 - [ ] **Set Google Cloud quota** — in Google Cloud Console → APIs & Services → Distance Matrix API → Quotas, set a daily element limit (suggested: 5,000) as a billing safety net independent of code.
 

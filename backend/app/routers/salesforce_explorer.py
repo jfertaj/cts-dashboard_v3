@@ -40,8 +40,8 @@ from app.utils.geo_cache import (
 
 # DB
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
-from app.database import get_db
+from sqlalchemy import select, func, text
+from app.database import get_db, engine
 from app.models.site import Site
 from app.models.site_qual import SiteQual
 from app.models import Questionnaire, Question, Section, QuestionnaireType
@@ -4137,19 +4137,20 @@ def search_accounts(body: AccountSearchBody, request: Request):
     return {"rows": rows}
 
 # === Endpoint: vecinos por distancia de conducción (km) con Google Matrix ===
-# Cache simple en memoria para resultados de Distance Matrix (puedes migrarlo a Redis)
-# NOTE: _dm_cache is process-local (one dict per uvicorn worker).
-# With workers=4, Distance Matrix results are not shared across processes.
-# Each worker fills its own cache independently, so the same route may be
-# fetched up to 4 times before all workers warm up.
-# If Google DM quota becomes a bottleneck, replace with a shared Redis cache.
-_dm_cache: Dict[str, Tuple[Any, float, int]] = {}  # key -> (val, created_ts, ttl)
-_CACHE_LOCK = threading.RLock()  # lock for _dm_cache (thread-safe within a process)
+# Distance Matrix cache: primary backing store is the `dm_cache` table in
+# PostgreSQL (shared across all uvicorn workers and survives container restarts,
+# see Alembic revision c3d4e5f6a7b8). The in-memory `_dm_cache` dict is kept as
+# a fallback so a DB outage doesn't take down Distance Matrix lookups — it just
+# degrades to process-local caching with the same semantics as before.
+_dm_cache: Dict[str, Tuple[Any, float, int]] = {}  # fallback only: key -> (val, created_ts, ttl)
+_CACHE_LOCK = threading.RLock()  # guards _dm_cache fallback
 
-def _cache_get(k: str):
+
+def _cache_get_mem(k: str):
     with _CACHE_LOCK:
         v = _dm_cache.get(k)
-    if not v: return None
+    if not v:
+        return None
     val, ts, ttl = v
     if time.time() - ts > ttl:
         with _CACHE_LOCK:
@@ -4157,9 +4158,48 @@ def _cache_get(k: str):
         return None
     return val
 
-def _cache_set(k: str, val: Any, ttl: int = 3600):
+
+def _cache_set_mem(k: str, val: Any, ttl: int):
     with _CACHE_LOCK:
         _dm_cache[k] = (val, time.time(), ttl)
+
+
+def _cache_get(k: str):
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT value FROM dm_cache "
+                    "WHERE key = :k "
+                    "AND (now() - created_at) < make_interval(secs => ttl_seconds)"
+                ),
+                {"k": k},
+            ).first()
+            if row is None:
+                return None
+            return row[0]
+    except Exception as e:
+        log.warning("dm_cache DB read failed, falling back to memory: %s", e)
+        return _cache_get_mem(k)
+
+
+def _cache_set(k: str, val: Any, ttl: int = 86400):
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO dm_cache (key, value, created_at, ttl_seconds) "
+                    "VALUES (:k, CAST(:v AS jsonb), now(), :ttl) "
+                    "ON CONFLICT (key) DO UPDATE SET "
+                    "value = EXCLUDED.value, "
+                    "created_at = EXCLUDED.created_at, "
+                    "ttl_seconds = EXCLUDED.ttl_seconds"
+                ),
+                {"k": k, "v": json.dumps(val), "ttl": ttl},
+            )
+    except Exception as e:
+        log.warning("dm_cache DB write failed, falling back to memory: %s", e)
+        _cache_set_mem(k, val, ttl)
 
 async def _drive_km_matrix(origin: Tuple[float,float], dests: List[Tuple[float,float]]) -> List[Optional[float]]:
     """
@@ -4219,7 +4259,7 @@ async def _drive_km_matrix(origin: Tuple[float,float], dests: List[Tuple[float,f
                     log.error("DistanceMatrix failed after 3 attempts for origin=%s chunk_size=%s", o_str, len(chunk))
                     continue
                 mx = _dm_response
-                _cache_set(ck, mx, ttl=3600)
+                _cache_set(ck, mx, ttl=86400)
             status = mx.get("status") if isinstance(mx, dict) else None
             if status != "OK":
                 log.warning("DistanceMatrix status=%s for origin=%s chunk_size=%s", status, o_str, len(chunk))
