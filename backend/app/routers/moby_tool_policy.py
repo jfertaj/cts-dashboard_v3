@@ -6,6 +6,8 @@ and no external dependencies beyond the standard library.
 """
 from __future__ import annotations
 
+import unicodedata
+
 
 TABLE_RETURNING_TOOLS: frozenset[str] = frozenset({
     "explorer_search",
@@ -13,3 +15,28 @@ TABLE_RETURNING_TOOLS: frozenset[str] = frozenset({
     "study_coordinators_with_activities",
     "members_search",
 })
+
+
+_POSITIVES_EN: tuple[str, ...] = (
+    "list", "show", "show me", "give", "give me", "find", "display",
+    "fetch", "get", "get me", "return", "search", "search for", "pull up",
+    "how many", "how much", "which", "which ones",
+    "what sites", "what members", "what centers", "what countries", "what coordinators",
+    "list of", "a list", "a table", "as a table", "as table",
+    "in a table", "table of", "report", "overview",
+)
+
+
+def _norm(s: str) -> str:
+    """Lowercase and strip accents for robust keyword matching."""
+    if not s:
+        return ""
+    return unicodedata.normalize("NFKD", s.lower()).encode("ascii", "ignore").decode()
+
+
+def has_tabular_intent(user_msg: str) -> bool:
+    """True if the query explicitly asks for a list/table/count/search result."""
+    if not user_msg:
+        return False
+    norm = _norm(user_msg)
+    return any(p in norm for p in _POSITIVES_EN)
