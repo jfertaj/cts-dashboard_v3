@@ -74,3 +74,31 @@ def test_has_tabular_intent_accents_normalized():
     assert has_tabular_intent("cuantos sitios")
     assert has_tabular_intent("CUÁNTOS SITIOS")
     assert has_tabular_intent("  Cuántos Sitios  ")
+
+
+def test_has_tabular_intent_blacklist_wins():
+    """Conversational phrasings beat positive keywords."""
+    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    for q in [
+        "Explain what HLA typing means",
+        "What is the meaning of profiling?",
+        "Why are some sites CTS-validated?",
+        "Can you explain how the qualification workflow works?",
+        "Describe the Clinical Trial Site concept",
+        "Tell me about CTS validation",
+        "Show me what that error means",
+        "Show me how the workflow works",
+        "Summarize the current status",
+        "Puedes explicar cómo funciona",
+        "Por qué hay sitios sin asignación?",
+        "Qué significa CTS?",
+        "Resume el estado actual",
+        "Cuéntame sobre la validación",
+    ]:
+        assert not has_tabular_intent(q), f"Expected NOT tabular for: {q!r}"
+
+
+def test_has_tabular_intent_conversational_short():
+    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    for q in ["hi", "thanks", "ok", "what?", "hola", "", "   "]:
+        assert not has_tabular_intent(q)

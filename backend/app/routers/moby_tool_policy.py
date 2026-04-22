@@ -37,6 +37,18 @@ _POSITIVES: tuple[str, ...] = (
 )
 
 
+_BLACKLIST: tuple[str, ...] = (
+    # EN
+    "summarize", "summary of", "explain", "what does", "what is the",
+    "why", "how do i", "can you explain", "describe", "tell me about",
+    "show me what", "show me how",
+    # ES (accent-stripped)
+    "resume", "explica", "que significa", "por que",
+    "como puedo", "como hago", "puedes explicar",
+    "cuentame sobre", "ensename que", "ensename como",
+)
+
+
 def _norm(s: str) -> str:
     """Lowercase and strip accents for robust keyword matching."""
     if not s:
@@ -45,8 +57,14 @@ def _norm(s: str) -> str:
 
 
 def has_tabular_intent(user_msg: str) -> bool:
-    """True if the query explicitly asks for a list/table/count/search result."""
+    """True if the query explicitly asks for a list/table/count/search result.
+
+    Blacklist wins: conversational phrasings return False even if a
+    positive keyword is present in the query.
+    """
     if not user_msg:
         return False
     norm = _norm(user_msg)
+    if any(b in norm for b in _BLACKLIST):
+        return False
     return any(p in norm for p in _POSITIVES)
