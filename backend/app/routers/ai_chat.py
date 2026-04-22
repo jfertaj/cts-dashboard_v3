@@ -4854,6 +4854,20 @@ def _agentic_loop(
     last_table, last_visualization, last_explorer_filters.
     """
     from backend.app.routers.moby_tools import ToolContext, dispatch_tool
+    from backend.app.routers.moby_tool_policy import (
+        has_tabular_intent,
+        filter_tools_spec,
+    )
+
+    _tabular = False
+    _whitelist_spec: Optional[List[Dict[str, Any]]] = None
+    try:
+        if has_tabular_intent(user_msg):
+            _tabular = True
+            _whitelist_spec = filter_tools_spec(TOOLS_SPEC)
+            _dbg("Tabular intent detected (query=%r), forcing tool_choice=required", user_msg[:80])
+    except Exception as _e:
+        _dbg("has_tabular_intent failed, defaulting to non-tabular: %s", _e)
 
     start_time = _monotonic()
     seen_hashes: set = set()
@@ -4883,7 +4897,16 @@ def _agentic_loop(
         _dbg("Agentic loop turn %d/%d (final=%s, thinking=%s)", turn, max_turns, is_final, think)
 
         try:
-            resp = _claude_chat(msgs, tool_choice="auto", force_no_tools=is_final, use_thinking=think)
+            if _tabular and turn == 1:
+                resp = _claude_chat(
+                    msgs,
+                    tool_choice="required",
+                    force_no_tools=is_final,
+                    use_thinking=think,
+                    tools_override=_whitelist_spec,
+                )
+            else:
+                resp = _claude_chat(msgs, tool_choice="auto", force_no_tools=is_final, use_thinking=think)
         except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as e:
             _dbg("Anthropic API error in agentic loop turn %d: %s", turn, e)
             text_out = f"<p>Service temporarily unavailable. Please try again later. ({str(e)[:50]})</p>"

@@ -377,3 +377,44 @@ def _fake_anthropic_response():
         cache_read_input_tokens=0, cache_creation_input_tokens=0,
     )
     return resp
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
+    """Tabular intent → turn 1 uses tool_choice='required' and tools_override whitelist."""
+    from backend.app.routers.ai_chat import _agentic_loop
+    from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+
+    mock_claude.return_value = _text_response("<p>empty</p>")
+
+    _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites in Spain",
+    )
+
+    assert mock_claude.called
+    _, kwargs = mock_claude.call_args_list[0]
+    assert kwargs.get("tool_choice") == "required", f"Got tool_choice={kwargs.get('tool_choice')}"
+    override = kwargs.get("tools_override")
+    assert override is not None, "tools_override must be passed when tabular"
+    names = {t["function"]["name"] for t in override}
+    assert names == TABLE_RETURNING_TOOLS
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_uses_auto_when_not_tabular(mock_dispatch, mock_claude, tool_ctx):
+    """Non-tabular query → existing behaviour: tool_choice='auto', no override."""
+    from backend.app.routers.ai_chat import _agentic_loop
+
+    mock_claude.return_value = _text_response("<p>hi</p>")
+
+    _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="Explain what CTS means",
+    )
+
+    _, kwargs = mock_claude.call_args_list[0]
+    assert kwargs.get("tool_choice") == "auto"
+    assert kwargs.get("tools_override") is None
