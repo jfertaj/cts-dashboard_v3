@@ -202,6 +202,24 @@ The model has no index on `(lower(name), country_code)`. With a full geonames ci
 
 ---
 
+## 17. ~~Fix SC06/SS01/SS03 flakiness so `refactor/moby-agentic-loop` can ship~~ — DONE (2026-04-22)
+
+**Observation (2026-04-21/22):** Bulk eval (121 questions) on `refactor/moby-agentic-loop` surfaced 10 regressions. Three of them (SC06 "Which sites in France have HLA typing capability", SS01 "Show me all sites where profiling form has been uploaded to the database", SS03 "List sites where C_Profiling_Complete is true") flipped between PASS and FAIL across identical reruns — classic "Claude answers from memory without calling a table-returning tool". Gate: these 3 had to be PASS in 3 consecutive runs of `scripts/rerun_regressions.py` before the refactor could merge.
+
+**Fix (plan A of the custom-loop-vs-SDK brainstorm):** Spec at `docs/superpowers/specs/2026-04-22-moby-force-tool-guard-design.md`, plan at `docs/superpowers/plans/2026-04-22-moby-force-tool-guard.md`.
+- New module `backend/app/routers/moby_tool_policy.py` — `TABLE_RETURNING_TOOLS` frozenset, `has_tabular_intent(user_msg)` keyword detector (EN+ES positives + blacklist), `filter_tools_spec(...)` helper. 16 unit tests.
+- `ai_chat.py::_claude_chat` — new `tools_override` kwarg; default `None` preserves existing behaviour.
+- `ai_chat.py::_agentic_loop` — on turn 1 if `has_tabular_intent(user_msg)`, force `tool_choice="required"` and pass `tools_override` = the 4 table-returning tools; post-loop retry (cap=1) when `_tabular and text_out and not _table_produced_this_request`. `_dispatch_tool_calls` extracted as helper. SSE `__PROGRESS__` with `turn="retry"`.
+- Tests: 10 new tests in `test_agentic_loop.py` covering turn-1 force, retry conditions, inherited-table follow-up, DM guard characterization.
+
+**Evidence (merge gate):** `docs/moby-regression-rerun-post-fix.json` — SC06/SS01/SS03 PASS 3/3 in three consecutive runs (2026-04-22). Out-of-scope known failures (CL05, FA01) unchanged.
+
+**Follow-up (plan B of the same brainstorm):** expose `TOOL_DISPATCH` as an MCP server (decouples Moby tools from `ai_chat.py`, future SDK-compat). Not shipped — separate spec to come. Tracked in memory `project_state_2026_04_22_triage_r1.md`.
+
+**Files:** `backend/app/routers/moby_tool_policy.py` (new), `backend/app/routers/ai_chat.py`, `backend/tests/test_tool_policy.py` (new), `backend/tests/test_agentic_loop.py`.
+
+---
+
 ## 13. ~~Add Profiling and Qualification Opportunity fields to Explorer filter/column catalog~~ — DONE (2026-03-16)
 
 **Observation:** Salesforce query on `dev` (2026-03-16) confirmed two Opportunity RecordTypes not currently represented in `fields_opportunity_curated.json`:

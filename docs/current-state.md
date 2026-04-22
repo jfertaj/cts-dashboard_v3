@@ -153,7 +153,8 @@ Legend:
 - `ChatView.tsx` renders live streaming bubble, structured table (AIResultTable), optional chart
 - `AIResultTable.tsx` has export CSV, "Open in Explorer", "Add columns", highlight buttons
 - Math handler and conversational no-tools shortcut for follow-up efficiency
-- Backend unit tests: `test_ai_chat.py` (pure function tests for `_is_complex_query`, `_truncate_history`)
+- **Force-tool guard on tabular-intent queries** — CONFIRMED (2026-04-22): new module `backend/app/routers/moby_tool_policy.py` (`TABLE_RETURNING_TOOLS` frozenset, `has_tabular_intent` EN+ES detector with blacklist override, `filter_tools_spec` helper; 16 unit tests). `_claude_chat` gained a `tools_override` kwarg; `_agentic_loop` now (a) forces `tool_choice="required"` + the 4 table-returning tools on turn 1 when the user message matches tabular intent, (b) runs one retry after the loop if it exited text-only and no table was produced this request, and (c) emits an SSE `__PROGRESS__` event with `turn="retry"`. `_dispatch_tool_calls` extracted as a private helper reused by both main loop and retry. Closes SC06/SS01/SS03 flakiness (3/3 PASS in `docs/moby-regression-rerun-post-fix.json`). Spec: `docs/superpowers/specs/2026-04-22-moby-force-tool-guard-design.md`. Plan: `docs/superpowers/plans/2026-04-22-moby-force-tool-guard.md`. 10 new tests in `test_agentic_loop.py`.
+- Backend unit tests: `test_ai_chat.py` (pure function tests for `_is_complex_query`, `_truncate_history`), `test_tool_policy.py` (16 pure tests for the new policy module), `test_agentic_loop.py` (23 mocked loop-control tests)
 - E2E coverage: `chat.spec.ts` (deterministic with SSE mock), `chat-live.smoke.spec.ts` (requires real SF session, skipped in CI)
 
 ### Backend Module Structure — CONFIRMED (2026-03-18)
