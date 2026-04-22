@@ -4735,6 +4735,106 @@ def _claude_chat(
     return OpenAICompatibleResponse(OpenAICompatibleMessage(content_str, tool_calls if tool_calls else None))
 
 
+def _dispatch_tool_calls(
+    assistant_msg,
+    msgs: List[Dict[str, Any]],
+    tool_ctx: "ToolContext",
+    seen_hashes: set,
+    dm_called: bool,
+    tool_calls_made: List[Dict[str, Any]],
+    turn,
+) -> Tuple[bool, Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[Dict[str, Any]], bool]:
+    """Dispatch every tool_call in assistant_msg, applying dedup + DM + truncation.
+
+    Returns a tuple:
+        (dm_called_after, last_table, last_viz, last_filters, table_produced_now)
+
+    - dm_called_after: True if any DM tool was dispatched in this call.
+    - last_table/viz/filters: latest values after dispatch (None if none set).
+    - table_produced_now: True if any dispatched tool set a non-None last_table.
+    """
+    import hashlib
+    from backend.app.routers.moby_tools import dispatch_tool
+
+    _DM_TOOL_NAMES = {"nearest_filtered_sites", "explorer_within_drive_km"}
+    _char_limit = MAX_TOOL_RESULT_TOKENS * 4
+
+    last_table: Optional[Dict[str, Any]] = None
+    last_visualization: Optional[Dict[str, Any]] = None
+    last_explorer_filters: Optional[Dict[str, Any]] = None
+    table_produced_now = False
+
+    for tc in assistant_msg.tool_calls:
+        name = tc.function.name
+        args_json = tc.function.arguments or "{}"
+        args = json.loads(args_json)
+        tool_call_id = tc.id
+
+        call_hash = hashlib.md5(f"{name}:{args_json}".encode()).hexdigest()
+        if call_hash in seen_hashes:
+            _dbg("Agentic loop: DEDUP skip %s (same args)", name)
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": json.dumps({
+                    "error": f"Duplicate call to {name} with same arguments — skipped. Use different parameters or summarize what you have."
+                }),
+            })
+            continue
+        seen_hashes.add(call_hash)
+
+        if name in _DM_TOOL_NAMES:
+            if dm_called:
+                _dbg("Agentic loop: DM tool %s blocked (already called a DM tool)", name)
+                msgs.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps({
+                        "error": "Distance Matrix tool already called this turn. Use the results from the previous call."
+                    }),
+                })
+                continue
+            dm_called = True
+
+        _dbg("Agentic loop turn %s: TOOL %s args=%s", turn, name, args)
+        tool_calls_made.append({"tool": name, "turn": turn})
+
+        tool_ctx.args = args
+        tool_ctx.tool_call_id = tool_call_id
+
+        tool_result = dispatch_tool(name, tool_ctx)
+
+        # Truncate oversized tool results in msgs immediately
+        for _m in reversed(msgs):
+            if _m.get("role") == "tool" and _m.get("tool_call_id") == tool_call_id:
+                _content = _m.get("content", "")
+                if len(_content) > _char_limit:
+                    try:
+                        _parsed = json.loads(_content)
+                        if isinstance(_parsed, dict) and "rows" in _parsed:
+                            _rows = _parsed["rows"]
+                            if isinstance(_rows, list) and len(_rows) > 50:
+                                _parsed["rows"] = _rows[:50]
+                                _parsed["_truncated"] = f"Showing 50 of {len(_rows)} rows"
+                                _m["content"] = json.dumps(_parsed, default=str)
+                    except Exception:
+                        pass
+                break
+
+        if tool_result.last_table is not None:
+            last_table = tool_result.last_table
+            tool_ctx.last_table = last_table
+            table_produced_now = True
+        if tool_result.last_visualization is not None:
+            last_visualization = tool_result.last_visualization
+            tool_ctx.last_visualization = last_visualization
+        if tool_result.last_explorer_filters is not None:
+            last_explorer_filters = tool_result.last_explorer_filters
+            tool_ctx.last_explorer_filters = last_explorer_filters
+
+    return (dm_called, last_table, last_visualization, last_explorer_filters, table_produced_now)
+
+
 # ====== Agentic loop ======
 
 def _agentic_loop(
@@ -4752,8 +4852,6 @@ def _agentic_loop(
     Returns dict with keys: text, turns_used, tool_calls_made,
     last_table, last_visualization, last_explorer_filters.
     """
-    import hashlib
-
     from backend.app.routers.moby_tools import ToolContext, dispatch_tool
 
     start_time = _monotonic()
@@ -4806,76 +4904,16 @@ def _agentic_loop(
         })
 
         # Dispatch each tool call
-        for tc in assistant_msg.tool_calls:
-            name = tc.function.name
-            args_json = tc.function.arguments or "{}"
-            args = json.loads(args_json)
-            tool_call_id = tc.id
-
-            # Dedup: skip if same tool+args already called
-            call_hash = hashlib.md5(f"{name}:{args_json}".encode()).hexdigest()
-            if call_hash in seen_hashes:
-                _dbg("Agentic loop: DEDUP skip %s (same args)", name)
-                msgs.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": json.dumps({"error": f"Duplicate call to {name} with same arguments — skipped. Use different parameters or summarize what you have."}),
-                })
-                continue
-            seen_hashes.add(call_hash)
-
-            # Distance Matrix cost protection: only one DM tool call per user message
-            if name in _DM_TOOL_NAMES:
-                if dm_called:
-                    _dbg("Agentic loop: DM tool %s blocked (already called a DM tool)", name)
-                    msgs.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": json.dumps({"error": "Distance Matrix tool already called this turn. Use the results from the previous call."}),
-                    })
-                    continue
-                dm_called = True
-
-            _dbg("Agentic loop turn %d: TOOL %s args=%s", turn, name, args)
-
-            # Truncate large args for tracking
-            tool_calls_made.append({"tool": name, "turn": turn})
-
-            # Update tool_ctx for this specific call
-            tool_ctx.args = args
-            tool_ctx.tool_call_id = tool_call_id
-
-            tool_result = dispatch_tool(name, tool_ctx)
-
-            # Truncate oversized tool results in msgs immediately (before next Claude turn)
-            # Handlers append to ctx.msgs — find the last tool message and truncate if needed
-            _char_limit = MAX_TOOL_RESULT_TOKENS * 4
-            for _m in reversed(msgs):
-                if _m.get("role") == "tool" and _m.get("tool_call_id") == tool_call_id:
-                    _content = _m.get("content", "")
-                    if len(_content) > _char_limit:
-                        try:
-                            _parsed = json.loads(_content)
-                            if isinstance(_parsed, dict) and "rows" in _parsed:
-                                _rows = _parsed["rows"]
-                                if isinstance(_rows, list) and len(_rows) > 50:
-                                    _parsed["rows"] = _rows[:50]
-                                    _parsed["_truncated"] = f"Showing 50 of {len(_rows)} rows"
-                                    _m["content"] = json.dumps(_parsed, default=str)
-                        except Exception:
-                            pass
-                    break
-
-            # Update shared state (guarded — preserve previous if handler didn't set)
-            if tool_result.last_table is not None:
-                last_table = tool_result.last_table
-                tool_ctx.last_table = last_table
-            if tool_result.last_visualization is not None:
-                last_visualization = tool_result.last_visualization
-                tool_ctx.last_visualization = last_visualization
-            if tool_result.last_explorer_filters is not None:
-                last_explorer_filters = tool_result.last_explorer_filters
-                tool_ctx.last_explorer_filters = last_explorer_filters
+        (dm_called, _lt, _lv, _lf, _produced_now) = _dispatch_tool_calls(
+            assistant_msg, msgs, tool_ctx, seen_hashes, dm_called, tool_calls_made, turn,
+        )
+        if _lt is not None:
+            last_table = _lt
+        if _lv is not None:
+            last_visualization = _lv
+        if _lf is not None:
+            last_explorer_filters = _lf
+        # _produced_now unused for now; Task 12 will wire it into retry logic.
 
         # Fast exit: if tool(s) returned a good table AND Claude included a meaningful
         # text summary alongside the tool call, skip the synthesis turn (saves 3-8s).
