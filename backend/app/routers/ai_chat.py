@@ -4842,6 +4842,7 @@ def _agentic_loop(
     tool_ctx: "ToolContext",
     *,
     use_thinking: bool = False,
+    user_msg: str = "",
 ) -> Dict[str, Any]:
     """
     Bounded agentic loop: up to MOBY_MAX_AGENT_TURNS turns of
@@ -9687,7 +9688,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         tool_call_id="",
     )
 
-    loop_result = _agentic_loop(msgs=msgs, tool_ctx=_tool_ctx, use_thinking=_complex)
+    loop_result = _agentic_loop(msgs=msgs, tool_ctx=_tool_ctx, use_thinking=_complex, user_msg=user_utterance)
 
     last_table = loop_result["last_table"]
     last_visualization = loop_result["last_visualization"]
