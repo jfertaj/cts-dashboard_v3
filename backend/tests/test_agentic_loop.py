@@ -382,7 +382,12 @@ def _fake_anthropic_response():
 @patch("backend.app.routers.ai_chat._claude_chat")
 @patch("backend.app.routers.moby_tools.dispatch_tool")
 def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
-    """Tabular intent → turn 1 uses tool_choice='required' and tools_override whitelist."""
+    """Tabular intent → turn 1 uses tool_choice='required' and tools_override whitelist.
+
+    Also asserts `use_thinking=False` because Anthropic API rejects
+    `tool_choice="required"` combined with `thinking` enabled (error 400:
+    "Thinking may not be enabled when tool_choice forces tool use").
+    """
     from backend.app.routers.ai_chat import _agentic_loop
     from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
 
@@ -390,6 +395,7 @@ def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude,
 
     _agentic_loop(
         msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        use_thinking=True,  # simulate _is_complex_query==True
         user_msg="List sites in Spain",
     )
 
@@ -400,6 +406,10 @@ def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude,
     assert override is not None, "tools_override must be passed when tabular"
     names = {t["function"]["name"] for t in override}
     assert names == TABLE_RETURNING_TOOLS
+    assert kwargs.get("use_thinking") is False, (
+        "use_thinking MUST be False when tool_choice='required' — "
+        "Anthropic API rejects the combination"
+    )
 
 
 @patch("backend.app.routers.ai_chat._claude_chat")

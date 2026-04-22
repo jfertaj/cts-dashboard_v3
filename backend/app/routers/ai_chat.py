@@ -4899,11 +4899,13 @@ def _agentic_loop(
 
         try:
             if _tabular and turn == 1:
+                # Anthropic API rejects thinking + tool_choice="required" together.
+                # Force-tool implies Claude doesn't need to deliberate — just call.
                 resp = _claude_chat(
                     msgs,
                     tool_choice="required",
                     force_no_tools=is_final,
-                    use_thinking=think,
+                    use_thinking=False,
                     tools_override=_whitelist_spec,
                 )
             else:
