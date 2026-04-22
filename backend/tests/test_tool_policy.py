@@ -49,3 +49,28 @@ def test_has_tabular_intent_synthetic_imperatives_en():
         "report on qualification status",
     ]:
         assert has_tabular_intent(q), f"Expected tabular for: {q!r}"
+
+
+def test_has_tabular_intent_positives_es():
+    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    for q in [
+        "lista los sitios CTS",
+        "muestra los miembros en España",
+        "dame los coordinadores",
+        "busca sitios cerca de Madrid",
+        "encuentra los sitios con perfilado completo",
+        "cuántos sitios hay en Alemania?",
+        "cuáles son los países con más sitios?",
+        "qué sitios tienen HLA typing?",
+        "tabla de miembros",
+        "una tabla de actividades",
+    ]:
+        assert has_tabular_intent(q), f"Expected tabular for: {q!r}"
+
+
+def test_has_tabular_intent_accents_normalized():
+    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    assert has_tabular_intent("cuántos sitios")
+    assert has_tabular_intent("cuantos sitios")
+    assert has_tabular_intent("CUÁNTOS SITIOS")
+    assert has_tabular_intent("  Cuántos Sitios  ")

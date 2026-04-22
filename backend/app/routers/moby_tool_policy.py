@@ -17,13 +17,23 @@ TABLE_RETURNING_TOOLS: frozenset[str] = frozenset({
 })
 
 
-_POSITIVES_EN: tuple[str, ...] = (
+_POSITIVES: tuple[str, ...] = (
+    # EN imperatives
     "list", "show", "show me", "give", "give me", "find", "display",
     "fetch", "get", "get me", "return", "search", "search for", "pull up",
+    # ES imperatives (accent-stripped forms)
+    "lista", "muestra", "muestrame", "dame", "ensena", "busca",
+    "buscame", "encuentra", "saca", "sacame", "trae", "traeme",
+    # EN interrogatives
     "how many", "how much", "which", "which ones",
     "what sites", "what members", "what centers", "what countries", "what coordinators",
+    # ES interrogatives
+    "cuantos", "cuantas", "cuales",
+    "que sitios", "que miembros", "que centros", "que paises",
+    # Markers
     "list of", "a list", "a table", "as a table", "as table",
     "in a table", "table of", "report", "overview",
+    "lista de", "en tabla", "como tabla", "una tabla", "tabla de",
 )
 
 
@@ -39,4 +49,4 @@ def has_tabular_intent(user_msg: str) -> bool:
     if not user_msg:
         return False
     norm = _norm(user_msg)
-    return any(p in norm for p in _POSITIVES_EN)
+    return any(p in norm for p in _POSITIVES)
