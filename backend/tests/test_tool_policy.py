@@ -153,3 +153,23 @@ def test_filter_tools_spec_default_uses_table_returning():
     names = {t["function"]["name"] for t in out}
     assert names == {"explorer_search", "members_search"}
     assert names.issubset(TABLE_RETURNING_TOOLS)
+
+
+def test_table_returning_tools_exist_in_real_tools_spec():
+    """All 4 entries in TABLE_RETURNING_TOOLS must correspond to real tools in TOOLS_SPEC."""
+    from backend.app.routers.ai_chat import TOOLS_SPEC
+    from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+
+    real_names = {t.get("function", {}).get("name") for t in TOOLS_SPEC}
+    missing = TABLE_RETURNING_TOOLS - real_names
+    assert not missing, f"TABLE_RETURNING_TOOLS references non-existent tools: {missing}"
+
+
+def test_filter_tools_spec_against_real_tools_spec():
+    from backend.app.routers.ai_chat import TOOLS_SPEC
+    from backend.app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
+
+    out = filter_tools_spec(TOOLS_SPEC)
+    assert len(out) == 4
+    names = {t["function"]["name"] for t in out}
+    assert names == TABLE_RETURNING_TOOLS
