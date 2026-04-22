@@ -4531,6 +4531,7 @@ def _claude_chat(
     *,
     force_no_tools: bool = False,
     use_thinking: bool = False,
+    tools_override: Optional[List[Dict[str, Any]]] = None,
 ):
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -4541,7 +4542,8 @@ def _claude_chat(
     # 1. Convert TOOLS_SPEC (OpenAI format) → Claude format
     claude_tools = []
     if not force_no_tools:
-        for t in TOOLS_SPEC:
+        source_spec = tools_override if tools_override is not None else TOOLS_SPEC
+        for t in source_spec:
             f = t["function"]
             params = f.get("parameters") or {"type": "object", "properties": {}}
             claude_tools.append({

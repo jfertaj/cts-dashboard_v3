@@ -340,3 +340,40 @@ def test_loop_updates_state_from_tool_result(mock_dispatch, mock_claude, tool_ct
     assert result["last_table"] == table
     assert result["last_visualization"] == viz
     assert result["last_explorer_filters"] == filters
+
+
+@patch("backend.app.routers.ai_chat._anthropic_sdk")
+def test_claude_chat_tools_override_replaces_tools_spec(mock_sdk):
+    """When tools_override is passed, claude_tools is built from the override, not TOOLS_SPEC."""
+    from backend.app.routers.ai_chat import _claude_chat
+
+    captured = {}
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = lambda **kw: captured.update(kw) or _fake_anthropic_response()
+    mock_sdk.Anthropic.return_value = mock_client
+
+    override = [{
+        "type": "function",
+        "function": {"name": "explorer_search", "description": "x", "parameters": {"type": "object", "properties": {}}},
+    }]
+
+    import os
+    os.environ["ANTHROPIC_API_KEY"] = "test-key"
+
+    _claude_chat([{"role": "user", "content": "hi"}], tools_override=override)
+
+    tools_passed = captured.get("tools") or []
+    names = [t["name"] for t in tools_passed]
+    assert names == ["explorer_search"], f"Expected only explorer_search, got {names}"
+
+
+def _fake_anthropic_response():
+    """Minimal response object mimicking the Anthropic SDK Message shape."""
+    resp = types.SimpleNamespace()
+    resp.content = [types.SimpleNamespace(type="text", text="ok")]
+    resp.stop_reason = "end_turn"
+    resp.usage = types.SimpleNamespace(
+        input_tokens=10, output_tokens=5,
+        cache_read_input_tokens=0, cache_creation_input_tokens=0,
+    )
+    return resp
