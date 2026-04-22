@@ -102,3 +102,14 @@ def test_has_tabular_intent_conversational_short():
     from backend.app.routers.moby_tool_policy import has_tabular_intent
     for q in ["hi", "thanks", "ok", "what?", "hola", "", "   "]:
         assert not has_tabular_intent(q)
+
+
+def test_has_tabular_intent_cl05_not_covered():
+    """CL05 ('Are there any CTS sites in X?') is intentionally NOT detected.
+
+    Per spec: CL05 is a semantic-note regression (CTS flag is null for
+    Bucharest), not a real bug. The force-tool guard does not cover it.
+    """
+    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    assert not has_tabular_intent("Are there any CTS sites in Romania or Bulgaria?")
+    assert not has_tabular_intent("Is there a CTS site in Poland?")
