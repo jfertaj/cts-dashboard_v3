@@ -418,3 +418,119 @@ def test_loop_uses_auto_when_not_tabular(mock_dispatch, mock_claude, tool_ctx):
     _, kwargs = mock_claude.call_args_list[0]
     assert kwargs.get("tool_choice") == "auto"
     assert kwargs.get("tools_override") is None
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_on_text_only_with_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
+    """Turn 1 returns text only + tabular intent → retry fires, produces a table."""
+    from backend.app.routers.ai_chat import _agentic_loop
+    from backend.app.routers.moby_tools import ToolResult
+
+    tool_call = _make_mock_tool_call("t1", "explorer_search", {})
+    mock_claude.side_effect = [
+        _text_response("<p>9 French sites have HLA typing.</p>"),
+        _tool_response([tool_call], text="Found 9 sites"),
+    ]
+    mock_dispatch.return_value = ToolResult(
+        last_table={"rows": [{"account_id": "a1", "country": "FR"}], "columns": ["account_id"]},
+    )
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites in France with HLA typing",
+    )
+
+    assert mock_claude.call_count == 2
+    _, retry_kwargs = mock_claude.call_args_list[1]
+    assert retry_kwargs.get("tool_choice") == "required"
+    assert retry_kwargs.get("tools_override") is not None
+    assert result["last_table"] is not None
+    assert result["last_table"]["rows"]
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_noop_without_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
+    """Text-only response + non-tabular intent → NO retry."""
+    from backend.app.routers.ai_chat import _agentic_loop
+
+    mock_claude.return_value = _text_response("<p>CTS stands for Clinical Trial Site.</p>")
+
+    _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="Explain what CTS means",
+    )
+
+    assert mock_claude.call_count == 1
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_noop_if_table_produced_this_request(mock_dispatch, mock_claude, tool_ctx):
+    """Turn 1 produced a table → NO retry even if tabular intent."""
+    from backend.app.routers.ai_chat import _agentic_loop
+    from backend.app.routers.moby_tools import ToolResult
+
+    tool_call = _make_mock_tool_call("t1", "explorer_search", {})
+    mock_claude.side_effect = [
+        _tool_response([tool_call], text="Found 50 sites — here is the summary."),
+        _text_response("<p>Here are your 50 sites.</p>"),
+    ]
+    mock_dispatch.return_value = ToolResult(
+        last_table={"rows": [{"a": 1}], "columns": ["a"]},
+    )
+
+    _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites",
+    )
+
+    assert mock_claude.call_count <= 2
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_fires_when_inherited_table_but_no_new_tool(mock_dispatch, mock_claude, tool_ctx):
+    """tool_ctx.last_table pre-populated (follow-up), turn 1 text-only → retry still fires."""
+    from backend.app.routers.ai_chat import _agentic_loop
+    from backend.app.routers.moby_tools import ToolResult
+
+    tool_ctx.last_table = {"rows": [{"old": 1}], "columns": ["old"]}
+
+    tool_call = _make_mock_tool_call("t2", "explorer_search", {})
+    mock_claude.side_effect = [
+        _text_response("<p>some text</p>"),
+        _tool_response([tool_call], text="New result"),
+    ]
+    mock_dispatch.return_value = ToolResult(
+        last_table={"rows": [{"new": 1}], "columns": ["new"]},
+    )
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites in Germany",
+    )
+
+    assert mock_claude.call_count == 2
+    assert result["last_table"]["rows"][0] == {"new": 1}
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_max_one(mock_dispatch, mock_claude, tool_ctx):
+    """Retry itself answers text-only → do NOT run a second retry (cap=1)."""
+    from backend.app.routers.ai_chat import _agentic_loop
+
+    mock_claude.side_effect = [
+        _text_response("<p>first text</p>"),
+        _text_response("<p>retry also text</p>"),
+        _text_response("<p>SHOULD NOT BE CALLED</p>"),
+    ]
+
+    _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites",
+    )
+
+    assert mock_claude.call_count == 2

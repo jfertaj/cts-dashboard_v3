@@ -4875,6 +4875,7 @@ def _agentic_loop(
     _DM_TOOL_NAMES = {"nearest_filtered_sites", "explorer_within_drive_km"}
     tool_calls_made: List[Dict[str, Any]] = []
     text_out: Optional[str] = None
+    _table_produced_this_request = False
 
     last_table = tool_ctx.last_table
     last_visualization = tool_ctx.last_visualization
@@ -4937,7 +4938,8 @@ def _agentic_loop(
             last_visualization = _lv
         if _lf is not None:
             last_explorer_filters = _lf
-        # _produced_now unused for now; Task 12 will wire it into retry logic.
+        if _produced_now:
+            _table_produced_this_request = True
 
         # Fast exit: if tool(s) returned a good table AND Claude included a meaningful
         # text summary alongside the tool call, skip the synthesis turn (saves 3-8s).
@@ -4960,6 +4962,51 @@ def _agentic_loop(
                 token_q.put(f"__PROGRESS__{progress}")
             except Exception:
                 pass
+
+    # Post-loop retry: one forced call if the loop exited text-only but the
+    # user asked for a table and no table was produced this request.
+    if _tabular and text_out and not _table_produced_this_request and _whitelist_spec is not None:
+        _dbg("Retry triggered: loop exited text-only with tabular intent, re-calling with whitelist")
+        msgs.append({
+            "role": "user",
+            "content": (
+                "The previous answer lacked a table. The user asked for a list/table — "
+                "you MUST call one of: explorer_search, nearest_filtered_sites, "
+                "study_coordinators_with_activities, members_search."
+            ),
+        })
+        try:
+            retry_resp = _claude_chat(
+                msgs,
+                tool_choice="required",
+                force_no_tools=False,
+                use_thinking=False,
+                tools_override=_whitelist_spec,
+            )
+        except (_anthropic_sdk.APITimeoutError, _anthropic_sdk.APIConnectionError, _anthropic_sdk.RateLimitError) as _e:
+            _dbg("Retry failed: %s", _e)
+        else:
+            retry_msg = retry_resp.choices[0].message
+            if retry_msg.tool_calls:
+                msgs.append({
+                    "role": "assistant",
+                    "content": retry_msg.content or "",
+                    "tool_calls": [tc.model_dump() for tc in retry_msg.tool_calls],
+                })
+                (dm_called, _lt, _lv, _lf, _produced_now) = _dispatch_tool_calls(
+                    retry_msg, msgs, tool_ctx, seen_hashes, dm_called, tool_calls_made, turn="retry",
+                )
+                if _lt is not None:
+                    last_table = _lt
+                if _lv is not None:
+                    last_visualization = _lv
+                if _lf is not None:
+                    last_explorer_filters = _lf
+                if _produced_now:
+                    _table_produced_this_request = True
+                    retry_text = (retry_msg.content or "").strip()
+                    if retry_text:
+                        text_out = retry_text
 
     return {
         "text": text_out,
