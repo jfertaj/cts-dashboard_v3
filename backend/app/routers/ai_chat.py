@@ -4996,6 +4996,16 @@ def _agentic_loop(
                 (dm_called, _lt, _lv, _lf, _produced_now) = _dispatch_tool_calls(
                     retry_msg, msgs, tool_ctx, seen_hashes, dm_called, tool_calls_made, turn="retry",
                 )
+                token_q = getattr(_STREAM_Q, "q", None)
+                if token_q is not None:
+                    try:
+                        progress = json.dumps({
+                            "turn": "retry",
+                            "tools": [tc.function.name for tc in retry_msg.tool_calls],
+                        })
+                        token_q.put(f"__PROGRESS__{progress}")
+                    except Exception:
+                        pass
                 if _lt is not None:
                     last_table = _lt
                 if _lv is not None:

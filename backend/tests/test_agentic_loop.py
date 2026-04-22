@@ -534,3 +534,38 @@ def test_loop_retry_max_one(mock_dispatch, mock_claude, tool_ctx):
     )
 
     assert mock_claude.call_count == 2
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_progress_event_on_retry(mock_dispatch, mock_claude, tool_ctx):
+    """When streaming (_STREAM_Q.q set), retry emits a __PROGRESS__ event."""
+    import queue
+    from backend.app.routers.ai_chat import _agentic_loop, _STREAM_Q
+    from backend.app.routers.moby_tools import ToolResult
+
+    tool_call = _make_mock_tool_call("t1", "explorer_search", {})
+    mock_claude.side_effect = [
+        _text_response("<p>text</p>"),
+        _tool_response([tool_call], text="retrieved"),
+    ]
+    mock_dispatch.return_value = ToolResult(
+        last_table={"rows": [{"a": 1}], "columns": ["a"]},
+    )
+
+    q: "queue.Queue[str]" = queue.Queue()
+    _STREAM_Q.q = q
+    try:
+        _agentic_loop(
+            msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+            user_msg="List sites",
+        )
+    finally:
+        _STREAM_Q.q = None
+
+    emitted = []
+    while not q.empty():
+        emitted.append(q.get_nowait())
+    progress_events = [e for e in emitted if isinstance(e, str) and e.startswith("__PROGRESS__")]
+    retry_events = [e for e in progress_events if '"retry"' in e or '"turn": "retry"' in e]
+    assert retry_events, f"No retry progress event in {progress_events}"
