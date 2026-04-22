@@ -113,3 +113,43 @@ def test_has_tabular_intent_cl05_not_covered():
     from backend.app.routers.moby_tool_policy import has_tabular_intent
     assert not has_tabular_intent("Are there any CTS sites in Romania or Bulgaria?")
     assert not has_tabular_intent("Is there a CTS site in Poland?")
+
+
+def _fake_spec(name: str) -> dict:
+    return {"type": "function", "function": {"name": name, "parameters": {}}}
+
+
+def test_filter_tools_spec_whitelist_basic():
+    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    spec = [_fake_spec("a"), _fake_spec("b"), _fake_spec("c")]
+    out = filter_tools_spec(spec, {"a", "c"})
+    assert [t["function"]["name"] for t in out] == ["a", "c"]
+
+
+def test_filter_tools_spec_preserves_entry_identity():
+    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    spec = [_fake_spec("a"), _fake_spec("b")]
+    out = filter_tools_spec(spec, {"a"})
+    assert out[0] is spec[0]  # reference-preserving, not a copy
+
+
+def test_filter_tools_spec_empty_whitelist():
+    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    spec = [_fake_spec("a")]
+    assert filter_tools_spec(spec, set()) == []
+
+
+def test_filter_tools_spec_nonexistent_tool_in_whitelist():
+    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    spec = [_fake_spec("a")]
+    out = filter_tools_spec(spec, {"a", "does_not_exist"})
+    assert [t["function"]["name"] for t in out] == ["a"]
+
+
+def test_filter_tools_spec_default_uses_table_returning():
+    from backend.app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
+    spec = [_fake_spec("explorer_search"), _fake_spec("soql_query"), _fake_spec("members_search")]
+    out = filter_tools_spec(spec)  # no whitelist arg → defaults to TABLE_RETURNING_TOOLS
+    names = {t["function"]["name"] for t in out}
+    assert names == {"explorer_search", "members_search"}
+    assert names.issubset(TABLE_RETURNING_TOOLS)

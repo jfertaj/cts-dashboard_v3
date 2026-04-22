@@ -7,6 +7,7 @@ and no external dependencies beyond the standard library.
 from __future__ import annotations
 
 import unicodedata
+from typing import Iterable
 
 
 TABLE_RETURNING_TOOLS: frozenset[str] = frozenset({
@@ -68,3 +69,16 @@ def has_tabular_intent(user_msg: str) -> bool:
     if any(b in norm for b in _BLACKLIST):
         return False
     return any(p in norm for p in _POSITIVES)
+
+
+def filter_tools_spec(
+    tools_spec: list[dict],
+    whitelist: Iterable[str] = TABLE_RETURNING_TOOLS,
+) -> list[dict]:
+    """Return a sub-list of tools_spec whose tool name is in the whitelist.
+
+    Entries are returned by reference (not copied). Unknown names in the
+    whitelist are silently ignored. Order follows tools_spec.
+    """
+    wl = frozenset(whitelist)
+    return [t for t in tools_spec if t.get("function", {}).get("name") in wl]
