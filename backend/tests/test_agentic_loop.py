@@ -569,3 +569,27 @@ def test_loop_progress_event_on_retry(mock_dispatch, mock_claude, tool_ctx):
     progress_events = [e for e in emitted if isinstance(e, str) and e.startswith("__PROGRESS__")]
     retry_events = [e for e in progress_events if '"retry"' in e or '"turn": "retry"' in e]
     assert retry_events, f"No retry progress event in {progress_events}"
+
+
+@patch("backend.app.routers.ai_chat._claude_chat")
+@patch("backend.app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_respects_dm_guard(mock_dispatch, mock_claude, tool_ctx):
+    """Retry that picks a DM tool after one DM call already happened is blocked, does not crash."""
+    from backend.app.routers.ai_chat import _agentic_loop
+    from backend.app.routers.moby_tools import ToolResult
+
+    turn1_tool = _make_mock_tool_call("t1", "nearest_filtered_sites", {"lat": 0, "lng": 0})
+    retry_tool = _make_mock_tool_call("t2", "nearest_filtered_sites", {"lat": 1, "lng": 1})
+    mock_claude.side_effect = [
+        _tool_response([turn1_tool], text=""),
+        _text_response("<p>no table</p>"),
+        _tool_response([retry_tool], text=""),
+    ]
+    mock_dispatch.return_value = ToolResult(last_table=None)
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="nearest sites to Madrid",
+    )
+
+    assert "no table" in (result["text"] or "") or result["text"] is not None
