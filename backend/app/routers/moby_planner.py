@@ -64,11 +64,28 @@ _STAGE_FIELDS = {
     "1": "sf.C_Number_of_Stage1_Individuals_followed__c",
     "2": "sf.C_Number_of_Stage2_Individuals_followed__c",
 }
-_ND_FIELD       = "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
-_PHARMACY_FIELD = "qual.3_6__is_your_pharmacy_on_site_or_off_campus"
+_ND_FIELD_O18    = "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
+_ND_FIELD_U18    = "sf.C_Number_of_new_T1D_diagnosed_U_18__c"
+_ND_FIELD        = _ND_FIELD_O18  # default when no age qualifier — kept for back-compat
+_PHARMACY_FIELD  = "qual.3_6__is_your_pharmacy_on_site_or_off_campus"
 _OVERNIGHT_FIELD = "qual.3_5_2__overnight_stay"
 
 _OP_MAP = {">=": ">=", "<=": "<=", ">": ">", "<": "<", "=": "equals", "==": "equals"}
+
+# Age qualifiers — match these BEFORE looking for count thresholds so that
+# "newly diagnosed <18" is treated as an age (under-18 group) not as a
+# numeric comparator on the ≥18 field. See test_nd_under_18_no_spurious_count_filter.
+_AGE_UNDER_18 = re.compile(
+    r"(?:<\s*=?\s*18|≤\s*18|under\s*18|\bu\s*18\b|"
+    r"\bpediatric\b|\bpaediatric\b|\bchild(?:ren)?\b|\bkid[s]?\b|"
+    r"\bni[ñn]os?\b|menores?\s+de\s+18)",
+    re.I,
+)
+_AGE_OVER_18 = re.compile(
+    r"(?:>\s*=?\s*18|≥\s*18|over\s*18|\bo\s*18\b|"
+    r"\badults?\b|\badultos?\b|mayores?\s+de\s+18)",
+    re.I,
+)
 
 
 def _extract_filters(text: str) -> tuple[List[FilterSpec], List[str]]:
@@ -95,21 +112,58 @@ def _extract_filters(text: str) -> tuple[List[FilterSpec], List[str]]:
                 "raw_term": m.group(0).strip(),
             })
 
-    # ND / newly diagnosed (optional comparator + value)
+    # ND / newly diagnosed — needs care because the ND field has two age
+    # variants (≥18 / <18) and the user may write "<18" or "≥18" as an age
+    # qualifier rather than a numeric count comparator.
     m_nd = re.search(r"\b(?:nd\b|newly[\s\-]?diagnosed|new\s+t1d\s+diagnos)", s, re.I)
     if m_nd:
-        m_val = re.search(r"(?:nd|newly[\s\-]?diagnosed)\s*(>=|<=|>|<)\s*(\d+)", s, re.I)
+        is_under_18 = bool(_AGE_UNDER_18.search(s))
+        is_over_18  = bool(_AGE_OVER_18.search(s))
+        nd_field = _ND_FIELD_U18 if is_under_18 else _ND_FIELD_O18
+
+        # Strip the age phrase before looking for a count threshold, so the
+        # literal "<18" doesn't get re-read as "ND < 18" (count operator).
+        s_no_age = _AGE_UNDER_18.sub(" ", s)
+        s_no_age = _AGE_OVER_18.sub(" ", s_no_age)
+
+        m_val = re.search(
+            r"(?:nd|newly[\s\-]?diagnosed)[\s\w]{0,40}?"
+            r"(?:(>=|<=|>|<)|\bmore\s+than\b|\bover\b|\bgreater\s+than\b"
+            r"|\bat\s+least\s+\b|\bless\s+than\b)\s*(\d+)",
+            s_no_age, re.I,
+        )
         if m_val:
-            op  = _OP_MAP.get(m_val.group(1), m_val.group(1))
+            sym = m_val.group(1)
+            if sym:
+                op = _OP_MAP.get(sym, sym)
+            else:
+                kw = m_val.group(0).lower()
+                if "less than" in kw:
+                    op = "<"
+                elif "at least" in kw:
+                    op = ">="
+                else:
+                    op = ">"  # more than / over / greater than
             val = int(m_val.group(2))
+            filters.append({
+                "field":    nd_field,
+                "operator": op,
+                "value":    val,
+                "raw_term": m_val.group(0).strip(),
+            })
+        elif is_under_18 or is_over_18:
+            # Age qualifier alone (no count threshold) — don't constrain the
+            # row set; the table will surface the age-specific column and
+            # any aggregation (total/sum) runs over the full country scope.
+            pass
         else:
-            op, val = ">", 0
-        filters.append({
-            "field":    _ND_FIELD,
-            "operator": op,
-            "value":    val,
-            "raw_term": m_nd.group(0).strip(),
-        })
+            # Bare "newly diagnosed" — back-compat default: ≥18 > 0.
+            filters.append({
+                "field":    nd_field,
+                "operator": ">",
+                "value":    0,
+                "raw_term": m_nd.group(0).strip(),
+            })
 
     # Pharmacy: in the clinical-trial-site domain "pharmacy" without a
     # qualifier is virtually always asking for on-site pharmacy capability
@@ -641,6 +695,24 @@ def parse_query_plan(
         filters = filters + _cat_filters
 
         col_resolved, col_unresolved = _extract_requested_columns(text, kindex)
+
+        # When the user mentions "newly diagnosed" with an age qualifier but
+        # no count threshold (so _extract_filters added no ND filter), surface
+        # the age-specific ND column as a requested column. This lets the
+        # short-circuit include the right field and aggregation helpers can
+        # find it. See test_nd_under_18_no_spurious_count_filter.
+        _has_nd_filter = any("new_T1D" in f["field"] for f in filters)
+        if not _has_nd_filter and re.search(
+            r"\b(?:nd\b|newly[\s\-]?diagnosed|new\s+t1d\s+diagnos)", text, re.I,
+        ):
+            if _AGE_UNDER_18.search(text):
+                _nd_col = _ND_FIELD_U18
+            elif _AGE_OVER_18.search(text):
+                _nd_col = _ND_FIELD_O18
+            else:
+                _nd_col = None
+            if _nd_col and _nd_col not in col_resolved:
+                col_resolved.append(_nd_col)
 
         # Detect snake_case tokens in the query (look like field names) that
         # couldn't be resolved by any extractor. Conservative: only flag tokens

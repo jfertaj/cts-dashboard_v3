@@ -122,6 +122,59 @@ class TestFilterExtraction:
         assert nd["operator"] == ">"
         assert nd["value"] == 10
 
+    def test_nd_under_18_no_spurious_count_filter(self):
+        # Regression: "newly diagnosed <18" was being parsed as "ND≥18 < 18"
+        # (count comparator on the wrong field), producing 35 IT sites instead
+        # of all 70.
+        filters, _ = _extract_filters(
+            "total number of newly diagnosed <18 in italian clinical sites"
+        )
+        for f in filters:
+            if "new_T1D" not in f["field"]:
+                continue
+            spurious = (
+                f["field"] == "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
+                and f["operator"] == "<"
+                and f["value"] == 18
+            )
+            assert not spurious, f"spurious O_18 < 18 filter: {f}"
+
+    def test_nd_under_18_age_no_threshold_skips_filter(self):
+        # When the user mentions only the age qualifier (no count threshold)
+        # we keep the country scope wide and let aggregation happen on the
+        # full result set — no ND filter at all.
+        filters, _ = _extract_filters("total newly diagnosed <18")
+        nd_filters = [f for f in filters if "new_T1D" in f["field"]]
+        assert nd_filters == []
+
+    def test_nd_under_18_with_threshold_uses_u18_field(self):
+        filters, _ = _extract_filters(
+            "newly diagnosed <18 with more than 100"
+        )
+        nd = next((f for f in filters if "new_T1D" in f["field"]), None)
+        assert nd is not None
+        assert nd["field"] == "sf.C_Number_of_new_T1D_diagnosed_U_18__c"
+        assert nd["operator"] == ">"
+        assert nd["value"] == 100
+
+    def test_nd_over_18_uses_o18_field(self):
+        filters, _ = _extract_filters(
+            "newly diagnosed >=18 with more than 50"
+        )
+        nd = next((f for f in filters if "new_T1D" in f["field"]), None)
+        assert nd is not None
+        assert nd["field"] == "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
+        assert nd["operator"] == ">"
+        assert nd["value"] == 50
+
+    def test_nd_under_18_words_picks_u18(self):
+        # "under 18" / "pediatric" should also map to U_18 field.
+        filters, _ = _extract_filters("newly diagnosed under 18 > 30")
+        nd = next((f for f in filters if "new_T1D" in f["field"]), None)
+        assert nd is not None
+        assert nd["field"] == "sf.C_Number_of_new_T1D_diagnosed_U_18__c"
+        assert nd["value"] == 30
+
     def test_pharmacy_on_site_resolved(self):
         filters, unresolved = _extract_filters("sites with pharmacy on-site")
         ph = next((f for f in filters if "pharmacy" in f["field"]), None)
@@ -180,6 +233,30 @@ class TestTableWithColumns:
         assert any("Stage2" in f["field"] for f in p["filters"])
         # Countries + filters + no unresolved → should hit high confidence
         assert p["confidence"] >= 0.70
+
+    def test_nd_under_18_with_country_short_circuits(self):
+        # Regression: "total newly diagnosed <18 in italian sites" should
+        # short-circuit so the planner can return the table + aggregation
+        # without paying for an LLM call. The age qualifier surfaces the
+        # U_18 column to lift confidence to the short-circuit threshold.
+        p = plan(
+            "Can you tell me the total number of newly diagnosed <18 "
+            "in all italian clinical sites"
+        )
+        assert "IT" in p["countries"]
+        assert "sf.C_Number_of_new_T1D_diagnosed_U_18__c" in p["requested_columns"]
+        # No spurious ND filter
+        for f in p["filters"]:
+            if "new_T1D" in f["field"]:
+                assert not (
+                    f["field"] == "sf.C_Number_of_new_T1D_diagnosed_O_18__c"
+                    and f["operator"] == "<"
+                    and f["value"] == 18
+                ), "spurious ND≥18 < 18 filter still present"
+        assert can_short_circuit(p), (
+            f"expected short-circuit, got confidence={p['confidence']}, "
+            f"intent={p['intent']}, output_mode={p['output_mode']}"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
