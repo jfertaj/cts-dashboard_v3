@@ -1,7 +1,8 @@
 # INCIDENT: Google Maps Distance Matrix cost spike (~$930 in March 2026)
 
-**Status: P0 code fixes applied 2026-04-21, awaiting prod deploy + Google Cloud quota config. Once both are done the incident can be closed.**
+**Status: CLOSED — 2026-04-28.** All P0 items resolved: code fixes deployed to prod (task definitions cts-dashboard-backend:115 / cts-dashboard-frontend:58 at tag `20260428-190319`); Google Cloud daily quota set to 5,000 elements/day on `distance-matrix-backend.googleapis.com` for project `earlyt1dnavigator` (271047955390). P1 / P2 follow-ups remain open and tracked below — they are recommended hardening, not blockers.
 **Date discovered: 2026-03-25**
+**Date closed: 2026-04-28**
 **Severity: HIGH (financial + security)**
 
 ---
@@ -76,7 +77,7 @@ This means some legitimate wide searches will now fail with 422. That is intenti
 
 - [x] **Cap Moby's Distance Matrix usage** (2026-04-21) — `_drive_matrix_sync` in `ai_chat.py` now imports `MAX_DISTANCE_MATRIX_ELEMENTS` from `salesforce_explorer.py` and returns `[None] * len(dests)` with a warning log when the destination count exceeds the cap. Same guard rail as the Explorer endpoints.
 
-- [ ] **Set Google Cloud quota** — in Google Cloud Console → APIs & Services → Distance Matrix API → Quotas, set a daily element limit (suggested: 5,000) as a billing safety net independent of code.
+- [x] **Set Google Cloud quota** (2026-04-28) — daily quota override of `5,000 elements/project/day` applied via `gcloud alpha services quota update --service=distance-matrix-backend.googleapis.com --consumer=projects/earlyt1dnavigator --metric=distance-matrix-backend.googleapis.com/billable_default --unit='1/d/{project}' --value=5000 --force`. Verified `effectiveLimit: '5000'` on the `1/d/{project}` bucket. Defaults remain on the per-minute buckets (60k/min/project, unlimited per user). This is a billing safety net independent of code; if the cap is hit, the API will reject further calls for the day with HTTP 429, surfacing the issue immediately rather than burning money silently.
 
 ### P1 — Should fix soon
 

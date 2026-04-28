@@ -4,19 +4,19 @@ These items are directly supported by observations in the code. Each entry state
 
 ---
 
-## 0. ACTIVE INCIDENT — Google Maps Distance Matrix cost spike (P0)
+## 0. ~~ACTIVE INCIDENT — Google Maps Distance Matrix cost spike (P0)~~ — CLOSED (2026-04-28)
 
-**All other development is paused until the P0 items below are resolved.**
+**All P0 items resolved and shipped to prod.** Development unblocked. Full timeline and evidence: **`docs/incident-distance-matrix-cost.md`**.
 
-Full details, evidence, and checklist: **`docs/incident-distance-matrix-cost.md`**
+Summary: `within-drive-km` and `nearby-multi` had generated ~186,000 billable Distance Matrix elements in March 2026 (~$730 unexpected cost). All five P0 fixes are now live:
 
-Summary: the `within-drive-km` and `nearby-multi` endpoints generated ~186,000 billable Distance Matrix elements in March 2026 (~$730 unexpected cost). A hard guard rail (`MAX_DISTANCE_MATRIX_ELEMENTS = 2000`) was added on 2026-03-25 as stop-gap. Remaining P0 work:
+- [x] ~~Shared Distance Matrix cache~~ — DONE (2026-04-21, deployed 2026-04-28). PostgreSQL `dm_cache` table backs `_cache_get` / `_cache_set`; survives container restarts; per-worker dict kept as fallback when DB is unreachable.
+- [x] ~~Increase cache TTL from 1h to 24–48h~~ — DONE (2026-04-21, deployed 2026-04-28). Default TTL raised to 86400s in both Explorer and Moby paths.
+- [x] ~~Haversine pre-filter + top-N cap on both endpoints~~ — DONE (2026-03-25). `DM_CANDIDATES_PER_BASE=20` straight-line cap before any Distance Matrix call.
+- [x] ~~Cap Moby's Distance Matrix usage in `ai_chat.py`~~ — DONE (2026-04-21, deployed 2026-04-28). `_drive_matrix_sync` honours `MAX_DISTANCE_MATRIX_ELEMENTS=2000` and short-circuits with `[None]*len(dests)` + warning log when exceeded.
+- [x] ~~Set Google Cloud daily quota~~ — DONE (2026-04-28). `1/d/{project}` quota override = 5,000 elements on `distance-matrix-backend.googleapis.com` for project `earlyt1dnavigator`. Hard ceiling independent of code.
 
-- [ ] Shared Distance Matrix cache (replace per-worker `_dm_cache` with file/SQLite/Redis)
-- [ ] Increase cache TTL from 1h to 24–48h
-- [x] ~~Add haversine pre-filter to `within-drive-km`~~ — DONE (2026-03-25). Both endpoints now have haversine sort + top-N cap (`DM_CANDIDATES_PER_BASE=20`)
-- [ ] Cap Moby's Distance Matrix usage in `ai_chat.py`
-- [ ] Set Google Cloud daily quota on Distance Matrix API
+P1 (separate keys, key restriction, key rotation, billing alerts) and P2 (observability, persistent cache, server-side `max_km` cap) follow-ups are tracked in the incident doc — recommended hardening, not blockers.
 
 ---
 
