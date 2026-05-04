@@ -477,10 +477,45 @@ def _build_knowledge_index(db: Session) -> Dict[str, Any]:
     _dbg("INDEX built: %d aliases (sf=%d, sq=%d, prof=%d, qual_alias=%d)", len(fused), len(sf_map), len(sq_map), len(prof_map), len(qual_aliases))
     return _INDEX_CACHE
 
+def _semantic_top_matches(q: str, aliases: List[str], k: int) -> Optional[List[str]]:
+    """
+    Optional semantic resolver path — gated by MOBY_SEMANTIC_FIELD_RESOLVER=1.
+
+    Returns None when disabled or when the resolver fails for any reason
+    (missing index, Bedrock unavailable, exception). Caller falls back to the
+    legacy lexical matcher.
+    """
+    if os.getenv("MOBY_SEMANTIC_FIELD_RESOLVER", "0") != "1":
+        return None
+    try:
+        from app.moby_semantic_resolver import SemanticFieldResolver
+        results = SemanticFieldResolver().resolve(q, top_n=k)
+    except Exception as exc:  # incl. BedrockUnavailable, IndexUnavailable
+        _dbg("semantic resolver fallback: %s", exc)
+        return None
+    if not results:
+        return None
+    alias_set = set(aliases)
+    out: List[str] = []
+    for r in results:
+        # Match against the alias list the legacy code passes in. Prefer the
+        # normalized label, fall back to the key.
+        for cand in (_normalize(r.get("label") or ""), _normalize(r.get("key") or "")):
+            if cand and cand in alias_set and cand not in out:
+                out.append(cand)
+                break
+        if len(out) >= k:
+            break
+    return out or None
+
+
 def _top_matches(q: str, aliases: List[str], k: int = 5) -> List[str]:
     """
     Matching ligero: intersección de tokens normalizados + prefiero substrings.
     """
+    sem = _semantic_top_matches(q, aliases, k)
+    if sem:
+        return sem
     qn = _normalize(q)
     qtokens = set(qn.split())
     scored = []
