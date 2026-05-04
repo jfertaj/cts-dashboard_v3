@@ -133,6 +133,24 @@ def test_resolver_raises_when_bedrock_fails(fake_index):
             mod.SemanticFieldResolver().resolve("anything")
 
 
+def test_resolve_caches_query_embedding(fake_index):
+    """Two consecutive resolve() calls with the same query must hit the
+    embedding cache: _embed_query is invoked once, last_cache_status flips
+    miss → hit. Rerank is still called every time (not cached)."""
+    mod = fake_index
+    rerank_payload = [{"index": 0, "relevance_score": 0.8}]
+    embed_mock = mock.MagicMock(side_effect=_fake_embed)
+    with mock.patch.object(mod, "_embed_query", embed_mock), \
+         mock.patch.object(mod, "_rerank", return_value=rerank_payload):
+        r1 = mod.SemanticFieldResolver()
+        r1.resolve("stage 1 followups", top_n=1)
+        assert r1.last_cache_status == "miss"
+        r2 = mod.SemanticFieldResolver()
+        r2.resolve("stage 1 followups", top_n=1)
+        assert r2.last_cache_status == "hit"
+    assert embed_mock.call_count == 1
+
+
 def test_top_matches_flag_off_uses_lexical(monkeypatch):
     """Flag off: pure lexical matcher (semantic branch deprecated in Option A)."""
     monkeypatch.delenv("MOBY_SEMANTIC_FIELD_RESOLVER", raising=False)

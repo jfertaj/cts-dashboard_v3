@@ -16,12 +16,15 @@ Design notes
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import threading
+import time
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -162,11 +165,46 @@ def _dedupe_by_key(ranked: List[Dict[str, Any]], top_n: int) -> List[Dict[str, A
 
 # --- Public API -------------------------------------------------------------
 
+# Embedding cache: query_hash -> (timestamp, embedding). LRU eviction at max
+# size; entries past TTL are treated as misses. Rerank is NOT cached because
+# it depends on the (query, candidate-shortlist) pair and is far less stable.
+_EMBED_CACHE_MAX = 256
+_EMBED_CACHE_TTL_SEC = 3600.0
+_EMBED_CACHE_LOCK = threading.Lock()
+_EMBED_CACHE: "OrderedDict[str, Tuple[float, np.ndarray]]" = OrderedDict()
+
+
+def _query_hash(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+
+
+def _cache_get(qhash: str) -> Optional[np.ndarray]:
+    with _EMBED_CACHE_LOCK:
+        entry = _EMBED_CACHE.get(qhash)
+        if entry is None:
+            return None
+        ts, vec = entry
+        if (time.time() - ts) > _EMBED_CACHE_TTL_SEC:
+            _EMBED_CACHE.pop(qhash, None)
+            return None
+        _EMBED_CACHE.move_to_end(qhash)
+        return vec
+
+
+def _cache_put(qhash: str, vec: np.ndarray) -> None:
+    with _EMBED_CACHE_LOCK:
+        _EMBED_CACHE[qhash] = (time.time(), vec)
+        _EMBED_CACHE.move_to_end(qhash)
+        while len(_EMBED_CACHE) > _EMBED_CACHE_MAX:
+            _EMBED_CACHE.popitem(last=False)
+
+
 class SemanticFieldResolver:
     """Resolve a free-text field reference to ranked SF/qual field keys."""
 
     def __init__(self) -> None:
         self._index = _load_index()
+        self.last_cache_status: str = "miss"  # "hit" | "miss" — read by caller for logs
 
     def _shortlist(self, qvec: np.ndarray, candidates: int) -> List[int]:
         sims = self._index["embeddings"] @ qvec  # already row-normalized
@@ -185,7 +223,15 @@ class SemanticFieldResolver:
     ) -> List[Dict[str, Any]]:
         if not query or not query.strip():
             return []
-        qvec = _embed_query(query)
+        qhash = _query_hash(query)
+        cached = _cache_get(qhash)
+        if cached is not None:
+            qvec = cached
+            self.last_cache_status = "hit"
+        else:
+            qvec = _embed_query(query)
+            _cache_put(qhash, qvec)
+            self.last_cache_status = "miss"
         shortlist_idx = self._shortlist(qvec, candidates)
         labels = self._index["labels"]
         keys = self._index["keys"]
@@ -217,3 +263,5 @@ def reset_caches_for_tests() -> None:
     _INDEX = None
     _EMBED_CLIENT = None
     _RERANK_CLIENT = None
+    with _EMBED_CACHE_LOCK:
+        _EMBED_CACHE.clear()

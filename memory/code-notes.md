@@ -1,3 +1,15 @@
+### [2026-05-04] [coder] — Tightening Opción A: top_n=4 + score gate + embed cache
+
+A/B test contra prod (6 queries reales) reveló: 1/6 win, regresiones por hint ruidoso en queries triviales (Q1 EN: top-K con `_how_many_beds`), supresión de un clarify legítimo (Q2), y +37% latencia. Tres ajustes:
+
+1. **`_semantic_field_hints`**: `top_n=8 → 4`, filtro post-rerank `score≥0.5`. Si tras el filtro `hits` queda vacío → `return ""` (no se inyecta bloque). Log enriquecido: `[moby-semantic] q=… top=[…] filtered_to=M/N cache=hit|miss latency=Xms`.
+2. **Cache de embeddings** (`moby_semantic_resolver.py`): `OrderedDict` LRU module-level, key = `sha256(query)[:16]`, TTL 1h, máx 256 entradas. Solo cachea el vector de query (rerank no — depende del par query+candidatos). `SemanticFieldResolver.last_cache_status` expone `"hit"|"miss"` para que el caller logue. Smoke local: cold 2609ms → cached 175ms (sólo rerank).
+3. **Ajuste 2 (skip si planner determinista captura)**: ya implícito — `_semantic_field_hints` se llama en L9401 de `chat_api`, downstream del `if planned: return planned` en L8361. El path Claude es el único que construye el hint. Sin cambio estructural.
+
+Tests: 1 nuevo (`test_resolve_caches_query_embedding`) — 13/13 verde. Plan de bulk eval (≥30 queries multi-idioma) en `docs/moby-semantic-eval-plan.md` para evaluar antes de flip a default ON. NO push, NO deploy.
+
+---
+
 ### [2026-05-04] [coder] — Opción A: semantic field hints inyectados en system prompt (Moby)
 
 El POC original enganchaba `_semantic_top_matches` a `_top_matches` en `ai_chat.py`, pero `_top_matches` **no está en la ruta del agentic loop con tool_use** (Claude resuelve campos directamente desde el SYSTEM_PROMPT y TOOLS_SPEC). Cero valor end-to-end. Migrado a **Opción A**: helpers `_semantic_field_hints(user_msg)` + `_format_hints_block(hits)` (≤30 líneas cada uno) que llaman al resolver con `top_n=8`, formatean un bloque markdown ("## Relevant fields (semantic hint, top-K=8)") y se appendean a `msgs[]` justo después del KNOWLEDGE INDEX en `chat_api`. Loggea siempre `[moby-semantic] q=… top=[…] latency=…ms`. Cualquier excepción → `""` (no regresión). La rama `_semantic_top_matches` dentro de `_top_matches` queda **comentada** (no borrada) para evitar la falsa señal anterior. Tests: `backend/tests/test_semantic_hints.py` (7 nuevos) + actualizaciones en `test_semantic_resolver.py` (12/12 verde). Smoke local con flag on confirma logs por consulta y campos top-K relevantes para ES/IT/FR/EN; latencia resolver ~300ms post-warmup.

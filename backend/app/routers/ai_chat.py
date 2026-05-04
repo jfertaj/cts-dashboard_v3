@@ -538,10 +538,19 @@ def _semantic_field_hints(user_msg: str) -> str:
     t0 = _monotonic()
     try:
         from app.moby_semantic_resolver import SemanticFieldResolver
-        hits = SemanticFieldResolver().resolve(user_msg, top_n=8)
+        resolver = SemanticFieldResolver()
+        raw_hits = resolver.resolve(user_msg, top_n=4)
+        # Score gate: drop noise (≥0.5 only). A/B test showed top-K below this
+        # threshold introduced regressions on trivial English queries.
+        hits = [h for h in raw_hits if h.get("score", 0.0) >= 0.5]
         ms = (_monotonic() - t0) * 1000.0
         keys_preview = [h.get("key") for h in hits]
-        print(f"[moby-semantic] q={user_msg[:80]!r} top={keys_preview} latency={ms:.0f}ms", flush=True)
+        cache = getattr(resolver, "last_cache_status", "?")
+        print(
+            f"[moby-semantic] q={user_msg[:80]!r} top={keys_preview} "
+            f"filtered_to={len(hits)}/{len(raw_hits)} cache={cache} latency={ms:.0f}ms",
+            flush=True,
+        )
         if not hits:
             return ""
         return _format_hints_block(hits)
