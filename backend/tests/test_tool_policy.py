@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 def test_table_returning_tools_constant_has_four_entries():
-    from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
     assert TABLE_RETURNING_TOOLS == frozenset({
         "explorer_search",
         "nearest_filtered_sites",
@@ -13,13 +13,13 @@ def test_table_returning_tools_constant_has_four_entries():
 
 
 def test_table_returning_tools_is_frozenset():
-    from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
     assert isinstance(TABLE_RETURNING_TOOLS, frozenset)
 
 
 def test_has_tabular_intent_real_regression_queries_en():
     """The 3 flaky regressions + 3 pattern-1 regressions must all be detected."""
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     queries = [
         "Which sites in France have HLA typing capability available?",          # SC06
         "Show me all sites where profiling form has been uploaded to the database",  # SS01
@@ -33,7 +33,7 @@ def test_has_tabular_intent_real_regression_queries_en():
 
 
 def test_has_tabular_intent_synthetic_imperatives_en():
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     for q in [
         "give me all members",
         "display sites in Spain",
@@ -52,7 +52,7 @@ def test_has_tabular_intent_synthetic_imperatives_en():
 
 
 def test_has_tabular_intent_positives_es():
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     for q in [
         "lista los sitios CTS",
         "muestra los miembros en España",
@@ -69,7 +69,7 @@ def test_has_tabular_intent_positives_es():
 
 
 def test_has_tabular_intent_accents_normalized():
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     assert has_tabular_intent("cuántos sitios")
     assert has_tabular_intent("cuantos sitios")
     assert has_tabular_intent("CUÁNTOS SITIOS")
@@ -78,7 +78,7 @@ def test_has_tabular_intent_accents_normalized():
 
 def test_has_tabular_intent_blacklist_wins():
     """Conversational phrasings beat positive keywords."""
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     for q in [
         "Explain what HLA typing means",
         "What is the meaning of profiling?",
@@ -99,7 +99,7 @@ def test_has_tabular_intent_blacklist_wins():
 
 
 def test_has_tabular_intent_conversational_short():
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     for q in ["hi", "thanks", "ok", "what?", "hola", "", "   "]:
         assert not has_tabular_intent(q)
 
@@ -110,7 +110,7 @@ def test_has_tabular_intent_cl05_not_covered():
     Per spec: CL05 is a semantic-note regression (CTS flag is null for
     Bucharest), not a real bug. The force-tool guard does not cover it.
     """
-    from backend.app.routers.moby_tool_policy import has_tabular_intent
+    from app.routers.moby_tool_policy import has_tabular_intent
     assert not has_tabular_intent("Are there any CTS sites in Romania or Bulgaria?")
     assert not has_tabular_intent("Is there a CTS site in Poland?")
 
@@ -120,34 +120,34 @@ def _fake_spec(name: str) -> dict:
 
 
 def test_filter_tools_spec_whitelist_basic():
-    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    from app.routers.moby_tool_policy import filter_tools_spec
     spec = [_fake_spec("a"), _fake_spec("b"), _fake_spec("c")]
     out = filter_tools_spec(spec, {"a", "c"})
     assert [t["function"]["name"] for t in out] == ["a", "c"]
 
 
 def test_filter_tools_spec_preserves_entry_identity():
-    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    from app.routers.moby_tool_policy import filter_tools_spec
     spec = [_fake_spec("a"), _fake_spec("b")]
     out = filter_tools_spec(spec, {"a"})
     assert out[0] is spec[0]  # reference-preserving, not a copy
 
 
 def test_filter_tools_spec_empty_whitelist():
-    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    from app.routers.moby_tool_policy import filter_tools_spec
     spec = [_fake_spec("a")]
     assert filter_tools_spec(spec, set()) == []
 
 
 def test_filter_tools_spec_nonexistent_tool_in_whitelist():
-    from backend.app.routers.moby_tool_policy import filter_tools_spec
+    from app.routers.moby_tool_policy import filter_tools_spec
     spec = [_fake_spec("a")]
     out = filter_tools_spec(spec, {"a", "does_not_exist"})
     assert [t["function"]["name"] for t in out] == ["a"]
 
 
 def test_filter_tools_spec_default_uses_table_returning():
-    from backend.app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
+    from app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
     spec = [_fake_spec("explorer_search"), _fake_spec("soql_query"), _fake_spec("members_search")]
     out = filter_tools_spec(spec)  # no whitelist arg → defaults to TABLE_RETURNING_TOOLS
     names = {t["function"]["name"] for t in out}
@@ -157,8 +157,8 @@ def test_filter_tools_spec_default_uses_table_returning():
 
 def test_table_returning_tools_exist_in_real_tools_spec():
     """All 4 entries in TABLE_RETURNING_TOOLS must correspond to real tools in TOOLS_SPEC."""
-    from backend.app.routers.ai_chat import TOOLS_SPEC
-    from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    from app.routers.ai_chat import TOOLS_SPEC
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
 
     real_names = {t.get("function", {}).get("name") for t in TOOLS_SPEC}
     missing = TABLE_RETURNING_TOOLS - real_names
@@ -166,8 +166,8 @@ def test_table_returning_tools_exist_in_real_tools_spec():
 
 
 def test_filter_tools_spec_against_real_tools_spec():
-    from backend.app.routers.ai_chat import TOOLS_SPEC
-    from backend.app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
+    from app.routers.ai_chat import TOOLS_SPEC
+    from app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
 
     out = filter_tools_spec(TOOLS_SPEC)
     assert len(out) == 4

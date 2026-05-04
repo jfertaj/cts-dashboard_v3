@@ -17,7 +17,7 @@ import sys
 import traceback
 
 # Ensure "backend" package is importable whether run from repo root (tests)
-# or from backend/ dir (uvicorn).  Without this, `from backend.app.routers...`
+# or from backend/ dir (uvicorn).  Without this, `from app.routers...`
 # fails when uvicorn starts from backend/.
 _backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _repo_root = os.path.dirname(_backend_dir)
@@ -85,7 +85,7 @@ def register_tool(name: str):
 
 def _ai():
     """Lazy import of ai_chat module."""
-    from backend.app.routers import ai_chat
+    from app.routers import ai_chat
     return ai_chat
 
 
@@ -95,7 +95,7 @@ def _ai():
 
 @register_tool("sql_query")
 def handle_sql_query(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_sql_query, _dbg, _INDEX_CACHE,
     )
     result = ToolResult()
@@ -157,7 +157,7 @@ def handle_sql_query(ctx: ToolContext) -> ToolResult:
 
 @register_tool("salesforce_query")
 def handle_salesforce_query(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_salesforce_query, tool_explorer_search,
         _validate_soql, _normalize_table_for_ui, _pretty_label,
         _dbg, _INDEX_CACHE,
@@ -258,7 +258,7 @@ TOOL_DISPATCH["soql_query"] = TOOL_DISPATCH["salesforce_query"]
 
 @register_tool("salesforce_account_extras")
 def handle_salesforce_account_extras(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_salesforce_account_extras
+    from app.routers.ai_chat import tool_salesforce_account_extras
     result = ToolResult()
     if not ctx.sf:
         ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
@@ -275,7 +275,7 @@ def handle_salesforce_account_extras(ctx: ToolContext) -> ToolResult:
 
 @register_tool("explorer_set_filters")
 def handle_explorer_set_filters(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_explorer_set_filters
+    from app.routers.ai_chat import tool_explorer_set_filters
     result = ToolResult()
     out = tool_explorer_set_filters(ctx.request, ctx.args)
     ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
@@ -285,7 +285,7 @@ def handle_explorer_set_filters(ctx: ToolContext) -> ToolResult:
 
 @register_tool("salesforce_account_contacts")
 def handle_salesforce_account_contacts(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_salesforce_account_contacts, _is_valid_sf_id, _first_account_id_from_table,
     )
     result = ToolResult()
@@ -321,7 +321,7 @@ def handle_salesforce_account_contacts(ctx: ToolContext) -> ToolResult:
 
 @register_tool("salesforce_assignments")
 def handle_salesforce_assignments(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_salesforce_assignments
+    from app.routers.ai_chat import tool_salesforce_assignments
     result = ToolResult()
     if not ctx.sf:
         ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
@@ -341,7 +341,7 @@ def handle_salesforce_assignments(ctx: ToolContext) -> ToolResult:
 
 @register_tool("group_count")
 def handle_group_count(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_group_count, tool_group_count_agg, tool_group_count_sf
+    from app.routers.ai_chat import tool_group_count, tool_group_count_agg, tool_group_count_sf
     result = ToolResult()
     try:
         by = ctx.args.get("by") or ["country"]
@@ -382,7 +382,7 @@ TOOL_DISPATCH["group_count_sf"] = TOOL_DISPATCH["group_count"]
 
 @register_tool("list_activities")
 def handle_list_activities(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_list_all_activities
+    from app.routers.ai_chat import tool_list_all_activities
     result = ToolResult()
     try:
         if not ctx.sf:
@@ -403,7 +403,7 @@ def handle_list_activities(ctx: ToolContext) -> ToolResult:
 
 @register_tool("activities_with_countries")
 def handle_activities_with_countries(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_activities_with_countries
+    from app.routers.ai_chat import tool_activities_with_countries
     result = ToolResult()
     try:
         if not ctx.sf:
@@ -422,7 +422,7 @@ def handle_activities_with_countries(ctx: ToolContext) -> ToolResult:
 
 @register_tool("activity_counts_by_country")
 def handle_activity_counts_by_country(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_activity_counts_by_country
+    from app.routers.ai_chat import tool_activity_counts_by_country
     result = ToolResult()
     try:
         if not ctx.sf:
@@ -441,7 +441,7 @@ def handle_activity_counts_by_country(ctx: ToolContext) -> ToolResult:
 
 @register_tool("activity_country_matrix")
 def handle_activity_country_matrix(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_activity_country_matrix
+    from app.routers.ai_chat import tool_activity_country_matrix
     result = ToolResult()
     try:
         if not ctx.sf:
@@ -460,7 +460,7 @@ def handle_activity_country_matrix(ctx: ToolContext) -> ToolResult:
 
 @register_tool("activities_sites")
 def handle_activities_sites(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_sites_with_any_activity
+    from app.routers.ai_chat import tool_sites_with_any_activity
     result = ToolResult()
     try:
         out_table = tool_sites_with_any_activity(
@@ -478,7 +478,7 @@ def handle_activities_sites(ctx: ToolContext) -> ToolResult:
 
 @register_tool("activities_by_name")
 def handle_activities_by_name(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_sites_by_activity
+    from app.routers.ai_chat import tool_sites_by_activity
     result = ToolResult()
     try:
         out_table = tool_sites_by_activity(
@@ -498,7 +498,7 @@ def handle_activities_by_name(ctx: ToolContext) -> ToolResult:
 
 @register_tool("sf_aggregate")
 def handle_sf_aggregate(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_group_agg_sf, tool_time_series_sf
+    from app.routers.ai_chat import tool_group_agg_sf, tool_time_series_sf
     result = ToolResult()
     try:
         mode = ctx.args.get("mode") or "aggregate"
@@ -533,7 +533,7 @@ TOOL_DISPATCH["time_series_sf"] = TOOL_DISPATCH["sf_aggregate"]
 
 @register_tool("activities_with_assignments_counts")
 def handle_activities_with_assignments_counts(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_activities_with_assignments_counts
+    from app.routers.ai_chat import tool_activities_with_assignments_counts
     result = ToolResult()
     try:
         if not ctx.sf:
@@ -558,7 +558,7 @@ def handle_activities_with_assignments_counts(ctx: ToolContext) -> ToolResult:
 
 @register_tool("activity_assignments_detailed")
 def handle_activity_assignments_detailed(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_activity_assignments_detailed
+    from app.routers.ai_chat import tool_activity_assignments_detailed
     result = ToolResult()
     try:
         if not ctx.sf:
@@ -585,7 +585,7 @@ def handle_activity_assignments_detailed(ctx: ToolContext) -> ToolResult:
 
 @register_tool("sql_query_fill_sf")
 def handle_sql_query_fill_sf(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_sql_query_fill_sf
+    from app.routers.ai_chat import tool_sql_query_fill_sf
     result = ToolResult()
     try:
         out_table = tool_sql_query_fill_sf(
@@ -606,7 +606,7 @@ def handle_sql_query_fill_sf(ctx: ToolContext) -> ToolResult:
 
 @register_tool("contacts_by_group")
 def handle_contacts_by_group(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_contacts_by_group
+    from app.routers.ai_chat import tool_contacts_by_group
     result = ToolResult()
     try:
         out_table = tool_contacts_by_group(
@@ -627,7 +627,7 @@ def handle_contacts_by_group(ctx: ToolContext) -> ToolResult:
 
 @register_tool("study_coordinators_with_activities")
 def handle_study_coordinators_with_activities(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_study_coordinators_with_activities
+    from app.routers.ai_chat import tool_study_coordinators_with_activities
     result = ToolResult()
     try:
         out_table = tool_study_coordinators_with_activities(
@@ -649,7 +649,7 @@ def handle_study_coordinators_with_activities(ctx: ToolContext) -> ToolResult:
 
 @register_tool("qual_search")
 def handle_qual_search(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_qual_search
+    from app.routers.ai_chat import tool_qual_search
     result = ToolResult()
     try:
         out_table = tool_qual_search(
@@ -668,7 +668,7 @@ def handle_qual_search(ctx: ToolContext) -> ToolResult:
 
 @register_tool("manipulate_data")
 def handle_manipulate_data(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_manipulate_data, tool_render_chart, _dbg
+    from app.routers.ai_chat import tool_manipulate_data, tool_render_chart, _dbg
     result = ToolResult()
     # Carry forward current state — manipulate_data may update both
     result.last_table = ctx.last_table
@@ -705,7 +705,7 @@ def handle_manipulate_data(ctx: ToolContext) -> ToolResult:
 
 @register_tool("render_chart")
 def handle_render_chart(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_render_chart, _pretty_label, _dbg
+    from app.routers.ai_chat import tool_render_chart, _pretty_label, _dbg
     result = ToolResult()
     chart_data = ctx.args.get("data")
     if not chart_data or len(chart_data) == 0:
@@ -746,7 +746,7 @@ def handle_render_chart(ctx: ToolContext) -> ToolResult:
 
 @register_tool("explorer_search")
 def handle_explorer_search(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_explorer_search, _normalize_table_for_ui, _dbg,
     )
     result = ToolResult()
@@ -813,7 +813,7 @@ def handle_explorer_search(ctx: ToolContext) -> ToolResult:
 
 @register_tool("nearest_filtered_sites")
 def handle_nearest_filtered_sites(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_nearest_filtered_sites, _normalize_table_for_ui,
     )
     result = ToolResult()
@@ -838,7 +838,7 @@ def handle_nearest_filtered_sites(ctx: ToolContext) -> ToolResult:
 
 @register_tool("explorer_within_drive_km")
 def handle_explorer_within_drive_km(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_explorer_within_drive_km, _normalize_table_for_ui,
         _first_account_id_from_table,
     )
@@ -870,7 +870,7 @@ def handle_explorer_within_drive_km(ctx: ToolContext) -> ToolResult:
 
 @register_tool("rank_sites")
 def handle_rank_sites(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import tool_rank_sites, tool_rank_sites_by_group
+    from app.routers.ai_chat import tool_rank_sites, tool_rank_sites_by_group
     result = ToolResult()
     try:
         group_by = ctx.args.get("group_by")
@@ -906,7 +906,7 @@ TOOL_DISPATCH["rank_sites_by_group"] = TOOL_DISPATCH["rank_sites"]
 
 @register_tool("members_search")
 def handle_members_search(ctx: ToolContext) -> ToolResult:
-    from backend.app.routers.ai_chat import (
+    from app.routers.ai_chat import (
         tool_members_search, _normalize_table_for_ui,
     )
     result = ToolResult()

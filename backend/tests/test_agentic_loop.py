@@ -66,7 +66,7 @@ def _tool_response(tool_calls, text: str = ""):
 @pytest.fixture
 def tool_ctx():
     """Minimal ToolContext for testing."""
-    from backend.app.routers.moby_tools import ToolContext, ToolResult
+    from app.routers.moby_tools import ToolContext, ToolResult
     return ToolContext(
         db=MagicMock(),
         request=MagicMock(),
@@ -86,27 +86,27 @@ def tool_ctx():
 
 def test_max_agent_turns_default():
     """MOBY_MAX_AGENT_TURNS defaults to 3."""
-    from backend.app.routers.ai_chat import MOBY_MAX_AGENT_TURNS
+    from app.routers.ai_chat import MOBY_MAX_AGENT_TURNS
     assert MOBY_MAX_AGENT_TURNS == 3
 
 
 def test_max_tool_result_tokens_default():
     """MAX_TOOL_RESULT_TOKENS defaults to 4000."""
-    from backend.app.routers.ai_chat import MAX_TOOL_RESULT_TOKENS
+    from app.routers.ai_chat import MAX_TOOL_RESULT_TOKENS
     assert MAX_TOOL_RESULT_TOKENS == 4000
 
 
 def test_agent_timeout_default():
     """MOBY_AGENT_TIMEOUT_S defaults to 30."""
-    from backend.app.routers.ai_chat import MOBY_AGENT_TIMEOUT_S
+    from app.routers.ai_chat import MOBY_AGENT_TIMEOUT_S
     assert MOBY_AGENT_TIMEOUT_S == 30
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_exits_on_text_response(mock_dispatch, mock_claude, tool_ctx):
     """Claude returns text on turn 1 => loop exits with turns_used=1, no tool calls."""
-    from backend.app.routers.ai_chat import _agentic_loop
+    from app.routers.ai_chat import _agentic_loop
 
     mock_claude.return_value = _text_response("<p>Hello!</p>")
 
@@ -122,12 +122,12 @@ def test_loop_exits_on_text_response(mock_dispatch, mock_claude, tool_ctx):
     assert kwargs.get("force_no_tools") is False
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_calls_tool_and_continues_to_synthesis(mock_dispatch, mock_claude, tool_ctx):
     """Turn 1: tool call returns table but no companion text → turn 2: Claude synthesizes."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     tc1 = _make_mock_tool_call("tc_1", "salesforce_query", {"soql": "SELECT Id FROM Account"})
     mock_claude.side_effect = [
@@ -147,12 +147,12 @@ def test_loop_calls_tool_and_continues_to_synthesis(mock_dispatch, mock_claude, 
     assert "10 sites" in result["text"]
     mock_dispatch.assert_called_once()
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_fast_exits_with_companion_text(mock_dispatch, mock_claude, tool_ctx):
     """Turn 1: tool call + companion text (>40 chars) → fast exit."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     tc1 = _make_mock_tool_call("tc_1", "explorer_search", {"filters": {}})
     # Claude includes text alongside the tool call
@@ -171,12 +171,12 @@ def test_loop_fast_exits_with_companion_text(mock_dispatch, mock_claude, tool_ct
     assert mock_claude.call_count == 1
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_forces_text_on_final_turn(mock_dispatch, mock_claude, tool_ctx):
     """On turn 3 (final), _claude_chat is called with force_no_tools=True."""
-    from backend.app.routers.ai_chat import _agentic_loop, MOBY_MAX_AGENT_TURNS
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop, MOBY_MAX_AGENT_TURNS
+    from app.routers.moby_tools import ToolResult
 
     # Turn 1: tool call
     tc1 = _make_mock_tool_call("tc_1", "salesforce_query", {"soql": "SELECT Id FROM Account"})
@@ -208,12 +208,12 @@ def test_loop_forces_text_on_final_turn(mock_dispatch, mock_claude, tool_ctx):
     assert kwargs2["force_no_tools"] is False
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_no_duplicate_tool_calls(mock_dispatch, mock_claude, tool_ctx):
     """Same tool+args called twice in same turn => second is skipped with error."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     same_args = {"soql": "SELECT Id FROM Account"}
     tc1 = _make_mock_tool_call("tc_1", "salesforce_query", same_args)
@@ -238,12 +238,12 @@ def test_loop_no_duplicate_tool_calls(mock_dispatch, mock_claude, tool_ctx):
     assert dedup_msgs[0]["tool_call_id"] == "tc_2"
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_dedup_across_turns(mock_dispatch, mock_claude, tool_ctx):
     """Same tool+args across different turns => second is skipped."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     same_args = {"soql": "SELECT Id FROM Account"}
     tc1 = _make_mock_tool_call("tc_1", "salesforce_query", same_args)
@@ -262,12 +262,12 @@ def test_loop_dedup_across_turns(mock_dispatch, mock_claude, tool_ctx):
     assert mock_dispatch.call_count == 1
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_extended_thinking_only_turn_1(mock_dispatch, mock_claude, tool_ctx):
     """Extended thinking is only passed on turn 1."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     tc1 = _make_mock_tool_call("tc_1", "salesforce_query", {"soql": "SELECT Id FROM Account"})
     mock_claude.side_effect = [
@@ -288,13 +288,13 @@ def test_loop_extended_thinking_only_turn_1(mock_dispatch, mock_claude, tool_ctx
     assert kwargs2["use_thinking"] is False
 
 
-@patch("backend.app.routers.ai_chat._monotonic")
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._monotonic")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_timeout(mock_dispatch, mock_claude, mock_mono, tool_ctx):
     """Loop exits when timeout is exceeded."""
-    from backend.app.routers.ai_chat import _agentic_loop, MOBY_AGENT_TIMEOUT_S
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop, MOBY_AGENT_TIMEOUT_S
+    from app.routers.moby_tools import ToolResult
 
     # Simulate time progression: start=0, turn 1 check=0, turn 2 check=TIMEOUT+1
     mock_mono.side_effect = [0.0, 0.0, float(MOBY_AGENT_TIMEOUT_S + 1)]
@@ -313,12 +313,12 @@ def test_loop_timeout(mock_dispatch, mock_claude, mock_mono, tool_ctx):
     assert mock_claude.call_count == 1  # only turn 1 executed
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_updates_state_from_tool_result(mock_dispatch, mock_claude, tool_ctx):
     """Tool results update last_table/visualization/explorer_filters."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     table = {"rows": [{"id": "001"}], "columns": [{"key": "id"}]}
     viz = {"type": "bar", "data": []}
@@ -342,10 +342,10 @@ def test_loop_updates_state_from_tool_result(mock_dispatch, mock_claude, tool_ct
     assert result["last_explorer_filters"] == filters
 
 
-@patch("backend.app.routers.ai_chat._anthropic_sdk")
+@patch("app.routers.ai_chat._anthropic_sdk")
 def test_claude_chat_tools_override_replaces_tools_spec(mock_sdk):
     """When tools_override is passed, claude_tools is built from the override, not TOOLS_SPEC."""
-    from backend.app.routers.ai_chat import _claude_chat
+    from app.routers.ai_chat import _claude_chat
 
     captured = {}
     mock_client = MagicMock()
@@ -379,8 +379,8 @@ def _fake_anthropic_response():
     return resp
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
     """Tabular intent → turn 1 uses tool_choice='required' and tools_override whitelist.
 
@@ -388,8 +388,8 @@ def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude,
     `tool_choice="required"` combined with `thinking` enabled (error 400:
     "Thinking may not be enabled when tool_choice forces tool use").
     """
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
 
     mock_claude.return_value = _text_response("<p>empty</p>")
 
@@ -412,11 +412,11 @@ def test_loop_forces_tool_choice_when_tabular_intent(mock_dispatch, mock_claude,
     )
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_uses_auto_when_not_tabular(mock_dispatch, mock_claude, tool_ctx):
     """Non-tabular query → existing behaviour: tool_choice='auto', no override."""
-    from backend.app.routers.ai_chat import _agentic_loop
+    from app.routers.ai_chat import _agentic_loop
 
     mock_claude.return_value = _text_response("<p>hi</p>")
 
@@ -430,12 +430,12 @@ def test_loop_uses_auto_when_not_tabular(mock_dispatch, mock_claude, tool_ctx):
     assert kwargs.get("tools_override") is None
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_on_text_only_with_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
     """Turn 1 returns text only + tabular intent → retry fires, produces a table."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     tool_call = _make_mock_tool_call("t1", "explorer_search", {})
     mock_claude.side_effect = [
@@ -459,11 +459,11 @@ def test_loop_retry_on_text_only_with_tabular_intent(mock_dispatch, mock_claude,
     assert result["last_table"]["rows"]
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_noop_without_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
     """Text-only response + non-tabular intent → NO retry."""
-    from backend.app.routers.ai_chat import _agentic_loop
+    from app.routers.ai_chat import _agentic_loop
 
     mock_claude.return_value = _text_response("<p>CTS stands for Clinical Trial Site.</p>")
 
@@ -475,12 +475,12 @@ def test_loop_retry_noop_without_tabular_intent(mock_dispatch, mock_claude, tool
     assert mock_claude.call_count == 1
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_noop_if_table_produced_this_request(mock_dispatch, mock_claude, tool_ctx):
     """Turn 1 produced a table → NO retry even if tabular intent."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     tool_call = _make_mock_tool_call("t1", "explorer_search", {})
     mock_claude.side_effect = [
@@ -499,12 +499,12 @@ def test_loop_retry_noop_if_table_produced_this_request(mock_dispatch, mock_clau
     assert mock_claude.call_count <= 2
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_fires_when_inherited_table_but_no_new_tool(mock_dispatch, mock_claude, tool_ctx):
     """tool_ctx.last_table pre-populated (follow-up), turn 1 text-only → retry still fires."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     tool_ctx.last_table = {"rows": [{"old": 1}], "columns": ["old"]}
 
@@ -526,11 +526,11 @@ def test_loop_retry_fires_when_inherited_table_but_no_new_tool(mock_dispatch, mo
     assert result["last_table"]["rows"][0] == {"new": 1}
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_max_one(mock_dispatch, mock_claude, tool_ctx):
     """Retry itself answers text-only → do NOT run a second retry (cap=1)."""
-    from backend.app.routers.ai_chat import _agentic_loop
+    from app.routers.ai_chat import _agentic_loop
 
     mock_claude.side_effect = [
         _text_response("<p>first text</p>"),
@@ -546,13 +546,13 @@ def test_loop_retry_max_one(mock_dispatch, mock_claude, tool_ctx):
     assert mock_claude.call_count == 2
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_progress_event_on_retry(mock_dispatch, mock_claude, tool_ctx):
     """When streaming (_STREAM_Q.q set), retry emits a __PROGRESS__ event."""
     import queue
-    from backend.app.routers.ai_chat import _agentic_loop, _STREAM_Q
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop, _STREAM_Q
+    from app.routers.moby_tools import ToolResult
 
     tool_call = _make_mock_tool_call("t1", "explorer_search", {})
     mock_claude.side_effect = [
@@ -581,12 +581,12 @@ def test_loop_progress_event_on_retry(mock_dispatch, mock_claude, tool_ctx):
     assert retry_events, f"No retry progress event in {progress_events}"
 
 
-@patch("backend.app.routers.ai_chat._claude_chat")
-@patch("backend.app.routers.moby_tools.dispatch_tool")
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_respects_dm_guard(mock_dispatch, mock_claude, tool_ctx):
     """Retry that picks a DM tool after one DM call already happened is blocked, does not crash."""
-    from backend.app.routers.ai_chat import _agentic_loop
-    from backend.app.routers.moby_tools import ToolResult
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
 
     turn1_tool = _make_mock_tool_call("t1", "nearest_filtered_sites", {"lat": 0, "lng": 0})
     retry_tool = _make_mock_tool_call("t2", "nearest_filtered_sites", {"lat": 1, "lng": 1})

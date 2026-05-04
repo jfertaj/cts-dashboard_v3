@@ -4819,7 +4819,7 @@ def _dispatch_tool_calls(
     - table_produced_now: True if any dispatched tool set a non-None last_table.
     """
     import hashlib
-    from backend.app.routers.moby_tools import dispatch_tool
+    from app.routers.moby_tools import dispatch_tool
 
     _DM_TOOL_NAMES = {"nearest_filtered_sites", "explorer_within_drive_km"}
     _char_limit = MAX_TOOL_RESULT_TOKENS * 4
@@ -4918,8 +4918,8 @@ def _agentic_loop(
     Returns dict with keys: text, turns_used, tool_calls_made,
     last_table, last_visualization, last_explorer_filters.
     """
-    from backend.app.routers.moby_tools import ToolContext, dispatch_tool
-    from backend.app.routers.moby_tool_policy import (
+    from app.routers.moby_tools import ToolContext, dispatch_tool
+    from app.routers.moby_tool_policy import (
         has_tabular_intent,
         filter_tools_spec,
     )
@@ -9827,7 +9827,7 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
         pass  # Hints are optional — don't let planner errors break the chat
 
     # --- Agentic loop replaces the old single-turn tool dispatch ---
-    from backend.app.routers.moby_tools import ToolContext as _TC, dispatch_tool as _dispatch_tool
+    from app.routers.moby_tools import ToolContext as _TC, dispatch_tool as _dispatch_tool
 
     _tool_ctx = _TC(
         db=db,
