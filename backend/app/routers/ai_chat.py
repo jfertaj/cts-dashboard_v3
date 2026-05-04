@@ -509,13 +509,59 @@ def _semantic_top_matches(q: str, aliases: List[str], k: int) -> Optional[List[s
     return out or None
 
 
+def _format_hints_block(hits: List[Dict[str, Any]]) -> str:
+    """Render semantic field hits as a markdown bullet list for the system prompt."""
+    lines = [
+        "## Relevant fields (semantic hint, top-K=8)",
+        "The following Salesforce fields are most semantically relevant to "
+        "the user's question. Prefer these when calling tools, especially "
+        "for multilingual queries.",
+        "",
+    ]
+    for h in hits:
+        key = h.get("key") or ""
+        label = h.get("label") or ""
+        lines.append(f"- `{key}` — {label}")
+    return "\n".join(lines)
+
+
+def _semantic_field_hints(user_msg: str) -> str:
+    """Return a markdown block of top-K semantic field hits for system-prompt injection.
+
+    Gated by MOBY_SEMANTIC_FIELD_RESOLVER=1. Any failure (missing index,
+    Bedrock unavailable, exception) returns "" — no regression vs. baseline.
+    """
+    if os.getenv("MOBY_SEMANTIC_FIELD_RESOLVER", "0") != "1":
+        return ""
+    if not user_msg or not user_msg.strip():
+        return ""
+    t0 = _monotonic()
+    try:
+        from app.moby_semantic_resolver import SemanticFieldResolver
+        hits = SemanticFieldResolver().resolve(user_msg, top_n=8)
+        ms = (_monotonic() - t0) * 1000.0
+        keys_preview = [h.get("key") for h in hits]
+        print(f"[moby-semantic] q={user_msg[:80]!r} top={keys_preview} latency={ms:.0f}ms", flush=True)
+        if not hits:
+            return ""
+        return _format_hints_block(hits)
+    except Exception as exc:
+        ms = (_monotonic() - t0) * 1000.0
+        print(f"[moby-semantic] q={user_msg[:80]!r} ERROR={exc!r} latency={ms:.0f}ms", flush=True)
+        return ""
+
+
 def _top_matches(q: str, aliases: List[str], k: int = 5) -> List[str]:
     """
     Matching ligero: intersección de tokens normalizados + prefiero substrings.
     """
-    sem = _semantic_top_matches(q, aliases, k)
-    if sem:
-        return sem
+    # unused: see Option A integration in chat_api (_semantic_field_hints).
+    # The agentic loop bypasses _top_matches; semantic guidance is injected
+    # into the system prompt instead. Kept here behind a no-op to avoid the
+    # false signal of "semantic resolver returned nothing useful".
+    # sem = _semantic_top_matches(q, aliases, k)
+    # if sem:
+    #     return sem
     qn = _normalize(q)
     qtokens = set(qn.split())
     scored = []
@@ -9347,6 +9393,16 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
             "Aliases → target field:\n" + INDEX_SNIPPET
         )
     })
+
+    # Option A: semantic field hints (Cohere Bedrock). Guides Claude on multilingual
+    # queries before the agentic loop picks tools. No-op when flag is off or resolver fails.
+    try:
+        _user_msg_for_hints = (payload.messages[-1].content or "") if payload.messages else ""
+        _hints_block = _semantic_field_hints(_user_msg_for_hints)
+        if _hints_block:
+            msgs.append({"role": "system", "content": _hints_block})
+    except Exception as _hints_exc:
+        _dbg("WARN: semantic field hints injection failed: %s", _hints_exc)
     if payload.last_filters and payload.last_filters.get("rules"):
         msgs.append({
             "role": "system",

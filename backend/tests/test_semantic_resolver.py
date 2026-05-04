@@ -54,6 +54,9 @@ def fake_index(tmp_path, monkeypatch):
     monkeypatch.setenv("MOBY_FIELD_INDEX_PATH", str(path))
 
     from app import moby_semantic_resolver as mod
+    # INDEX_PATH is frozen at module import → patch it explicitly so the
+    # fixture path wins even when other tests imported the module first.
+    monkeypatch.setattr(mod, "INDEX_PATH", path)
     mod.reset_caches_for_tests()
     return mod
 
@@ -130,35 +133,21 @@ def test_resolver_raises_when_bedrock_fails(fake_index):
             mod.SemanticFieldResolver().resolve("anything")
 
 
-def test_top_matches_flag_off_skips_resolver(monkeypatch):
-    """When the flag is unset, the legacy lexical matcher runs untouched."""
+def test_top_matches_flag_off_uses_lexical(monkeypatch):
+    """Flag off: pure lexical matcher (semantic branch deprecated in Option A)."""
     monkeypatch.delenv("MOBY_SEMANTIC_FIELD_RESOLVER", raising=False)
+    from app.routers import ai_chat
+    out = ai_chat._top_matches("stage 1", ["stage 1", "hla typing"], k=2)
+    assert "stage 1" in out
+
+
+def test_top_matches_flag_on_still_uses_lexical(monkeypatch):
+    """Option A: _top_matches no longer calls the semantic resolver — semantic
+    guidance now lives in the system prompt via _semantic_field_hints."""
+    monkeypatch.setenv("MOBY_SEMANTIC_FIELD_RESOLVER", "1")
     from app.routers import ai_chat
 
     sentinel = mock.MagicMock(side_effect=AssertionError("must not be called"))
-    with mock.patch.object(ai_chat, "_semantic_top_matches",
-                           wraps=lambda q, a, k: None) as spy:
-        out = ai_chat._top_matches("stage 1", ["stage 1", "hla typing"], k=2)
-    assert "stage 1" in out
-    spy.assert_called_once()  # called but returned None → fallback
-
-
-def test_top_matches_flag_on_uses_resolver(monkeypatch):
-    monkeypatch.setenv("MOBY_SEMANTIC_FIELD_RESOLVER", "1")
-    from app.routers import ai_chat
-
-    fake_results = ["hla typing"]
-    with mock.patch.object(ai_chat, "_semantic_top_matches",
-                           return_value=fake_results) as spy:
-        out = ai_chat._top_matches("immune typing", ["stage 1", "hla typing"], k=2)
-    assert out == fake_results
-    spy.assert_called_once()
-
-
-def test_top_matches_flag_on_falls_back_when_resolver_returns_none(monkeypatch):
-    monkeypatch.setenv("MOBY_SEMANTIC_FIELD_RESOLVER", "1")
-    from app.routers import ai_chat
-
-    with mock.patch.object(ai_chat, "_semantic_top_matches", return_value=None):
+    with mock.patch.object(ai_chat, "_semantic_top_matches", side_effect=sentinel):
         out = ai_chat._top_matches("stage 1", ["stage 1", "hla typing"], k=2)
     assert "stage 1" in out
