@@ -108,17 +108,8 @@ def _clean_text(s: str) -> str:
     return re.sub(r"\s*<table>\s*", "", s or "").strip()
 
 # ====== Tipos ======
-Role = Literal["system","user","assistant","tool"]
-class ChatMessage(BaseModel):
-    role: Role
-    content: str
-    tool_name: Optional[str] = None  # solo para compat interna; OpenAI ignora esto
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    stream: bool = False
-    last_table: Optional[Dict[str, Any]] = None    # Tabla de la respuesta anterior para follow-ups eficientes
-    last_filters: Optional[Dict[str, Any]] = None  # FilterGroup que produjo la tabla anterior (para follow-ups con explorer_search)
+# Moved to app.moby.schemas (Phase 1 refactor); re-exported as shim.
+from app.moby.schemas import Role, ChatMessage, ChatRequest  # noqa: F401,E402
 
 # ====== Whitelists / Guards ======
 
