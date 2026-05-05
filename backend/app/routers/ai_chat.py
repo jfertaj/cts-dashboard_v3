@@ -4992,6 +4992,49 @@ def _dispatch_tool_calls(
 
 # ====== Agentic loop ======
 
+def _detect_lang_hint(text: str) -> str:
+    """Cheap language hint for synthesis prompt. Returns 'es', 'it', 'fr', 'de', or 'en'."""
+    t = (text or "").lower()
+    if any(w in t for w in (" qué", "¿", "cuántos", "centros", "país", "españa", "italia ")):
+        return "es"
+    if any(w in t for w in ("quanti", " siti", "italia?", "nazione", "coordinatori")):
+        return "it"
+    if any(w in t for w in ("combien", "pédiatrique", "pays", "français")):
+        return "fr"
+    if any(w in t for w in ("wie viele", "standorte", "deutschland", "pädiatrisch")):
+        return "de"
+    return "en"
+
+
+def _synthesis_fallback(
+    msgs: List[Dict[str, Any]],
+    user_msg: str,
+    prev_tools: int,
+) -> Optional[str]:
+    """One extra Claude call (no tools) to summarize prior tool results.
+
+    Triggered when the agentic loop ends with empty text after >=1 successful tool_use.
+    Returns the synthesized text, or None if it also fails / returns empty.
+    """
+    lang = _detect_lang_hint(user_msg)
+    lang_word = {"es": "Spanish", "it": "Italian", "fr": "French", "de": "German", "en": "English"}[lang]
+    prompt = (
+        f"Please summarize the previous tool results in 2-3 sentences for the user. "
+        f"Mention the key fields used and the actual numbers/findings. "
+        f"Respond in {lang_word}."
+    )
+    msgs_extra = list(msgs) + [{"role": "user", "content": prompt}]
+    _dbg("[AI-CHAT] synthesis-fallback triggered (prev_tools=%d, lang=%s)", prev_tools, lang)
+    try:
+        resp = _claude_chat(msgs_extra, tool_choice="auto", force_no_tools=True, use_thinking=False)
+    except Exception as e:
+        _dbg("[AI-CHAT] synthesis-fallback failed: %s", e)
+        return None
+    text = (resp.choices[0].message.content or "").strip()
+    _dbg("[AI-CHAT] synthesis-fallback result text_len=%d", len(text))
+    return text or None
+
+
 def _agentic_loop(
     msgs: List[Dict[str, Any]],
     tool_ctx: "ToolContext",
@@ -5174,6 +5217,14 @@ def _agentic_loop(
                     retry_text = (retry_msg.content or "").strip()
                     if retry_text:
                         text_out = retry_text
+
+    # Synthesis fallback: loop ended with empty text but had successful tool calls.
+    # Make one extra Claude call (no tools) to summarize the prior tool results
+    # before falling through to the generic "I wasn't able to answer" string.
+    if (not text_out or not text_out.strip()) and len(tool_calls_made) >= 1:
+        synth = _synthesis_fallback(msgs, user_msg, prev_tools=len(tool_calls_made))
+        if synth:
+            text_out = synth
 
     return {
         "text": text_out,

@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "created": "2026-05-05",
+  "notes": "Ground truth ranges are intentionally loose — goal is to detect catastrophic failures (no data, wrong country, 0 vs >100), not validate exact values which drift over time.",
+  "queries": [
+    {"id": "EN-01", "lang": "en", "category": "simple-count", "query": "How many sites are in Spain?", "ground_truth": {"expected_country": "ES", "min_sites": 5, "max_sites": 60}},
+    {"id": "EN-02", "lang": "en", "category": "simple-count", "query": "List CTS in France", "ground_truth": {"expected_country": "FR", "min_sites": 3, "max_sites": 60}},
+    {"id": "EN-03", "lang": "en", "category": "simple-count", "query": "How many active sites are there?", "ground_truth": {"min_sites": 30, "max_sites": 500}},
+    {"id": "EN-04", "lang": "en", "category": "simple-count", "query": "Sites in Italy?", "ground_truth": {"expected_country": "IT", "min_sites": 3, "max_sites": 80}},
+    {"id": "EN-05", "lang": "en", "category": "simple-count", "query": "How many opportunities are there in Germany?", "ground_truth": {"expected_country": "DE", "min_sites": 3, "max_sites": 100}},
+
+    {"id": "EN-06", "lang": "en", "category": "synonym", "query": "pediatric T1D follow-up for kids under 18", "ground_truth": {"must_mention_field_any": ["T1D", "U_18", "under 18", "pediatric", "Pediatric"]}},
+    {"id": "EN-07", "lang": "en", "category": "synonym", "query": "centres recruiting Stage 2", "ground_truth": {"must_mention_field_any": ["Stage 2", "Stage2", "stage_2", "Stage_2"]}},
+    {"id": "EN-08", "lang": "en", "category": "synonym", "query": "HLA typed individuals", "ground_truth": {"must_mention_field_any": ["HLA", "hla"]}},
+    {"id": "EN-09", "lang": "en", "category": "synonym", "query": "ND consenters with islet autoantibodies", "ground_truth": {"must_mention_field_any": ["ND", "consent", "autoantibod", "AAb", "islet"]}},
+    {"id": "EN-10", "lang": "en", "category": "synonym", "query": "first-degree relatives followed", "ground_truth": {"must_mention_field_any": ["first-degree", "FDR", "relative", "Relative"]}},
+
+    {"id": "ES-01", "lang": "es", "category": "simple-count", "query": "¿Cuántos centros hay en España?", "ground_truth": {"expected_country": "ES", "min_sites": 5, "max_sites": 60}},
+    {"id": "ES-02", "lang": "es", "category": "synonym", "query": "sitios pediátricos T1D menores 18", "ground_truth": {"must_mention_field_any": ["T1D", "pediatric", "pediátric", "U_18", "under 18", "menores"]}},
+    {"id": "ES-03", "lang": "es", "category": "synonym", "query": "¿qué centros tienen ND seguidos en estadio 1?", "ground_truth": {"must_mention_field_any": ["ND", "Stage 1", "Stage1", "estadio", "Stage_1"]}},
+    {"id": "ES-04", "lang": "es", "category": "aggregate", "query": "actividades por país", "ground_truth": {"must_mention_field_any": ["actividad", "Activit", "country", "país", "pais"]}},
+    {"id": "ES-05", "lang": "es", "category": "coordinators", "query": "coordinadores de estudio en Italia", "ground_truth": {"expected_country": "IT", "must_mention_field_any": ["coordinator", "coordinador", "Study Coordinator"]}},
+
+    {"id": "IT-01", "lang": "it", "category": "simple-count", "query": "quanti siti in Italia?", "ground_truth": {"expected_country": "IT", "min_sites": 3, "max_sites": 80}},
+    {"id": "IT-02", "lang": "it", "category": "synonym", "query": "centri pediatrici T1D under 18", "ground_truth": {"must_mention_field_any": ["T1D", "pediatric", "pediatric", "U_18", "under 18"]}},
+    {"id": "IT-03", "lang": "it", "category": "synonym", "query": "stadio 2 individui seguiti", "ground_truth": {"must_mention_field_any": ["Stage 2", "Stage2", "stadio", "Stage_2"]}},
+    {"id": "IT-04", "lang": "it", "category": "coordinators", "query": "coordinatori per nazione", "ground_truth": {"must_mention_field_any": ["coordinator", "coordinatori", "Study Coordinator"]}},
+
+    {"id": "FR-01", "lang": "fr", "category": "simple-count", "query": "combien de sites en France?", "ground_truth": {"expected_country": "FR", "min_sites": 3, "max_sites": 60}},
+    {"id": "FR-02", "lang": "fr", "category": "synonym", "query": "suivi pédiatrique T1D moins de 18 ans", "ground_truth": {"must_mention_field_any": ["T1D", "pediatric", "pédiatric", "U_18", "moins", "under 18"]}},
+    {"id": "FR-03", "lang": "fr", "category": "synonym", "query": "centres avec typage HLA", "ground_truth": {"must_mention_field_any": ["HLA", "typage"]}},
+    {"id": "FR-04", "lang": "fr", "category": "aggregate", "query": "activités par pays", "ground_truth": {"must_mention_field_any": ["activit", "Activit", "country", "pays", "país"]}},
+
+    {"id": "DE-01", "lang": "de", "category": "simple-count", "query": "Wie viele Standorte in Deutschland?", "ground_truth": {"expected_country": "DE", "min_sites": 3, "max_sites": 100}},
+    {"id": "DE-02", "lang": "de", "category": "synonym", "query": "pädiatrische T1D Nachsorge unter 18", "ground_truth": {"must_mention_field_any": ["T1D", "pediatric", "pädiatric", "U_18", "unter 18", "under 18"]}},
+    {"id": "DE-03", "lang": "de", "category": "synonym", "query": "Stadium 1 verfolgte Personen", "ground_truth": {"must_mention_field_any": ["Stage 1", "Stage1", "Stadium", "Stage_1"]}},
+    {"id": "DE-04", "lang": "de", "category": "coordinators", "query": "Studienkoordinatoren pro Land", "ground_truth": {"must_mention_field_any": ["coordinator", "Koordinator", "Study Coordinator"]}},
+
+    {"id": "AMB-01", "lang": "en", "category": "ambiguous", "query": "show me everything in Spain about kids", "ground_truth": {"expected_country": "ES", "should_clarify_or_data": true}},
+    {"id": "AMB-02", "lang": "en", "category": "multi-intent", "query": "pediatric centres with HLA and Stage 2", "ground_truth": {"must_mention_field_any": ["HLA", "Stage 2", "Stage_2", "pediatric", "Pediatric"]}},
+    {"id": "AMB-03", "lang": "en", "category": "multi-intent", "query": "compare ND and T1D by country", "ground_truth": {"must_mention_field_any": ["ND", "T1D", "country"]}}
+  ]
+}
