@@ -634,3 +634,58 @@ def test_synthesis_fallback_called_on_empty_final_text(mock_dispatch, mock_claud
     assert result["text"] == "Found 70 sites in Italy."
     # Confirm the extra synthesis call actually happened (>= 4 total Claude calls)
     assert mock_claude.call_count >= 4
+
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
+def test_loop_multi_tool_same_turn_dispatches_each(mock_dispatch, mock_claude, tool_ctx):
+    """Claude paralleliza dos tools en el mismo turno → ambas se dispatchan."""
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
+
+    tc1 = _make_mock_tool_call("t1", "salesforce_query", {"soql": "SELECT Id FROM Account"})
+    tc2 = _make_mock_tool_call("t2", "members_search", {"q": "Madrid"})  # diff tool, diff args
+    mock_claude.side_effect = [
+        _tool_response([tc1, tc2]),
+        _text_response("<p>Combined results.</p>"),
+    ]
+    mock_dispatch.return_value = ToolResult(last_table={"rows": [], "columns": []})
+
+    result = _agentic_loop(msgs=tool_ctx.msgs, tool_ctx=tool_ctx)
+
+    # Both tool_calls dispatched (no dedup since args differ)
+    assert mock_dispatch.call_count == 2
+    assert {c["tool"] for c in result["tool_calls_made"]} == {
+        "salesforce_query", "members_search",
+    }
+    assert result["text"] == "<p>Combined results.</p>"
+
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
+def test_loop_anthropic_api_error_returns_friendly_message(
+    mock_dispatch, mock_claude, tool_ctx
+):
+    """RateLimitError on turn 1 → loop exits with a service-unavailable text, no raise."""
+    from app.routers.ai_chat import _agentic_loop, _anthropic_sdk
+
+    # Build a RateLimitError instance the way the SDK exposes it.
+    # The class signature varies by SDK version; we just need an instance whose
+    # type matches the except clause.
+    class _FakeRateLimit(_anthropic_sdk.RateLimitError):
+        def __init__(self):
+            Exception.__init__(self, "rate limit hit")
+
+    try:
+        err = _FakeRateLimit()
+    except TypeError:
+        # Some SDK versions require body/response args — fall back to plain
+        # APIConnectionError which has a simpler ctor.
+        err = _anthropic_sdk.APIConnectionError(message="conn fail", request=MagicMock())
+
+    mock_claude.side_effect = err
+
+    result = _agentic_loop(msgs=tool_ctx.msgs, tool_ctx=tool_ctx)
+
+    assert "temporarily unavailable" in (result["text"] or "")
+    mock_dispatch.assert_not_called()
