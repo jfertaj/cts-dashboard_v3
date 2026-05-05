@@ -70,9 +70,8 @@ from app.moby.config import (  # noqa: F401
     CLAUDE_INTERLEAVED_THINKING_BETA,
     INDEX_PREVIEW_LIMIT,
 )
-# Thread-local used by the /chat/stream endpoint to receive token chunks
-# from _claude_chat without changing any function signatures.
-_STREAM_Q: threading.local = threading.local()
+# _STREAM_Q moved to app.moby.streaming (Phase 1 refactor); re-exported as shim.
+from app.moby.streaming import _STREAM_Q  # noqa: F401,E402
 
 def _dbg(msg: str, *args):
     if DEBUG:
