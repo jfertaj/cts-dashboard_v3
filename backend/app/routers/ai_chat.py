@@ -52,23 +52,24 @@ from app.routers.moby_handlers import (
     handle_activity,
 )
 
-DEBUG = os.environ.get("AI_CHAT_DEBUG", "0") == "1"
-INDEX_REFRESH_SEC = int(os.environ.get("AI_INDEX_REFRESH_SEC", "600"))
-FIELDS_SF_JSON_PATH = os.environ.get("FIELDS_SF_JSON_PATH", "app/config/fields_opportunity_curated.json")
-QUAL_ALIAS_JSON_PATH = os.environ.get("QUAL_ALIAS_JSON_PATH", "app/config/qualification_aliases.json")
-EXPLORER_DRIVE_KM_PATH = "/api/explorer/search/within-drive-km"
-EXPLORER_SEARCH_PATH   = "/api/explorer/search"
-# Max user turns to keep in history before truncating (each turn = 1 user + 1 assistant message).
-# Keeps context focused and prevents unbounded token growth in long conversations.
-MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "12"))
-# Token budget for extended thinking on complex queries.
-# The model may use up to this many tokens to reason before responding.
-# max_tokens is automatically raised to budget + 8192 when thinking is enabled.
-CLAUDE_THINKING_BUDGET = int(os.environ.get("CLAUDE_THINKING_BUDGET", "8000"))
-# Agentic loop limits
-MOBY_MAX_AGENT_TURNS = int(os.getenv("MOBY_MAX_AGENT_TURNS", "3"))
-MAX_TOOL_RESULT_TOKENS = int(os.getenv("MAX_TOOL_RESULT_TOKENS", "4000"))
-MOBY_AGENT_TIMEOUT_S = int(os.getenv("MOBY_AGENT_TIMEOUT_S", "30"))
+# Constants moved to app.moby.config (Phase 1 refactor); re-exported here as shim
+# to preserve existing import paths and test mock targets.
+from app.moby.config import (  # noqa: F401
+    DEBUG,
+    INDEX_REFRESH_SEC,
+    FIELDS_SF_JSON_PATH,
+    QUAL_ALIAS_JSON_PATH,
+    EXPLORER_DRIVE_KM_PATH,
+    EXPLORER_SEARCH_PATH,
+    MAX_HISTORY_TURNS,
+    CLAUDE_THINKING_BUDGET,
+    MOBY_MAX_AGENT_TURNS,
+    MAX_TOOL_RESULT_TOKENS,
+    MOBY_AGENT_TIMEOUT_S,
+    CLAUDE_MODEL,
+    CLAUDE_INTERLEAVED_THINKING_BETA,
+    INDEX_PREVIEW_LIMIT,
+)
 # Thread-local used by the /chat/stream endpoint to receive token chunks
 # from _claude_chat without changing any function signatures.
 _STREAM_Q: threading.local = threading.local()
@@ -144,8 +145,7 @@ ALLOWED_TABLES = {
 from time import time, monotonic as _monotonic
 
 _INDEX_CACHE: Dict[str, Any] = {"ts": 0, "index": {}, "sf_fields": {}}
-# Limit for previewing aliases in the system hints (smaller → faster)
-INDEX_PREVIEW_LIMIT = int(os.environ.get("AI_INDEX_PREVIEW_LIMIT", "60"))
+# INDEX_PREVIEW_LIMIT now lives in app.moby.config and is re-exported above.
 
 # Country alias map: lowercase alias → (SF full name, ISO2 code)
 # Used by multiple planner handlers (pharmacy, country, nearest)
