@@ -53,6 +53,43 @@ los handlers se extraigan, para no inflar el diff.
 Ninguno detectado durante esta pasada. Si aparecen durante Fase 1-3, listar
 aquí con SHA del commit donde se descubre.
 
+## 5b. Notas de Fase 1 (extracción a `app/moby/`)
+
+Seis commits, cada uno un módulo. Pytest `624 pass / 3 pre-existing fail`
+estable tras cada commit. SHAs:
+
+- `79a4bf5` config.py (constantes)
+- `822010b` schemas.py (Pydantic)
+- `e092616` streaming.py (`_STREAM_Q`)
+- `55a6a87` claude_client.py (`_claude_chat` + adapter)
+- `c6c613b` synthesis.py (`_synthesis_fallback`, `_detect_lang_hint`)
+- `e9de80c` prompt.py (`SCHEMA_HINT`, `SYSTEM_PROMPT`)
+
+Indirecciones intencionales (que se simplificarán cuando el código
+relacionado migre):
+
+- `claude_client._claude_chat` resuelve `TOOLS_SPEC` con import diferido
+  desde `app.routers.ai_chat` (TOOLS_SPEC sigue allí — Fase 2/3).
+- `claude_client._claude_chat` resuelve el módulo Anthropic SDK con
+  `_get_anthropic_sdk()` (atributo dinámico de `app.routers.ai_chat`)
+  para que tests que hacen `@patch("app.routers.ai_chat._anthropic_sdk")`
+  sigan funcionando.
+- `synthesis._synthesis_fallback` resuelve `_claude_chat` igual
+  (atributo dinámico) por la misma razón.
+
+Estas tres redirecciones se documentan inline en el módulo. Cuando
+TOOLS_SPEC y los tests-de-mock se reubiquen, las redirecciones
+desaparecen.
+
+`prompt.py` sí se completó en Fase 1 (no requiere knowledge index).
+Los builders de prompt dinámicos que sí dependen del knowledge index
+(`_semantic_field_hints`, `_format_hints_block`) siguen en `ai_chat.py`
+y se moverán en Fase 3 junto con el módulo `knowledge/`.
+
+`ai_chat.py`: 10.230 → 9.526 líneas (-704 líneas; código real movido +
+shims más compactos que los originales). Ningún test cambia su path de
+mock. Ningún import circular real (sólo los lazy imports documentados).
+
 ## 6. Cobertura de tests añadida en Fase 0
 
 | Archivo | Tests | Cubre |
