@@ -1666,41 +1666,6 @@ def tool_sql_query(db: Session, sql: str, params: Optional[Dict[str, Any]] = Non
             pass
         raise
 
-def tool_salesforce_query(sf, soql: str):
-    _dbg("SOQL (raw) >>> %s", soql)
-    soql_plus = _ensure_soql_has_account_id(soql)
-    fixed = _sanitize_soql_basic(soql_plus)
-    if fixed != soql:
-        _dbg("SOQL (fixed) >>> %s", fixed)
-    _validate_soql(fixed, sf)
-    raw = sf.query_all(fixed)
-    _dbg("SOQL <<< records=%d", len(raw.get("records", [])) if isinstance(raw, dict) else -1)
-    return raw
-
-def tool_salesforce_account_extras(sf, account_id: str):
-    _dbg("SF extras >>> account_id=%s", account_id)
-    if not account_id:
-        raise HTTPException(400, "Missing account_id")
-    data = _account_extras_core(sf, account_id)
-    flat = {
-        "account_id": data.get("account_id"),
-        "member_name": (data.get("member") or {}).get("name"),
-        "pi_name": (data.get("pi") or {}).get("name"),
-        "pi_email": (data.get("pi") or {}).get("email"),
-        "pi_phone": (data.get("pi") or {}).get("phone"),
-        "cs_clinical_site": (data.get("csContribution") or {}).get("INNODIA_Clinical_Trial_Site__c"),
-        "cs_referral_outreach": (data.get("csContribution") or {}).get("Referral_Outreach_Site_Non_CTS__c"),
-        "cs_eligible_detect": (data.get("csContribution") or {}).get("Elegible_for_DETECT_Site__c"),
-        "assignments_count": int(len(data.get("assignments") or [])),
-        "new_dx_u18": data.get("newDxUnder18"),
-        "new_dx_o18": data.get("newDxOver18"),
-    }
-    _dbg("SF extras <<< member=%s | PI=%s | assignments=%d | new_u18=%s | new_o18=%s",
-         flat.get("member_name"), flat.get("pi_name"),
-         flat.get("assignments_count", 0), str(flat.get("new_dx_u18")), str(flat.get("new_dx_o18")))
-    return {"columns": list(flat.keys()), "rows": [[flat[k] for k in flat.keys()]]}
-
-
 def tool_salesforce_account_contacts(sf, account_id: str, include_subaccounts: bool = False, role_contains: Optional[str] = None, roles: Optional[List[str]] = None, title_contains: Optional[str] = None, country: Optional[str] = None, city: Optional[str] = None):
     """Fetch contacts by Account OR by geography when no Account Id is given.
     - If account_id is valid: returns contacts for that Account (and optionally child Accounts).
@@ -2145,138 +2110,6 @@ def tool_group_count_agg(
 
 
 # ==== Salesforce groupers (counts and aggregations) ====
-
-def tool_group_count_sf(
-    sf,
-    by: List[Literal["country","city"]] = ["country"],
-):
-    if not sf:
-        raise HTTPException(400, "No SF session")
-    by = by or ["country"]
-    dim = by[0]
-    # Always restrict to clinical subaccounts and active
-    inactive_clause = "(Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)"
-    if dim == "country":
-        soql = (
-            "SELECT ShippingCountry country, COUNT(Id) "
-            "FROM Account "
-            "WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
-            "AND ShippingCountry != null AND " + inactive_clause + " "
-            "GROUP BY ShippingCountry ORDER BY COUNT(Id) DESC"
-        )
-        raw = tool_salesforce_query(sf, soql)
-        recs = raw.get("records", []) if isinstance(raw, dict) else []
-        rows = [{"country": r.get("country"), "count": r.get("expr0") or r.get("count") or r.get("COUNT") } for r in recs]
-        return {"columns": [{"key":"country","label":"Country"},{"key":"count","label":"Count"}], "rows": rows}
-    else:
-        # city: include country as context
-        soql = (
-            "SELECT ShippingCity city, ShippingCountry country, COUNT(Id) "
-            "FROM Account "
-            "WHERE RecordType.DeveloperName='SubAccount' AND C_Type__c='Clinical' "
-            "AND ShippingCity != null AND " + inactive_clause + " "
-            "GROUP BY ShippingCity, ShippingCountry ORDER BY COUNT(Id) DESC"
-        )
-        raw = tool_salesforce_query(sf, soql)
-        recs = raw.get("records", []) if isinstance(raw, dict) else []
-        rows = [{"city": r.get("city"), "country": r.get("country"), "count": r.get("expr0") or r.get("count") } for r in recs]
-        return {"columns": [{"key":"city","label":"City"},{"key":"country","label":"Country"},{"key":"count","label":"Count"}], "rows": rows}
-
-
-def tool_group_agg_sf(
-    sf,
-    by: List[Literal["country","city"]] = ["country"],
-    field: str = "",
-    agg: Literal["sum","max","avg"] = "avg",
-):
-    if not sf:
-        raise HTTPException(400, "No SF session")
-    if not field:
-        raise HTTPException(400, "Missing field")
-    func = {"sum":"SUM","max":"MAX","avg":"AVG"}[agg]
-    dim = (by or ["country"])[0]
-    grp_field = "Account.ShippingCountry" if dim == "country" else "Account.ShippingCity"
-    # Validate SOQL field usage (on Opportunity) via whitelist
-    _validate_soql(f"SELECT {field} FROM Opportunity", sf)
-    soql = f"""
-        SELECT {grp_field} grp, {func}({field}) value
-        FROM Opportunity
-        WHERE {field} != null AND {grp_field} != null
-        GROUP BY {grp_field}
-        ORDER BY value DESC
-    """
-    raw = tool_salesforce_query(sf, soql)
-    recs = raw.get("records", []) if isinstance(raw, dict) else []
-    out_rows = []
-    for r in recs:
-        g = r.get("grp") or r.get("expr0")
-        val = r.get("value") or r.get("expr1")
-        if dim == "country":
-            out_rows.append({"country": g, f"sf.{field}": val})
-        else:
-            out_rows.append({"city": g, f"sf.{field}": val})
-    cols = (
-        [{"key":"country","label":"Country"}] if dim=="country" else [{"key":"city","label":"City"}]
-    ) + [{"key": f"sf.{field}", "label": _pretty_label(f"sf.{field}") + f" ({agg})"}]
-    return {"columns": cols, "rows": out_rows}
-
-def tool_time_series_sf(
-    sf,
-    field: str,
-    date_field: str = "CloseDate",
-    period: Literal["month","quarter","year"] = "month",
-    agg: Literal["sum","max","avg"] = "sum",
-    last_n: Optional[int] = None,
-):
-    if not sf:
-        raise HTTPException(400, "No SF session")
-    func = {"sum":"SUM","max":"MAX","avg":"AVG"}[agg]
-    per_fn = {"month":"CALENDAR_MONTH","quarter":"CALENDAR_QUARTER","year":"CALENDAR_YEAR"}[period]
-    where = f"WHERE {field} != null"
-    if last_n and period in ("month","quarter"):
-        # filtrar últimos N unidades aproximando por CreatedDate/CloseDate
-        where += " AND LastModifiedDate = LAST_N_MONTHS:%d" % (last_n if period=="month" else last_n*3)
-    soql = f"""
-        SELECT {per_fn}({date_field}) per, {func}({field}) metric
-        FROM Opportunity
-        {where}
-        GROUP BY {per_fn}({date_field})
-        ORDER BY {per_fn}({date_field})
-    """
-    _validate_soql(f"SELECT {date_field} FROM Opportunity", sf)  # asegura date field permitido
-    raw = tool_salesforce_query(sf, soql)
-    recs = raw.get("records", []) if isinstance(raw, dict) else []
-    rows = []
-    for r in recs:
-        rows.append({"period": r.get("expr0") or r.get("per"), f"sf.{field}": r.get("expr1") or r.get("metric")})
-    return {"columns": [{"key":"period","label":"Period"},{"key":f"sf.{field}","label":_pretty_label(f"sf.{field}")}], "rows": rows}
-
-
-def tool_sql_query_fill_sf(
-    db: Session,
-    sf,
-    sql: str,
-    account_fields: List[str],
-    params: Optional[Dict[str, Any]] = None,
-):
-    """Ejecuta SQL (debe devolver account_id) y rellena columnas Account.* desde SF en lote."""
-    base = tool_sql_query(db, sql, params or {})
-    cols = base.get("columns") or []
-    rows = [{cols[i]: v for i, v in enumerate(r)} for r in base.get("rows") or []]
-    ids = list({str(r.get("account_id")) for r in rows if r.get("account_id")})
-    if sf and ids and account_fields:
-        fields = [f for f in account_fields if f and f != "Id"]
-        ids_clause = ', '.join([f"'{i}'" for i in ids])
-        soql = f"SELECT Id, {', '.join(fields)} FROM Account WHERE Id IN ({ids_clause})"
-        accs = tool_salesforce_query(sf, soql).get("records", [])
-        m = {a.get("Id"): a for a in accs}
-        for r in rows:
-            aid = str(r.get("account_id") or "")
-            a = m.get(aid) or {}
-            for f in fields:
-                r[f"sf.Account.{f}"] = a.get(f)
-    return {"columns": [{"key":k, "label": _pretty_label(k)} for k in (list(rows[0].keys()) if rows else cols)], "rows": rows}
-
 
 def tool_contacts_by_group(
     sf,
@@ -3693,6 +3526,17 @@ def _truncate_history(messages: List[Any], max_turns: int = MAX_HISTORY_TURNS) -
     return messages[cut_at:]
 
 
+
+# --- Salesforce-direct tool implementations moved to app/moby/tools/salesforce.py (Phase 2 refactor)
+# Re-exported here so external callers (moby_tools.py, tests) keep working.
+from app.moby.tools.salesforce import (  # noqa: E402,F401
+    tool_salesforce_query,
+    tool_salesforce_account_extras,
+    tool_group_count_sf,
+    tool_group_agg_sf,
+    tool_time_series_sf,
+    tool_sql_query_fill_sf,
+)
 # --- _claude_chat + OpenAI-compatible adapter moved to app/moby/claude_client.py
 # (Phase 1 refactor). Shim re-exports preserve existing import paths and
 # test mock targets like backend.app.routers.ai_chat._claude_chat.
