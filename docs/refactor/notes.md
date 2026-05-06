@@ -90,6 +90,60 @@ y se moverán en Fase 3 junto con el módulo `knowledge/`.
 shims más compactos que los originales). Ningún test cambia su path de
 mock. Ningún import circular real (sólo los lazy imports documentados).
 
+## 5c. Notas de Fase 2 (extracción a `app/moby/tools/` + `tools_spec.py`)
+
+Cinco commits, sin tocar Fase 3+. Pytest se mantuvo en `624 pass / 3
+pre-existing fail` tras cada commit. SHAs (en orden):
+
+- `7e2952b` `tools_spec.py` (`TOOLS_SPEC` movido fuera de ai_chat;
+  `claude_client.py` ya importa directamente desde `app.moby.tools_spec`,
+  con lo que la indirección §5b "TOOLS_SPEC sigue allí" queda resuelta).
+- `ddfdd33` `tools/salesforce.py` — `tool_salesforce_query`,
+  `tool_salesforce_account_extras`, `tool_group_count_sf`,
+  `tool_group_agg_sf`, `tool_time_series_sf`, `tool_sql_query_fill_sf`.
+- `b552be2` `tools/explorer.py` — `tool_explorer_within_drive_km`,
+  `tool_explorer_search`, `tool_nearest_filtered_sites`,
+  `tool_rank_sites_by_group`.
+- `7f04225` `tools/members.py` — `tool_members_search`,
+  `tool_contacts_by_group`.
+- `6e57916` `tools/aggregates.py` — `tool_sql_query`, `tool_group_count`,
+  `tool_group_count_agg`, `tool_qual_search`.
+
+`ai_chat.py`: 9.526 → 8.021 líneas (-1.505 líneas en Fase 2; -2.209
+acumulado desde Fase 0). Cada nuevo módulo importa sus dependencias de
+`ai_chat` con `from app.routers import ai_chat as _ai` *dentro* de cada
+función (lazy) para evitar el ciclo: `ai_chat.py` re-exporta los
+`tool_*` desde el nuevo módulo al final del fichero. Esto preserva
+cualquier path de mock `@patch("app.routers.ai_chat.tool_*", ...)` que
+puedan tener los tests (verificado con grep antes de cada commit).
+
+Indirecciones que **siguen vivas** tras Fase 2 (se eliminan en Fase 3+):
+
+- `_anthropic_sdk` indirección dinámica (§5b) — sigue justificada por
+  los tests que parchean `app.routers.ai_chat._anthropic_sdk`.
+- Los nuevos módulos `tools/explorer.py`, `tools/members.py`,
+  `tools/aggregates.py`, `tools/salesforce.py` resuelven helpers
+  privados (`_dbg`, `_pretty_label`, `_resolve_metric`, `_ok_table`,
+  `_normalize_table_for_ui`, `_validate_soql`,
+  `_ensure_soql_has_account_id`, `_sanitize_soql_basic`,
+  `_account_extras_core`) vía `from app.routers import ai_chat as _ai`.
+  Esos helpers se moverán en Fase 3 (a `validation.py`, `tables.py`,
+  `metrics.py` o similar) y entonces los `_ai.<helper>` se reemplazarán
+  por imports directos.
+- `tool_*` no movidos en Fase 2 porque sólo aparecen como standalones
+  fuera del scope explícito de la fase: `tool_render_chart`,
+  `tool_manipulate_data`, `tool_explorer_set_filters`,
+  `tool_study_coordinators_with_activities`, las series
+  `tool_activity_*`/`tool_sites_*`/`tool_list_all_activities` y
+  `tool_rank_sites`. Quedan para Fase 3 (`chart.py`, `manipulation.py`,
+  `coordinators.py`, `activities.py`).
+
+Sorpresas de la fase: ninguna. Todos los movimientos fueron textualmente
+puros; los únicos cambios al cuerpo de las funciones fueron sustituir
+referencias directas a helpers locales por `_ai.<helper>` y reemplazar
+`tool_sql_query`/`tool_salesforce_query` por su forma `_ai.<...>`
+cuando se cruzan módulos.
+
 ## 6. Cobertura de tests añadida en Fase 0
 
 | Archivo | Tests | Cubre |
