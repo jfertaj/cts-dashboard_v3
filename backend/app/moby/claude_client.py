@@ -4,12 +4,6 @@ Pure move from `app.routers.ai_chat` (Phase 1 refactor).
 Behavior is unchanged — the function accepts the same signature, reads
 the same env vars, and returns the same OpenAI-compatible adapter.
 
-Circular-import note: `_claude_chat` references `TOOLS_SPEC` which still
-lives in `ai_chat.py`. We resolve this by importing TOOLS_SPEC lazily
-inside the function (only when `tools_override is None and not
-force_no_tools`). This deferred import is intentional and documented;
-when `TOOLS_SPEC` is moved to `app.moby.tools_spec` in a later phase,
-this lazy import becomes a normal top-level one.
 """
 import json
 import os
@@ -19,6 +13,7 @@ import anthropic as _anthropic_sdk  # noqa: F401  (kept for back-compat / direct
 
 from app.moby.config import CLAUDE_THINKING_BUDGET, DEBUG
 from app.moby.streaming import _STREAM_Q
+from app.moby.tools_spec import TOOLS_SPEC
 
 
 def _get_anthropic_sdk():
@@ -77,12 +72,7 @@ def _claude_chat(
     # 1. Convert TOOLS_SPEC (OpenAI format) → Claude format
     claude_tools = []
     if not force_no_tools:
-        if tools_override is not None:
-            source_spec = tools_override
-        else:
-            # Lazy import to avoid circular dep — TOOLS_SPEC still lives in ai_chat.
-            from app.routers.ai_chat import TOOLS_SPEC
-            source_spec = TOOLS_SPEC
+        source_spec = tools_override if tools_override is not None else TOOLS_SPEC
         for t in source_spec:
             f = t["function"]
             params = f.get("parameters") or {"type": "object", "properties": {}}
