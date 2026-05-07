@@ -73,12 +73,8 @@ from app.moby.config import (  # noqa: F401
 # _STREAM_Q moved to app.moby.streaming (Phase 1 refactor); re-exported as shim.
 from app.moby.streaming import _STREAM_Q  # noqa: F401,E402
 
-def _dbg(msg: str, *args):
-    if DEBUG:
-        try:
-            print("[AI-CHAT]", msg % args if args else msg)
-        except Exception:
-            print("[AI-CHAT]", msg)
+# _dbg moved to app.moby.helpers.debug (Phase 3 refactor); re-exported as shim.
+from app.moby.helpers.debug import _dbg  # noqa: F401,E402
 
 
 def _first_account_id_from_table(table: Optional[Dict[str, Any]]) -> Optional[str]:
