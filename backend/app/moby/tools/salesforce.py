@@ -24,7 +24,6 @@ from sqlalchemy.orm import Session
 
 
 def tool_salesforce_query(sf, soql: str):
-    from app.routers import ai_chat as _ai
     _dbg("SOQL (raw) >>> %s", soql)
     soql_plus = _ensure_soql_has_account_id(soql)
     fixed = _sanitize_soql_basic(soql_plus)
@@ -102,7 +101,6 @@ def tool_group_agg_sf(
     field: str = "",
     agg: Literal["sum", "max", "avg"] = "avg",
 ):
-    from app.routers import ai_chat as _ai
     if not sf:
         raise HTTPException(400, "No SF session")
     if not field:
@@ -142,7 +140,6 @@ def tool_time_series_sf(
     agg: Literal["sum", "max", "avg"] = "sum",
     last_n: Optional[int] = None,
 ):
-    from app.routers import ai_chat as _ai
     if not sf:
         raise HTTPException(400, "No SF session")
     func = {"sum": "SUM", "max": "MAX", "avg": "AVG"}[agg]
@@ -174,8 +171,8 @@ def tool_salesforce_account_contacts(sf, account_id: str, include_subaccounts: b
     Returns a normalized table with account_id, site, contact_id, contact_name, email, phone, title, department, role.
     """
     import os
-    from app.routers import ai_chat as _ai
     from app.moby.helpers.tables import _normalize_table_for_ui
+    from app.moby.helpers.text import _is_valid_sf_id
 
     def _list_contacts_for_accounts(ids: List[str]) -> List[Dict[str, Any]]:
         rows_local: List[Dict[str, Any]] = []
@@ -268,7 +265,7 @@ def tool_salesforce_account_contacts(sf, account_id: str, include_subaccounts: b
     rows: List[Dict[str, Any]] = []
 
     # Path A: valid Account Id
-    if account_id and _ai._is_valid_sf_id(account_id, prefix="001"):
+    if account_id and _is_valid_sf_id(account_id, prefix="001"):
         account_ids = [account_id]
         try:
             if include_subaccounts:
