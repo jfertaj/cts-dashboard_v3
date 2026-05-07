@@ -7585,34 +7585,8 @@ def chat_api(payload: ChatRequest, request: Request, db: Session = Depends(get_d
 from app.moby.helpers.soql import _sanitize_soql_basic  # noqa: F401, E402
 
 # ====== Generic metric resolver & Top-N ranking tool ======
-def _resolve_metric(alias_or_key: str, db: Session) -> Dict[str, Any]:
-    """
-    Resolve a free-text alias or raw key into:
-      - {"source":"sf","field":"<SF API name>","label":"<nice label>"}
-      - {"source":"site_qual","key":"<JSONB key>","label":"<nice label>"}
-    """
-    cache = _build_knowledge_index(db)
-    kidx = cache.get("index", {})
-    sf_fields = cache.get("sf_fields", {})
-
-    qn = _normalize(alias_or_key)
-    if qn in kidx:
-        meta = dict(kidx[qn])
-    else:
-        best = _top_matches(alias_or_key, list(kidx.keys()), k=1)
-        meta = dict(kidx.get(best[0], {})) if best else {}
-
-    # Fallbacks
-    if not meta and re.match(r"^[A-Za-z0-9_]+__c$", alias_or_key or ""):
-        meta = {"source":"sf","field": alias_or_key, "label": alias_or_key}
-    if not meta:
-        meta = {"source":"site_qual","key": alias_or_key, "label": alias_or_key}
-
-    if meta.get("source") == "sf":
-        f = meta.get("field","")
-        lab = (sf_fields.get(_normalize(f)) or {}).get("label")
-        if lab: meta["label"] = lab
-    return meta
+# _resolve_metric moved to app/moby/helpers/metrics.py (Phase 3 refactor).
+from app.moby.helpers.metrics import _resolve_metric  # noqa: F401, E402
 
 def tool_rank_sites(
     db: Session,
