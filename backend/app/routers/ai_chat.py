@@ -1218,41 +1218,8 @@ from app.moby.tools.manipulation import (  # noqa: F401
 )
 
 
-def tool_render_chart(
-    kind: Literal["bar","line","scatter","pie"],
-    data: Any,
-    xKey: str,
-    yKeys: List[str],
-    meta: Optional[Dict[str, Any]] = None,
-    options: Optional[Dict[str, Any]] = None,
-):
-    # --- normalize numeric series (so the ChartModal never says "No numeric columns detected") ---
-    rows = data or []
-    if isinstance(rows, list) and isinstance(yKeys, list):
-        norm = []
-        for r in rows:
-            rr = dict(r) if isinstance(r, dict) else r
-            if isinstance(rr, dict):
-                for y in yKeys:
-                    v = rr.get(y)
-                    if not isinstance(v, (int, float)) and v is not None:
-                        try:
-                            rr[y] = float(str(v).replace(",", ""))
-                        except Exception:
-                            rr[y] = 0
-            norm.append(rr)
-        rows = norm
-
-    return {
-        "type": "chart",
-        "visualization": {
-            "type": kind,
-            "xKey": xKey,
-            "yKeys": yKeys,
-            "data": rows,
-            "meta": meta or {},
-        }
-    }
+# --- tool_render_chart moved to app/moby/tools/chart.py (Phase 4) ---
+from app.moby.tools.chart import tool_render_chart  # noqa: F401
 
 # ====== Spec de herramientas para el modelo ======
 # TOOLS_SPEC moved to app/moby/tools_spec.py (Phase 2 refactor).
