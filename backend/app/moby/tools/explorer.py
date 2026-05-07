@@ -16,6 +16,11 @@ from __future__ import annotations
 import math
 import os
 from typing import Any, Dict, List, Literal, Optional
+from app.moby.helpers.debug import _dbg
+from app.moby.helpers.labels import _pretty_label
+from app.moby.helpers.metrics import _resolve_metric
+from app.moby.helpers.tables import _normalize_table_for_ui
+
 
 import httpx
 from fastapi import HTTPException, Request
@@ -78,7 +83,7 @@ def tool_explorer_search(
     if filters:
         _vl_errors = validate_filter_group(filters)
         if _vl_errors:
-            _ai._dbg("WARN: invalid FilterGroup from tool call: %s", _vl_errors)
+            _dbg("WARN: invalid FilterGroup from tool call: %s", _vl_errors)
             return {
                 "error": "invalid_filter_group",
                 "validation_errors": _vl_errors,
@@ -187,10 +192,10 @@ def tool_nearest_filtered_sites(
             if geo_city and geo_city.latitude and geo_city.longitude:
                 geo_lat, geo_lon = float(geo_city.latitude), float(geo_city.longitude)
                 formatted = f"{geo_city.name}, {geo_city.country_code}"
-                _ai._dbg("NEAREST: geocoded '%s' via geonames_cities → %s (%.4f, %.4f, pop=%s)",
+                _dbg("NEAREST: geocoded '%s' via geonames_cities → %s (%.4f, %.4f, pop=%s)",
                      location, formatted, geo_lat, geo_lon, geo_city.population)
     except Exception as e:
-        _ai._dbg("WARN: geonames geocode failed: %s", e)
+        _dbg("WARN: geonames geocode failed: %s", e)
 
     # 1b. Fallback to Google Geocoding API (if geonames didn't find it)
     if geo_lat is None:
@@ -208,9 +213,9 @@ def tool_nearest_filtered_sites(
                         loc = gj["results"][0]["geometry"]["location"]
                         geo_lat, geo_lon = float(loc["lat"]), float(loc["lng"])
                         formatted = gj["results"][0].get("formatted_address", location)
-                        _ai._dbg("NEAREST: geocoded '%s' via Google API → %s", location, formatted)
+                        _dbg("NEAREST: geocoded '%s' via Google API → %s", location, formatted)
             except Exception as e:
-                _ai._dbg("WARN: Google geocode failed: %s", e)
+                _dbg("WARN: Google geocode failed: %s", e)
     if geo_lat is None:
         return {"error": f"Could not geocode '{location}'."}
 
@@ -236,7 +241,7 @@ def tool_nearest_filtered_sites(
 
     # 3a. Fast path: no filters AND no SF session → query local Site table + explorer geocache
     if not has_filters and db is not None and not _has_sf_cookie:
-        _ai._dbg("NEAREST: fast-path via local DB + geocache (no filters)")
+        _dbg("NEAREST: fast-path via local DB + geocache (no filters)")
         # Lazy-import geocache + country normalizer from explorer (already loaded in memory, no overhead)
         _geo_cache_get_fn = None
         _country_norm_fn = None
@@ -244,7 +249,7 @@ def tool_nearest_filtered_sites(
             from app.utils.geo_cache import _geo_cache_get as _geo_cache_get_fn  # noqa: F401
             from app.routers.salesforce_explorer import _country_norm as _country_norm_fn  # noqa: F401
         except Exception as _imp_err:
-            _ai._dbg("NEAREST: could not import geocache helpers: %s", _imp_err)
+            _dbg("NEAREST: could not import geocache helpers: %s", _imp_err)
 
         sites_q = db.query(
             SiteModel.salesforce_account_id,
@@ -291,14 +296,14 @@ def tool_nearest_filtered_sites(
                     "distance_km": dist,
                 })
         n_total_sites = len(sites_q)
-        _ai._dbg(
+        _dbg(
             "NEAREST: fast-path: %d total sites, db_coords=%d cache_coords=%d no_coords=%d within_%skm=%d",
             n_total_sites, n_db_coords, n_cache_coords, n_no_coords, int(max_km), len(enriched),
         )
 
     # 3b. Filtered path: call /api/explorer/search (requires session cookie)
     else:
-        _ai._dbg("NEAREST: filtered-path via internal HTTP (filters=%s)", bool(has_filters))
+        _dbg("NEAREST: filtered-path via internal HTTP (filters=%s)", bool(has_filters))
         url = f"http://127.0.0.1:8000{EXPLORER_SEARCH_PATH}"
         headers = {}
         if request:
@@ -320,7 +325,7 @@ def tool_nearest_filtered_sites(
                 json={"filters": filters or {"logic": "AND", "rules": []}, "columns": _nearest_sf_cols},
                 headers=headers,
             )
-        _ai._dbg("NEAREST: explorer/search status=%d", resp.status_code)
+        _dbg("NEAREST: explorer/search status=%d", resp.status_code)
         if resp.status_code >= 400:
             raise HTTPException(resp.status_code, f"explorer_search failed: {resp.text[:300]}")
         resp_json = resp.json()
@@ -389,7 +394,7 @@ def tool_nearest_filtered_sites(
         return result
     for _ff in _collect_filter_sf_fields_fn(filters or {}):
         if _ff not in _already_col_keys:
-            _lbl = _sf_key_labels.get(_ff) or _ai._pretty_label(_ff)
+            _lbl = _sf_key_labels.get(_ff) or _pretty_label(_ff)
             columns.append({"key": _ff, "label": _lbl})
             _already_col_keys.add(_ff)
     return {
@@ -416,7 +421,7 @@ def tool_rank_sites_by_group(
     """Top-N per group (country/city) for both SF and site_qual metrics."""
     from app.routers import ai_chat as _ai
 
-    meta = _ai._resolve_metric(metric, db)
+    meta = _resolve_metric(metric, db)
     dir_sql = "ASC" if str(order).lower() == "asc" else "DESC"
     grp_col = "country" if group_by == "country" else "city"
 
@@ -453,7 +458,7 @@ def tool_rank_sites_by_group(
                 {"key": "site", "label": "Account Name"},
                 {"key": "country", "label": "Country"},
                 {"key": "city", "label": "City"},
-                {"key": f"qual.{key}", "label": _ai._pretty_label(f"qual.{key}")}
+                {"key": f"qual.{key}", "label": _pretty_label(f"qual.{key}")}
             ],
             "rows": [
                 {
@@ -466,7 +471,7 @@ def tool_rank_sites_by_group(
                 } for r in rows
             ],
         }
-        return _ai._normalize_table_for_ui(table)
+        return _normalize_table_for_ui(table)
 
     # -- SF path --
     field = meta.get("field")
@@ -522,8 +527,8 @@ def tool_rank_sites_by_group(
             {"key": "site", "label": "Account Name"},
             {"key": "country", "label": "Country"},
             {"key": "city", "label": "City"},
-            {"key": f"sf.{field}", "label": _ai._pretty_label(f"sf.{field}")},
+            {"key": f"sf.{field}", "label": _pretty_label(f"sf.{field}")},
         ],
         "rows": rows,
     }
-    return _ai._normalize_table_for_ui(table)
+    return _normalize_table_for_ui(table)

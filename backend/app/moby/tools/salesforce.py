@@ -14,6 +14,10 @@ patch `app.routers.ai_chat.tool_salesforce_query` etc. keep working.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
+from app.moby.helpers.debug import _dbg
+from app.moby.helpers.labels import _pretty_label
+from app.moby.helpers.soql import _ensure_soql_has_account_id, _sanitize_soql_basic, _validate_soql
+
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -21,20 +25,20 @@ from sqlalchemy.orm import Session
 
 def tool_salesforce_query(sf, soql: str):
     from app.routers import ai_chat as _ai
-    _ai._dbg("SOQL (raw) >>> %s", soql)
-    soql_plus = _ai._ensure_soql_has_account_id(soql)
-    fixed = _ai._sanitize_soql_basic(soql_plus)
+    _dbg("SOQL (raw) >>> %s", soql)
+    soql_plus = _ensure_soql_has_account_id(soql)
+    fixed = _sanitize_soql_basic(soql_plus)
     if fixed != soql:
-        _ai._dbg("SOQL (fixed) >>> %s", fixed)
-    _ai._validate_soql(fixed, sf)
+        _dbg("SOQL (fixed) >>> %s", fixed)
+    _validate_soql(fixed, sf)
     raw = sf.query_all(fixed)
-    _ai._dbg("SOQL <<< records=%d", len(raw.get("records", [])) if isinstance(raw, dict) else -1)
+    _dbg("SOQL <<< records=%d", len(raw.get("records", [])) if isinstance(raw, dict) else -1)
     return raw
 
 
 def tool_salesforce_account_extras(sf, account_id: str):
     from app.routers import ai_chat as _ai
-    _ai._dbg("SF extras >>> account_id=%s", account_id)
+    _dbg("SF extras >>> account_id=%s", account_id)
     if not account_id:
         raise HTTPException(400, "Missing account_id")
     data = _ai._account_extras_core(sf, account_id)
@@ -51,7 +55,7 @@ def tool_salesforce_account_extras(sf, account_id: str):
         "new_dx_u18": data.get("newDxUnder18"),
         "new_dx_o18": data.get("newDxOver18"),
     }
-    _ai._dbg("SF extras <<< member=%s | PI=%s | assignments=%d | new_u18=%s | new_o18=%s",
+    _dbg("SF extras <<< member=%s | PI=%s | assignments=%d | new_u18=%s | new_o18=%s",
              flat.get("member_name"), flat.get("pi_name"),
              flat.get("assignments_count", 0), str(flat.get("new_dx_u18")), str(flat.get("new_dx_o18")))
     return {"columns": list(flat.keys()), "rows": [[flat[k] for k in flat.keys()]]}
@@ -106,7 +110,7 @@ def tool_group_agg_sf(
     func = {"sum": "SUM", "max": "MAX", "avg": "AVG"}[agg]
     dim = (by or ["country"])[0]
     grp_field = "Account.ShippingCountry" if dim == "country" else "Account.ShippingCity"
-    _ai._validate_soql(f"SELECT {field} FROM Opportunity", sf)
+    _validate_soql(f"SELECT {field} FROM Opportunity", sf)
     soql = f"""
         SELECT {grp_field} grp, {func}({field}) value
         FROM Opportunity
@@ -126,7 +130,7 @@ def tool_group_agg_sf(
             out_rows.append({"city": g, f"sf.{field}": val})
     cols = (
         [{"key": "country", "label": "Country"}] if dim == "country" else [{"key": "city", "label": "City"}]
-    ) + [{"key": f"sf.{field}", "label": _ai._pretty_label(f"sf.{field}") + f" ({agg})"}]
+    ) + [{"key": f"sf.{field}", "label": _pretty_label(f"sf.{field}") + f" ({agg})"}]
     return {"columns": cols, "rows": out_rows}
 
 
@@ -153,13 +157,13 @@ def tool_time_series_sf(
         GROUP BY {per_fn}({date_field})
         ORDER BY {per_fn}({date_field})
     """
-    _ai._validate_soql(f"SELECT {date_field} FROM Opportunity", sf)
+    _validate_soql(f"SELECT {date_field} FROM Opportunity", sf)
     raw = tool_salesforce_query(sf, soql)
     recs = raw.get("records", []) if isinstance(raw, dict) else []
     rows = []
     for r in recs:
         rows.append({"period": r.get("expr0") or r.get("per"), f"sf.{field}": r.get("expr1") or r.get("metric")})
-    return {"columns": [{"key": "period", "label": "Period"}, {"key": f"sf.{field}", "label": _ai._pretty_label(f"sf.{field}")}], "rows": rows}
+    return {"columns": [{"key": "period", "label": "Period"}, {"key": f"sf.{field}", "label": _pretty_label(f"sf.{field}")}], "rows": rows}
 
 
 def tool_sql_query_fill_sf(
@@ -186,4 +190,4 @@ def tool_sql_query_fill_sf(
             a = m.get(aid) or {}
             for f in fields:
                 r[f"sf.Account.{f}"] = a.get(f)
-    return {"columns": [{"key": k, "label": _ai._pretty_label(k)} for k in (list(rows[0].keys()) if rows else cols)], "rows": rows}
+    return {"columns": [{"key": k, "label": _pretty_label(k)} for k in (list(rows[0].keys()) if rows else cols)], "rows": rows}

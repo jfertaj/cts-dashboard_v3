@@ -13,6 +13,11 @@ from __future__ import annotations
 import os
 import re
 from typing import Any, Dict, List, Literal, Optional
+from app.moby.helpers.debug import _dbg
+from app.moby.helpers.labels import _pretty_label
+from app.moby.helpers.metrics import _resolve_metric
+from app.moby.helpers.tables import _ok_table
+
 
 from fastapi import HTTPException
 from sqlalchemy import text
@@ -20,15 +25,14 @@ from sqlalchemy.orm import Session
 
 
 def tool_sql_query(db: Session, sql: str, params: Optional[Dict[str, Any]] = None):
-    from app.routers import ai_chat as _ai
 
-    _ai._dbg("SQL >>> %s | params=%s", sql, params)
+    _dbg("SQL >>> %s | params=%s", sql, params)
     if re.search(r"\b(insert|update|delete|alter|drop|create|grant|revoke|truncate)\b", sql, re.I):
         raise HTTPException(400, "Only read-only SELECT is allowed")
 
     suspects = re.findall(r"(?:from|join)\s+([A-Za-z0-9_\.]+)", sql, flags=re.I)
     for t in suspects:
-        if not _ai._ok_table(t):
+        if not _ok_table(t):
             raise HTTPException(400, f"Table not allowed: {t}")
 
     # Geo guard: no Postgres geo/earthdistance functions (must use Explorer within-drive-km)
@@ -129,7 +133,7 @@ def tool_sql_query(db: Session, sql: str, params: Optional[Dict[str, Any]] = Non
                     new_items.append(rebuilt)
                 sql_fixed = re.sub(r"\border\s+by\s+.*$", "ORDER BY " + ", ".join(new_items), sql_fixed, flags=re.I)
 
-            _ai._dbg("SQL fallback (alias→expr) >>> %s", sql_fixed)
+            _dbg("SQL fallback (alias→expr) >>> %s", sql_fixed)
             # Antes de reintentar, limpiar cualquier estado de error previo
             try:
                 db.rollback()
@@ -151,7 +155,6 @@ def tool_group_count(
     by: List[Literal["country", "city"]],
     where: Optional[Dict[str, Any]] = None,
 ):
-    from app.routers import ai_chat as _ai
 
     by = by or ["country"]
     cols = ["s.country" if b == "country" else "s.city" for b in by]
@@ -160,7 +163,7 @@ def tool_group_count(
     where_sql = "1=1"
     params: Dict[str, Any] = {}
     if where and where.get("key"):
-        meta = _ai._resolve_metric(where.get("key"), db)
+        meta = _resolve_metric(where.get("key"), db)
         if meta.get("source") != "site_qual":
             raise HTTPException(400, "group_count only supports site_qual filters for now")
         k = meta.get("key")
@@ -199,7 +202,6 @@ def tool_group_count_agg(
     metric: Optional[str] = None,
     agg: Literal["avg", "sum", "ratio_exists"] = "avg",
 ):
-    from app.routers import ai_chat as _ai
 
     by = by or ["country"]
     cols = ["s.country" if b == "country" else "s.city" for b in by]
@@ -208,7 +210,7 @@ def tool_group_count_agg(
     if agg == "ratio_exists":
         if not metric:
             raise HTTPException(400, "metric required for ratio_exists")
-        meta = _ai._resolve_metric(metric, db)
+        meta = _resolve_metric(metric, db)
         if meta.get("source") != "site_qual":
             raise HTTPException(400, "ratio_exists only supports site_qual")
         k = meta.get("key")
@@ -233,7 +235,7 @@ def tool_group_count_agg(
     # avg/sum
     if not metric:
         raise HTTPException(400, "metric required for avg/sum")
-    meta = _ai._resolve_metric(metric, db)
+    meta = _resolve_metric(metric, db)
     if meta.get("source") != "site_qual":
         raise HTTPException(400, "only site_qual supported here")
     k = meta.get("key")
@@ -254,7 +256,7 @@ def tool_group_count_agg(
         for i, b in enumerate(by):
             rr[b] = r.get(cols[i])
         res.append(rr)
-    return {"columns": [{"key": b, "label": b.title()} for b in by] + [{"key": "value", "label": _ai._pretty_label(f"qual.{k}") + f" ({agg})"}], "rows": res}
+    return {"columns": [{"key": b, "label": b.title()} for b in by] + [{"key": "value", "label": _pretty_label(f"qual.{k}") + f" ({agg})"}], "rows": res}
 
 
 def tool_qual_search(
