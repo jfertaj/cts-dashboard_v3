@@ -77,30 +77,15 @@ from app.moby.streaming import _STREAM_Q  # noqa: F401,E402
 from app.moby.helpers.debug import _dbg  # noqa: F401,E402
 
 
-def _first_account_id_from_table(table: Optional[Dict[str, Any]]) -> Optional[str]:
-    if not table or not isinstance(table.get("rows"), list):
-        return None
-    for r in table["rows"]:
-        aid = r.get("account_id") or r.get("sf.Account.Id") or r.get("sf.AccountId") or r.get("Account.Id")
-        if aid: return str(aid)
-
-# Simple validator for Salesforce 15/18-char Ids (optionally enforce Account prefix '001')
-import re as _re_id
-
-def _is_valid_sf_id(s: Optional[str], prefix: Optional[str] = None) -> bool:
-    if not s or not isinstance(s, str):
-        return False
-    if not _re_id.match(r"^[0-9A-Za-z]{15}(?:[0-9A-Za-z]{3})?$", s):
-        return False
-    if prefix and not s.startswith(prefix):
-        return False
-    return True
+# _first_account_id_from_table, _is_valid_sf_id, _clean_text moved to
+# app/moby/helpers/text.py (Phase 5b refactor). Shim re-exports.
+from app.moby.helpers.text import (  # noqa: E402,F401
+    _first_account_id_from_table,
+    _is_valid_sf_id,
+    _clean_text,
+)
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
-
-def _clean_text(s: str) -> str:
-    # Elimina restos como "<table>" del texto del asistente
-    return re.sub(r"\s*<table>\s*", "", s or "").strip()
 
 # ====== Tipos ======
 # Moved to app.moby.schemas (Phase 1 refactor); re-exported as shim.
