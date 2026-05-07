@@ -182,3 +182,44 @@ tests existentes.
 
 Pytest tras cada commit: **624 passed, 3 failed** (los 3 fallos pre-existentes
 en `test_moby_planner.py` no relacionados con la refactorización).
+
+## 5e. Notas de Fase 4
+
+Extracción de las herramientas `tool_*` independientes que aún vivían en
+`app/routers/ai_chat.py` a módulos dedicados bajo `app/moby/tools/`. Cada
+commit es un *pure move* (sin cambios de comportamiento) seguido de
+`pytest backend/tests/` con resultado **624 passed, 3 failed** (mismos
+3 fallos pre-existentes).
+
+| Commit | SHA | Tools movidos | Archivo destino | Líneas movidas |
+|---|---|---|---|---|
+| 1 | `0a63c0c` | `tool_sites_by_activity`, `tool_sites_with_any_activity`, `tool_list_all_activities`, `tool_activities_with_countries`, `tool_activity_counts_by_country`, `tool_activity_country_matrix`, `tool_activities_with_assignments_counts`, `tool_activity_assignments_detailed`, `tool_activity_sites_by_country` (9 funciones) | `tools/activities.py` (740 L) | –714 |
+| 2 | `de8d375` | `tool_study_coordinators_with_activities` | `tools/coordinators.py` (255 L) | –233 |
+| 3 | `f526938` | `tool_explorer_set_filters`, `tool_manipulate_data` | `tools/manipulation.py` (184 L) | –162 |
+| 4 | `f1279c5` | `tool_render_chart` | `tools/chart.py` (46 L) | –33 |
+| 5 | `3f31bbe` | `tool_rank_sites` | `tools/ranking.py` (151 L) | –129 |
+
+Notas:
+
+- Step 1 incluye 9 funciones (no 7 como inicialmente planeado): el bloque
+  contiguo en ai_chat.py contenía además `tool_activities_with_countries`
+  y `tool_activities_with_assignments_counts`, que son tools de Activity y
+  encajan naturalmente en el mismo módulo.
+- Step 4 (`tool_render_chart`) era de **35 líneas**, no ~5 270 como sugería
+  el plan inicial — ese cálculo confundía el rango con el resto de
+  `ai_chat.py`. La extracción es trivial (función pura sin helpers).
+- Todas las tools nuevas re-importan los helpers directamente desde
+  `app/moby/helpers/*` (protocolo post-Fase-3); ninguna usa
+  `from app.routers import ai_chat as _ai`.
+- Shims `from app.moby.tools.<mod> import tool_*  # noqa: F401` quedan en
+  `ai_chat.py` para preservar `@patch("app.routers.ai_chat.tool_*")` y
+  los imports externos (`moby_handlers.py`, `moby_tools.py`).
+
+`backend/app/routers/ai_chat.py` queda en **6 459 líneas** (desde 7 721 al
+inicio de Fase 4, –1 262 líneas / –16 %). Las extracciones de tool
+standalones quedan **cerradas**: lo que resta en `ai_chat.py` son
+`_try_planner` (deterministic handlers), `chat_api` / `chat_api_stream`,
+`_agentic_loop`, `_dispatch_tool_calls` y los tools que dependen de
+estado del request (`tool_salesforce_account_contacts`,
+`tool_salesforce_assignments`) — Fase 5+ decidirá si se extraen también.
+
