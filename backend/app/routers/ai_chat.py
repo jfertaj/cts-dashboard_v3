@@ -692,52 +692,8 @@ def _extract_structured(content: str) -> Dict[str, Any]:
     return out
 
 # --------- Etiquetas “humanas” para columnas ----------
-def _pretty_label(key: str) -> str:
-    """
-    Convierte claves técnicas en etiquetas legibles (no cambia las keys reales).
-    """
-    k = key or ""
-    # sf.* -> usa label de catálogo cuando exista
-    if k.startswith("sf."):
-        core = k[3:]
-        # Mapa rápido para Account.*
-        if core == "Account.Name":       return "Account Name"
-        if core == "Account.Id":         return "Account Id"
-        if core == "Account.ShippingCountry": return "Country"
-        if core == "Account.ShippingCity":    return "City"
-        # Detectar expresiones de agregación de Salesforce (expr0, expr1, etc.)
-        if re.match(r"^expr\d+$", core, re.I):
-            return "Average"  # genérico para AVG, COUNT, etc.
-        # intenta catálogo
-        lbl = (_INDEX_CACHE.get("sf_fields") or {}).get(_normalize(core), {}) or {}
-        if isinstance(lbl, dict) and lbl.get("label"):
-            return lbl["label"]
-        # último recurso: heurística específica para API names
-        return _prettify_sf_field_name(core)
-    # Detectar expresiones agregadas sin prefijo sf. (expr0, expr1)
-    if re.match(r"^expr\d+$", k, re.I):
-        return "Average"
-    # qual.* -> humaniza
-    if k.startswith("qual."):
-        base = k.split(".",1)[1]
-        base = re.sub(r"__c$", "", base).replace("_", " ")
-        return _apply_common_rewrites(base)
-    if k.startswith("profil.") or k.startswith("profiling."):
-        base = k.split(".",1)[1]
-        base = re.sub(r"__c$", "", base).replace("_", " ")
-        return _apply_common_rewrites(base)
-    # extra.* y otros
-    if k.startswith("extra."):
-        return k.split(".",1)[1].replace("_"," ").title()
-    if k in ("site","city","country","account_id","distance_km"):
-        return {"site":"Account Name","city":"City","country":"Country","account_id":"Account Id","distance_km":"Distance (km)"}[k]
-    # Account fields sin prefijo (ShippingCity, ShippingCountry)
-    if k == "ShippingCity": return "City"
-    if k == "ShippingCountry": return "Country"
-    if k.lower() == "shippingcity": return "City"
-    if k.lower() == "shippingcountry": return "Country"
-    # por defecto humaniza
-    return _apply_common_rewrites(re.sub(r"[_]+"," ",k))
+# _pretty_label moved to app/moby/helpers/labels.py (Phase 3 refactor).
+from app.moby.helpers.labels import _pretty_label  # noqa: F401, E402
 
 # _ok_table moved to app/moby/helpers/tables.py (Phase 3 refactor).
 from app.moby.helpers.tables import _ok_table  # noqa: F401, E402

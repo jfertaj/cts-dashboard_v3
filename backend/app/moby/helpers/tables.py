@@ -30,7 +30,7 @@ def _normalize_table_for_ui(table: Optional[Dict[str, Any]]) -> Optional[Dict[st
       - country / city (desprefijando sitios comunes)
     No cambia los labels, solo agrega claves adicionales en rows (y añade columns si no existen).
     """
-    from app.routers.ai_chat import _pretty_label
+    from app.moby.helpers.labels import _pretty_label
 
     if not table or not isinstance(table, dict):
         return table
