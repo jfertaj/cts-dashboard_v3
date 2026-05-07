@@ -223,3 +223,39 @@ standalones quedan **cerradas**: lo que resta en `ai_chat.py` son
 estado del request (`tool_salesforce_account_contacts`,
 `tool_salesforce_assignments`) — Fase 5+ decidirá si se extraen también.
 
+## 5f. Notas de Fase 5a+5b
+
+Branch: `refactor/moby-phase5`. Baseline pytest pre-fase: **624 passed,
+3 pre-existing failed** (`test_moby_planner.py` — sin relación). Mantenido
+en cada commit.
+
+| Step | SHA       | Extracción                                                 | Destino                                    |
+|------|-----------|------------------------------------------------------------|--------------------------------------------|
+| 1    | `293bbff` | `tool_salesforce_account_contacts` + `tool_salesforce_assignments` | `tools/salesforce.py` (append)             |
+| 2    | `0f70d9d` | `_normalize`, `_smart_title`, `_apply_common_rewrites`, `_prettify_sf_field_name` | `knowledge/text.py` (new)                  |
+| 3    | `3d7c051` | `_load_sf_fields`, `_introspect_*`, `_load_qual_aliases`, `_build_knowledge_index`, `_INDEX_CACHE` | `knowledge/index.py` (new)                 |
+| 4    | `9ffa2e2` | `_format_hints_block`, `_semantic_field_hints`, `_top_matches` | `knowledge/hints.py` (new)                 |
+| 5    | `e2d69a7` | `_extract_structured`                                      | `knowledge/parsing.py` (new)               |
+| 6    | `0177e2b` | `_is_complex_query`, `_truncate_history`, `_dispatch_tool_calls`, `_agentic_loop` | `loop.py` (new)                            |
+| 7    | `13302da` | `_first_account_id_from_table`, `_is_valid_sf_id`, `_clean_text` | `helpers/text.py` (new)                    |
+| 8    | `8b4ae90` | `_describe_fields`, `_short_circuit_aggregation_lines`, `_sf_escape_value` (+ `_AGGREGATION_*`) | `helpers/sf.py` (new)                      |
+| 9    | `b39e3c7` | Drop dead `_ai` lazy imports en 5 tool functions           | `tools/explorer.py`, `tools/salesforce.py` |
+
+Notas:
+
+- `_INDEX_CACHE` se mueve a `knowledge/index.py` y se re-exporta desde
+  `ai_chat.py` para preservar el contrato con `moby_tools.py` y
+  `helpers/labels.py`.
+- `loop.py` late-binds `_claude_chat`, `_synthesis_fallback` y
+  `_monotonic` vía `app.routers.ai_chat as _ai` para preservar los mocks
+  `@patch("app.routers.ai_chat._claude_chat")` y similares.
+- `tool_salesforce_account_contacts` ahora importa `_is_valid_sf_id`
+  directamente desde `app.moby.helpers.text` en vez de via `_ai`.
+- **Diferido a Fase 5c**: `chat_api` (~4 744 L) y el `_try_planner`
+  anidado dentro. Requieren un trabajo previo de des-anidar closures y
+  no entran en el scope de 5a+5b.
+
+`backend/app/routers/ai_chat.py` queda en **5 182 líneas** (desde 6 459
+al inicio de Fase 5, –1 277 líneas / –20 %). El bulk restante es
+exclusivamente `chat_api` + `_try_planner`.
+
