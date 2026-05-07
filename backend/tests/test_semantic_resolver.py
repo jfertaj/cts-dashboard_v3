@@ -160,12 +160,15 @@ def test_top_matches_flag_off_uses_lexical(monkeypatch):
 
 
 def test_top_matches_flag_on_still_uses_lexical(monkeypatch):
-    """Option A: _top_matches no longer calls the semantic resolver — semantic
-    guidance now lives in the system prompt via _semantic_field_hints."""
+    """Option A: _top_matches uses pure lexical matching regardless of the flag.
+    Semantic guidance lives in the system prompt via _semantic_field_hints
+    (wired in chat_api), and the deprecated `_semantic_top_matches` branch was
+    deleted on `refactor/moby-modularize` (Fase 0)."""
     monkeypatch.setenv("MOBY_SEMANTIC_FIELD_RESOLVER", "1")
     from app.routers import ai_chat
 
-    sentinel = mock.MagicMock(side_effect=AssertionError("must not be called"))
-    with mock.patch.object(ai_chat, "_semantic_top_matches", side_effect=sentinel):
-        out = ai_chat._top_matches("stage 1", ["stage 1", "hla typing"], k=2)
+    # Sanity: the deprecated symbol is gone.
+    assert not hasattr(ai_chat, "_semantic_top_matches")
+
+    out = ai_chat._top_matches("stage 1", ["stage 1", "hla typing"], k=2)
     assert "stage 1" in out

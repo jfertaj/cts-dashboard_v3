@@ -1,0 +1,420 @@
+{
+  "flag": "off",
+  "timestamp": "2026-05-05T06:20:47.989116+00:00",
+  "api_base": "http://localhost:8000",
+  "queries_file": "docs/moby-semantic-eval-queries.json",
+  "summary": {
+    "queries_total": 30,
+    "queries_passed": 23,
+    "pass_rate": 0.7666666666666667,
+    "http_errors": 0,
+    "p50_total_ms": 12969.1,
+    "p95_total_ms": 37192.4,
+    "semantic_metrics": {
+      "available": false,
+      "reason": "flag=off"
+    }
+  },
+  "queries": [
+    {
+      "id": "EN-01",
+      "lang": "en",
+      "category": "simple-count",
+      "query": "How many sites are in Spain?",
+      "http": 200,
+      "latency_ms": 23486.9,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": true
+      },
+      "response_snippet": "There are **20 active clinical sites in Spain** in the INNODIA network. They are spread across 9 cities, with **Madrid** being the most represented (6 sites), followed by **Sevilla** (3 sites) and **Valencia** and **Barcelona** (2 sites each). The largest site by T1D patient volume is Hospital Universitario Virgen del Roc\u00edo (Sevilla) with 3,700 adult patients and 500 pediatric patients currently under care.\n\n| # | Site | City | T1D <18 | T1D \u226518 | ND <18 | ND \u226518 |\n|---|------|------|---------|-"
+    },
+    {
+      "id": "EN-02",
+      "lang": "en",
+      "category": "simple-count",
+      "query": "List CTS in France",
+      "http": 200,
+      "latency_ms": 28073.9,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": true
+      },
+      "response_snippet": "There are **21 Clinical Trial Sites (CTS) in France**, spread across 11 cities. Paris has the highest concentration with **6 sites**, followed by Nice (2) and Bondy (2). Standout sites by patient volume include **CHU de Montpellier** (5,000 current T1D \u226518, 800 <18) and **Robert Debre University Hospital** (850 current T1D <18, 80 ND <18). H\u00f4pital Necker-Enfants Malades leads on Stage 1 tracking (10 individuals followed).\n\n<table>\n  <thead>\n    <tr>\n      <th>Site</th>\n      <th>City</th>\n      "
+    },
+    {
+      "id": "EN-03",
+      "lang": "en",
+      "category": "simple-count",
+      "query": "How many active sites are there?",
+      "http": 200,
+      "latency_ms": 14818.9,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "count_range": true
+      },
+      "response_snippet": "There are **209 active clinical sites** in the INNODIA network. The results span multiple countries, with Italy, Spain, Germany, and the UK being among the most represented. Notable standouts include Steno Diabetes Center Copenhagen, which has one of the highest patient volumes with 5,500 T1D patients (\u226518) and 1,000 under 18. (Source: Salesforce)"
+    },
+    {
+      "id": "EN-04",
+      "lang": "en",
+      "category": "simple-count",
+      "query": "Sites in Italy?",
+      "http": 200,
+      "latency_ms": 37192.4,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": false
+      },
+      "response_snippet": "<p>Italy is the <strong>largest country</strong> in the INNODIA network with <strong>70 active sites</strong> spread across the country \u2014 from Turin and Milan in the north to Naples, Palermo, and Catania in the south. The network covers a wide range of cities including Rome, Florence, Bologna, Padova, Genoa, Trieste, and many more.</p>\n\n<p><strong>San Raffaele Hospital (Milan)</strong> stands out with the highest combined T1D patient load (1,200 under-18 + 1,200 over-18), and also leads in newly"
+    },
+    {
+      "id": "EN-05",
+      "lang": "en",
+      "category": "simple-count",
+      "query": "How many opportunities are there in Germany?",
+      "http": 200,
+      "latency_ms": 16570.3,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": true
+      },
+      "response_snippet": "<p>There are <strong>9 active clinical sites (opportunities) in Germany</strong> within the INNODIA network. They span 9 different cities \u2014 from Hamburg in the north to Augsburg in the south. <strong>Hannoversche Kinderheilanstalt</strong> (Hannover) stands out with the highest number of current T1D patients under 18 (900), while <strong>Catholic Children's Hospital WilhelmStift</strong> (Hamburg) leads in newly diagnosed patients under 18 (70).</p>\n\n| Site | City | Current T1D <18 | Current T1D"
+    },
+    {
+      "id": "EN-06",
+      "lang": "en",
+      "category": "synonym",
+      "query": "pediatric T1D follow-up for kids under 18",
+      "http": 200,
+      "latency_ms": 4614.7,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "I need to clarify what you're looking for before fetching data.\n\nAre you interested in:\n\n1. **Currently followed T1D patients under 18** \u2014 how many kids each site is currently caring for?\n2. **Newly diagnosed T1D under 18** \u2014 how many new diagnoses (last year) per site?\n3. **Both** \u2014 current patients <18 AND newly diagnosed <18 side by side?\n\nAlso, any geographic filter (country, region) or should I fetch **all sites globally**?"
+    },
+    {
+      "id": "EN-07",
+      "lang": "en",
+      "category": "synonym",
+      "query": "centres recruiting Stage 2",
+      "http": 200,
+      "latency_ms": 24788.3,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "<p><strong>44 centres</strong> across 15 countries are currently following Stage 2 pre-symptomatic individuals. The clear leader is <strong>Motol University Hospital</strong> (Prague, CZ) with 120 Stage 2 individuals, followed by <strong>Medical University in Bialystok</strong> (Poland, 30) and <strong>Fondazione Policlinico Gemelli</strong> (Rome, Italy, 20). Italy has the most sites represented (13 sites), with France (7) and Spain (5) next.</p>\n\n<p>Note: some rows from the query returned Stag"
+    },
+    {
+      "id": "EN-08",
+      "lang": "en",
+      "category": "synonym",
+      "query": "HLA typed individuals",
+      "http": 200,
+      "latency_ms": 4725.2,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "I need to clarify what you're looking for. When you say \"HLA typed individuals,\" do you mean:\n\n1. **Sites that perform HLA typing** (i.e., where `C_Is_HLA_typing_performed__c = 'Yes'`)\n2. **The number of HLA-typed individuals** per site (a specific count field)\n\nAlso, could you clarify:\n- **Age group**: <18, \u226518, or both?\n- **Any country/region filter**, or all sites globally?\n\nPlease let me know and I'll fetch the data right away!"
+    },
+    {
+      "id": "EN-09",
+      "lang": "en",
+      "category": "synonym",
+      "query": "ND consenters with islet autoantibodies",
+      "http": 200,
+      "latency_ms": 5138.4,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "<p>Found <strong>99</strong> site(s).</p>"
+    },
+    {
+      "id": "EN-10",
+      "lang": "en",
+      "category": "synonym",
+      "query": "first-degree relatives followed",
+      "http": 200,
+      "latency_ms": 10531.1,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "field_mention_any": false
+      },
+      "response_snippet": "I wasn't able to answer that. Could you rephrase or break it into smaller questions?"
+    },
+    {
+      "id": "ES-01",
+      "lang": "es",
+      "category": "simple-count",
+      "query": "\u00bfCu\u00e1ntos centros hay en Espa\u00f1a?",
+      "http": 200,
+      "latency_ms": 13375.4,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": true
+      },
+      "response_snippet": "<p>Hay <strong>20 centros activos</strong> en Espa\u00f1a dentro de la red INNODIA. Se distribuyen principalmente en <strong>Madrid</strong> (6 centros), <strong>Sevilla</strong> (3 centros) y <strong>Valencia</strong> y <strong>Barcelona</strong> (2 cada una). El centro con mayor n\u00famero de pacientes T1D actualmente en seguimiento es el <strong>Hospital Universitario Virgen del Roc\u00edo</strong> (Sevilla), con 3.700 adultos y 500 pacientes pedi\u00e1tricos.</p>\n\n<p>(Fuente: Salesforce)</p>"
+    },
+    {
+      "id": "ES-02",
+      "lang": "es",
+      "category": "synonym",
+      "query": "sitios pedi\u00e1tricos T1D menores 18",
+      "http": 200,
+      "latency_ms": 22517.9,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "<p><strong>137 sitios cl\u00ednicos activos</strong> en la red INNODIA reportan pacientes T1D <strong>menores de 18 a\u00f1os</strong>. Los l\u00edderes son <strong>Poznan University of Medical Sciences</strong> (Polonia) y <strong>Helsinki University Hospital</strong> (Finlandia), ambos con 1.500 pacientes pedi\u00e1tricos activos, seguidos de <strong>San Raffaele Hospital</strong> (Mil\u00e1n, Italia) y <strong>Children's Health Ireland</strong> (Dubl\u00edn) con 1.200 cada uno. Italia domina num\u00e9ricamente con el mayor n\u00fam"
+    },
+    {
+      "id": "ES-03",
+      "lang": "es",
+      "category": "synonym",
+      "query": "\u00bfqu\u00e9 centros tienen ND seguidos en estadio 1?",
+      "http": 200,
+      "latency_ms": 13820.5,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Se encontraron **14 centros** que combinan pacientes reci\u00e9n diagnosticados (ND) con individuos en seguimiento en Estadio 1. Italia lidera con 6 centros (destacando **San Raffaele Hospital** en Mil\u00e1n con 30 en Estadio 1 y **A.O.O.R. Villa Sofia-Cervello** en Palermo tambi\u00e9n con 30), seguidos de Espa\u00f1a (3 centros) y Francia (2). **Cruces University Hospital** en Bilbao destaca con 12 en Estadio 1."
+    },
+    {
+      "id": "ES-04",
+      "lang": "es",
+      "category": "aggregate",
+      "query": "actividades por pa\u00eds",
+      "http": 200,
+      "latency_ms": 4620.9,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Voy a buscar las actividades con sus pa\u00edses participantes ahora mismo."
+    },
+    {
+      "id": "ES-05",
+      "lang": "es",
+      "category": "coordinators",
+      "query": "coordinadores de estudio en Italia",
+      "http": 200,
+      "latency_ms": 12969.1,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "country": true,
+        "field_mention_any": false
+      },
+      "response_snippet": "Intentar\u00e9 con una b\u00fasqueda m\u00e1s amplia de contactos en sitios italianos."
+    },
+    {
+      "id": "IT-01",
+      "lang": "it",
+      "category": "simple-count",
+      "query": "quanti siti in Italia?",
+      "http": 200,
+      "latency_ms": 17797.7,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": false
+      },
+      "response_snippet": "In Italia ci sono **70 siti clinici attivi** nella rete INNODIA. Le citt\u00e0 pi\u00f9 rappresentate sono **Milano** (con almeno 5 siti, tra cui San Raffaele, Niguarda e University of Milan) e **Roma**, **Torino**, **Catania** e **Padova**. Il <strong>San Raffaele Hospital</strong> spicca per il maggior numero di pazienti T1D seguiti (1.200 pediatrici + 1.200 adulti), mentre l'<strong>AOU Citt\u00e0 della Salute di Torino</strong> (adulti) ne conta 1.400 over 18.\n\n<p><em>Fonte: Salesforce + Qual DB</em></p>"
+    },
+    {
+      "id": "IT-02",
+      "lang": "it",
+      "category": "synonym",
+      "query": "centri pediatrici T1D under 18",
+      "http": 200,
+      "latency_ms": 8108.9,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Sto cercando i centri con pazienti T1D attualmente in cura under 18. Recupero i dati da Salesforce."
+    },
+    {
+      "id": "IT-03",
+      "lang": "it",
+      "category": "synonym",
+      "query": "stadio 2 individui seguiti",
+      "http": 200,
+      "latency_ms": 9770.4,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Cerco i dati sugli individui in Stage 2 seguiti per tutti i siti della rete INNODIA."
+    },
+    {
+      "id": "IT-04",
+      "lang": "it",
+      "category": "coordinators",
+      "query": "coordinatori per nazione",
+      "http": 200,
+      "latency_ms": 9674.4,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "field_mention_any": false
+      },
+      "response_snippet": "<p><strong>154 sites</strong> found.</p>"
+    },
+    {
+      "id": "FR-01",
+      "lang": "fr",
+      "category": "simple-count",
+      "query": "combien de sites en France?",
+      "http": 200,
+      "latency_ms": 16422.7,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": true
+      },
+      "response_snippet": "<p>Il y a <strong>31 sites cliniques actifs en France</strong> dans le r\u00e9seau INNODIA. Ils sont r\u00e9partis dans <strong>14 villes</strong>, avec une forte concentration \u00e0 <strong>Paris</strong> (9 sites), suivi de <strong>Toulouse</strong> et <strong>Nice</strong> (2 chacun). Le site le mieux dot\u00e9 en patients DT1 p\u00e9diatriques actuels est <strong>Toulouse University Hospital_CS-Ped</strong> (1 100 patients &lt;18 ans), tandis que le CHU de Montpellier se distingue avec 5 000 patients adultes.</p>\n\n"
+    },
+    {
+      "id": "FR-02",
+      "lang": "fr",
+      "category": "synonym",
+      "query": "suivi p\u00e9diatrique T1D moins de 18 ans",
+      "http": 200,
+      "latency_ms": 7777.8,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Je vais r\u00e9cup\u00e9rer les donn\u00e9es sur le suivi p\u00e9diatrique T1D (patients actuellement suivis de moins de 18 ans) pour tous les sites du r\u00e9seau INNODIA."
+    },
+    {
+      "id": "FR-03",
+      "lang": "fr",
+      "category": "synonym",
+      "query": "centres avec typage HLA",
+      "http": 200,
+      "latency_ms": 9735.4,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Je recherche les sites avec le typage HLA effectu\u00e9 dans Salesforce."
+    },
+    {
+      "id": "FR-04",
+      "lang": "fr",
+      "category": "aggregate",
+      "query": "activit\u00e9s par pays",
+      "http": 200,
+      "latency_ms": 4828.6,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Je vais r\u00e9cup\u00e9rer les activit\u00e9s avec leurs pays participants !"
+    },
+    {
+      "id": "DE-01",
+      "lang": "de",
+      "category": "simple-count",
+      "query": "Wie viele Standorte in Deutschland?",
+      "http": 200,
+      "latency_ms": 18879.5,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "count_range": true
+      },
+      "response_snippet": "<p>Es gibt <strong>9 aktive Standorte in Deutschland</strong>. Die meisten sind p\u00e4diatrische Kliniken (CS-Ped), verteilt \u00fcber verschiedene St\u00e4dte. <strong>Hannover</strong> hat mit 900 T1D-Patienten unter 18 die h\u00f6chste Patientenzahl, w\u00e4hrend <strong>Hamburg (WilhelmStift)</strong> mit 70 die meisten neu diagnostizierten Patienten unter 18 im letzten Jahr aufweist. Ulm ist der einzige Standort mit nennenswerter Aktivit\u00e4t sowohl bei Erwachsenen als auch bei Kindern (je 35 neu diagnostiziert).</p>"
+    },
+    {
+      "id": "DE-02",
+      "lang": "de",
+      "category": "synonym",
+      "query": "p\u00e4diatrische T1D Nachsorge unter 18",
+      "http": 200,
+      "latency_ms": 7218.5,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Ich suche nach den Standorten mit den meisten aktuellen T1D-Patienten unter 18 Jahren."
+    },
+    {
+      "id": "DE-03",
+      "lang": "de",
+      "category": "synonym",
+      "query": "Stadium 1 verfolgte Personen",
+      "http": 200,
+      "latency_ms": 58377.4,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "<p><strong>50 klinische Standorte</strong> haben Daten zu verfolgten Personen in <strong>Stadium 1 (pr\u00e4symptomatisch)</strong>. Den h\u00f6chsten Wert verzeichnet die <strong>Medical University in Bialystok</strong> (Polen) mit <strong>180 Personen</strong>, gefolgt von <strong>Turku University Hospital</strong> (Finnland) mit <strong>100</strong> und <strong>University of Naples Federico II</strong> (Italien) mit <strong>35</strong>. Mehrere Standorte melden einen Wert von 0 f\u00fcr Stadium 1, verfolgen"
+    },
+    {
+      "id": "DE-04",
+      "lang": "de",
+      "category": "coordinators",
+      "query": "Studienkoordinatoren pro Land",
+      "http": 200,
+      "latency_ms": 4225.1,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "field_mention_any": true
+      },
+      "response_snippet": "Ich suche nach Studienkoordinatoren gruppiert nach Land."
+    },
+    {
+      "id": "AMB-01",
+      "lang": "en",
+      "category": "ambiguous",
+      "query": "show me everything in Spain about kids",
+      "http": 200,
+      "latency_ms": 25790.5,
+      "pass_overall": true,
+      "pass_breakdown": {
+        "country": true,
+        "clarify_or_data": true
+      },
+      "response_snippet": "Here is a comprehensive overview of **pediatric T1D data across all 20 Spanish sites** in the INNODIA network. Madrid has the highest concentration of sites (7), followed by Sevilla (3) and Valencia (2). The standout sites for kids under 18 are **Hospital Universitario Virgen del Roc\u00edo (Sevilla, Ped)** and **La Fe University Hospital (Valencia)**, both reporting 500 current T1D patients under 18, while **Cruces University Hospital (Bilbao)** leads in pre-symptomatic screening with 3,000 individu"
+    },
+    {
+      "id": "AMB-02",
+      "lang": "en",
+      "category": "multi-intent",
+      "query": "pediatric centres with HLA and Stage 2",
+      "http": 200,
+      "latency_ms": 4824.6,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "field_mention_any": false
+      },
+      "response_snippet": "<p>Found <strong>38</strong> site(s).</p>"
+    },
+    {
+      "id": "AMB-03",
+      "lang": "en",
+      "category": "multi-intent",
+      "query": "compare ND and T1D by country",
+      "http": 200,
+      "latency_ms": 15742.9,
+      "pass_overall": false,
+      "pass_breakdown": {
+        "field_mention_any": false
+      },
+      "response_snippet": "I wasn't able to answer that. Could you rephrase or break it into smaller questions?"
+    }
+  ]
+}
