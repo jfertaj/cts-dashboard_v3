@@ -166,6 +166,324 @@ def tool_time_series_sf(
     return {"columns": [{"key": "period", "label": "Period"}, {"key": f"sf.{field}", "label": _pretty_label(f"sf.{field}")}], "rows": rows}
 
 
+def tool_salesforce_account_contacts(sf, account_id: str, include_subaccounts: bool = False, role_contains: Optional[str] = None, roles: Optional[List[str]] = None, title_contains: Optional[str] = None, country: Optional[str] = None, city: Optional[str] = None):
+    """Fetch contacts by Account OR by geography when no Account Id is given.
+    - If account_id is valid: returns contacts for that Account (and optionally child Accounts).
+    - Else if country/city is provided (or a non-Id account_id that looks like a place), search Accounts in that geography
+      restricted to Clinical SubAccounts, then return contacts filtered by roles/title.
+    Returns a normalized table with account_id, site, contact_id, contact_name, email, phone, title, department, role.
+    """
+    import os
+    from app.routers import ai_chat as _ai
+    from app.moby.helpers.tables import _normalize_table_for_ui
+
+    def _list_contacts_for_accounts(ids: List[str]) -> List[Dict[str, Any]]:
+        rows_local: List[Dict[str, Any]] = []
+        if not ids:
+            return rows_local
+        ids_clause = ", ".join([f"'{i}'" for i in set(ids)])
+        roles_env = [s.strip() for s in (os.environ.get("SF_CONTACT_ROLES", "").split(",")) if s.strip()]
+        role_list = roles if roles and len(roles) else roles_env
+        if role_list:
+            role_vals = ", ".join([f"'{r}'" for r in role_list])
+            soql = (
+                "SELECT Id, AccountId, ContactId, Role__c, "
+                "Contact.Name, Contact.Email, Contact.Phone, Contact.Title, Contact.Department, "
+                "Account.Name "
+                "FROM AccountContactRelation "
+                f"WHERE AccountId IN ({ids_clause}) AND Role__c IN ({role_vals}) "
+            )
+            if title_contains:
+                title_escaped = title_contains.replace("'", "\\'")
+                # ampliar variantes: 'Study Coord', 'Coordinator', 'Co-ordinator', prefijo 'Coordinat'
+                soql += (
+                    f" AND (Contact.Title LIKE '%{title_escaped}%'"
+                    f" OR Contact.Title LIKE '%Coordinat%')"
+                )
+            soql += " ORDER BY AccountId, Contact.Name"
+            raw = sf.query_all(soql)
+            for r in raw.get("records", []):
+                acc = r.get("Account") or {}
+                c = r.get("Contact") or {}
+                rows_local.append({
+                    "account_id": r.get("AccountId"),
+                    "site": acc.get("Name"),
+                    "contact_id": r.get("ContactId"),
+                    "contact_name": c.get("Name"),
+                    "email": c.get("Email"),
+                    "phone": c.get("Phone"),
+                    "title": c.get("Title"),
+                    "department": c.get("Department"),
+                    "role": r.get("Role__c"),
+                })
+            # Fallback/Union: si pedimos por título, incluye también Contact por Title
+            if title_contains:
+                fields = ["Id", "Name", "Email", "Phone", "Title", "Department", "AccountId", "Account.Name"]
+                tc = title_contains.replace("'", "\'")
+                where = f"AccountId IN ({ids_clause}) AND Title LIKE '%{tc}%'"
+                soql2 = f"SELECT {', '.join(fields)} FROM Contact WHERE {where} ORDER BY AccountId, Name"
+                raw2 = sf.query_all(soql2)
+                for r in raw2.get("records", []):
+                    acc = r.get("Account") or {}
+                    rows_local.append({
+                        "account_id": r.get("AccountId"),
+                        "site": acc.get("Name"),
+                        "contact_id": r.get("Id"),
+                        "contact_name": r.get("Name"),
+                        "email": r.get("Email"),
+                        "phone": r.get("Phone"),
+                        "title": r.get("Title"),
+                        "department": r.get("Department"),
+                    })
+        else:
+            fields = ["Id", "Name", "Email", "Phone", "Title", "Department", "AccountId", "Account.Name"]
+            where = f"AccountId IN ({ids_clause})"
+            if role_contains:
+                rc = role_contains.replace("'", "\'")
+                where += f" AND (Title LIKE '%{rc}%' OR Department LIKE '%{rc}%')"
+            if title_contains:
+                tc = title_contains.replace("'", "\'")
+                where += f" AND (Title LIKE '%{tc}%' OR Title LIKE '%Coordinat%')"
+            soql = f"SELECT {', '.join(fields)} FROM Contact WHERE {where} ORDER BY AccountId, Name"
+            raw = sf.query_all(soql)
+            for r in raw.get("records", []):
+                acc = r.get("Account") or {}
+                rows_local.append({
+                    "account_id": r.get("AccountId"),
+                    "site": acc.get("Name"),
+                    "contact_id": r.get("Id"),
+                    "contact_name": r.get("Name"),
+                    "email": r.get("Email"),
+                    "phone": r.get("Phone"),
+                    "title": r.get("Title"),
+                    "department": r.get("Department"),
+                })
+        # De-duplicar por contact_id
+        uniq = {}
+        for r in rows_local:
+            cid = r.get("contact_id") or r.get("ContactId") or r.get("Id")
+            uniq[cid or len(uniq)] = r
+        return list(uniq.values())
+
+    rows: List[Dict[str, Any]] = []
+
+    # Path A: valid Account Id
+    if account_id and _ai._is_valid_sf_id(account_id, prefix="001"):
+        account_ids = [account_id]
+        try:
+            if include_subaccounts:
+                rt_sub_cfg = os.environ.get("SF_ACCOUNT_RT_SUB", "SubAccount").strip()
+                rt_list = [s.strip() for s in rt_sub_cfg.split(",") if s.strip()]
+                if not rt_list:
+                    rt_list = ["SubAccount"]
+                if len(rt_list) == 1:
+                    rt_clause = f"RecordType.DeveloperName = '{rt_list[0]}'"
+                else:
+                    rt_vals = ", ".join([f"'{x}'" for x in rt_list])
+                    rt_clause = f"RecordType.DeveloperName IN ({rt_vals})"
+                acct_type_field = os.environ.get("SF_ACCOUNT_TYPE_FIELD", "C_Type__c").strip() or "C_Type__c"
+                clinical_val = os.environ.get("SF_ACCOUNT_TYPE_CLINICAL", "Clinical").strip() or "Clinical"
+                soql_children = (
+                    "SELECT Id FROM Account "
+                    f"WHERE ParentId = '{account_id}' AND {rt_clause} "
+                    f"AND {acct_type_field} = '{clinical_val}'"
+                )
+                res = sf.query_all(soql_children)
+                for rec in res.get("records", []):
+                    cid = rec.get("Id")
+                    if cid:
+                        account_ids.append(cid)
+        except Exception as e:
+            _dbg("WARN: listing subaccounts failed: %s", e)
+        rows = _list_contacts_for_accounts(account_ids)
+    else:
+        # Path B: Geography search (country/city) when no valid Account Id
+        geo_country = (country or "").strip() or (account_id if account_id and len(account_id) > 2 else "")
+        geo_city = (city or "").strip()
+        rt_sub_cfg = os.environ.get("SF_ACCOUNT_RT_SUB", "SubAccount").strip()
+        rt_list = [s.strip() for s in rt_sub_cfg.split(",") if s.strip()] or ["SubAccount"]
+        if len(rt_list) == 1:
+            rt_clause = f"RecordType.DeveloperName = '{rt_list[0]}'"
+        else:
+            rt_vals = ", ".join([f"'{x}'" for x in rt_list])
+            rt_clause = f"RecordType.DeveloperName IN ({rt_vals})"
+        acct_type_field = os.environ.get("SF_ACCOUNT_TYPE_FIELD", "C_Type__c").strip() or "C_Type__c"
+        clinical_val = os.environ.get("SF_ACCOUNT_TYPE_CLINICAL", "Clinical").strip() or "Clinical"
+        inactive_clause = "(Account_Inactive__c = false OR Account_Inactive__c = null) AND (Subaccount_Inactive__c = false OR Subaccount_Inactive__c = null)"
+        where_parts = [rt_clause, f"{acct_type_field} = '{clinical_val}'", inactive_clause]
+        if geo_country:
+            gc = geo_country.replace("'", "\'")
+            where_parts.append(f"ShippingCountry = '{gc}'")
+        if geo_city:
+            gcity = geo_city.replace("'", "\'")
+            where_parts.append(f"ShippingCity = '{gcity}'")
+        if not geo_country and not geo_city:
+            # Global search across all clinical subaccounts (limited)
+            soql_accounts = "SELECT Id FROM Account WHERE " + " AND ".join(where_parts) + " LIMIT 1000"
+        else:
+            soql_accounts = "SELECT Id FROM Account WHERE " + " AND ".join(where_parts) + " LIMIT 500"
+        acc_res = sf.query_all(soql_accounts)
+        acc_ids = [r.get("Id") for r in acc_res.get("records", []) if r.get("Id")]
+        rows = _list_contacts_for_accounts(acc_ids)
+
+    # Enrich with Activities per Account (Activity Opportunities)
+    try:
+        acc_ids = sorted({str(r.get("account_id")) for r in rows if r.get("account_id")})
+        if acc_ids:
+            def _chunks(xs, n=120):
+                buf=[]
+                for x in xs:
+                    if x: buf.append(x)
+                    if len(buf)>=n:
+                        yield buf; buf=[]
+                if buf: yield buf
+            act_by_acc: Dict[str, List[str]] = {}
+            for ch in _chunks(acc_ids):
+                ids_in = ", ".join(f"'{x}'" for x in ch)
+                soql = (
+                    "SELECT AccountId, Name FROM Opportunity "
+                    f"WHERE AccountId IN ({ids_in}) AND (RecordType.DeveloperName = 'Activity' OR Type = 'Activity')"
+                )
+                res = sf.query_all(soql)
+                for r0 in res.get("records", []):
+                    aid = str(r0.get("AccountId") or "")
+                    nm = (r0.get("Name") or "").strip()
+                    if not aid or not nm:
+                        continue
+                    lst = act_by_acc.setdefault(aid, [])
+                    if nm in lst or len(lst) >= 15:
+                        continue
+                    lst.append(nm)
+            if act_by_acc:
+                for r in rows:
+                    aid = str(r.get("account_id") or "")
+                    names = act_by_acc.get(aid) or []
+                    if names:
+                        r["activities_names"] = "; ".join(names)
+                        r["activities_count"] = len(names)
+    except Exception as _e:
+        pass
+
+    table = {
+        "columns": [
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":"contact_id","label":"Contact Id"},
+            {"key":"contact_name","label":"Contact Name"},
+            {"key":"email","label":"Email"},
+            {"key":"phone","label":"Phone"},
+            {"key":"title","label":"Title"},
+            {"key":"department","label":"Department"},
+            {"key":"role","label":"Role"},
+            {"key":"activities_names","label":"Activities"},
+            {"key":"activities_count","label":"Activities Count"},
+        ],
+        "rows": rows,
+    }
+    return _normalize_table_for_ui(table)
+
+
+def tool_salesforce_assignments(sf, account_ids: List[str], active_only: bool = False, last_n_months: Optional[int] = None):
+    """Return assignments per Account using the existing extras core.
+    Filters: active_only by simple heuristic on stage; last_n_months by created date when available.
+    Also falls back to Opportunities with RecordType.DeveloperName='Activity' when the Assignment__c object is not populated.
+    """
+    from app.routers import ai_chat as _ai
+    from app.moby.helpers.tables import _normalize_table_for_ui
+    if not account_ids:
+        raise HTTPException(400, "Missing account_ids")
+    out_rows: List[Dict[str, Any]] = []
+    from datetime import datetime, timedelta
+    cutoff = None
+    if last_n_months and last_n_months > 0:
+        cutoff = datetime.utcnow() - timedelta(days=int(last_n_months)*30)
+    for aid in account_ids:
+        acc_name: Optional[str] = None
+        try:
+            data = _ai._account_extras_core(sf, aid)
+            acc_name = (data.get("member") or {}).get("name") or data.get("account_name")
+            assignments = data.get("assignments") or []
+            for a in assignments:
+                name = a.get("name") or a.get("opportunity_name") or a.get("id")
+                stage = a.get("stage") or a.get("type") or ""
+                created = a.get("created")
+                if cutoff and created:
+                    try:
+                        dt = datetime.fromisoformat(str(created).replace("Z","+00:00"))
+                        if dt < cutoff:
+                            continue
+                    except Exception:
+                        pass
+                if active_only and isinstance(stage, str) and stage:
+                    if any(s in stage.lower() for s in ("closed", "won", "lost", "inactive")):
+                        continue
+                out_rows.append({
+                    "account_id": aid,
+                    "site": acc_name,
+                    "assignment_name": name,
+                    "stage": a.get("stage"),
+                    "type": a.get("type"),
+                    "opportunity_name": a.get("opportunity_name"),
+                    "created": created,
+                })
+        except Exception as e:
+            _dbg("WARN: extras for %s failed: %s", aid, e)
+        # Fallback: Opportunities with RecordType 'Activity'
+        try:
+            fields = ["Id","Name","StageName","Type","CreatedDate","RecordType.DeveloperName"]
+            import os
+            rt_cfg = os.environ.get("SF_RT_ACTIVITY", "Activity,RT_Activity").strip()
+            rt_list = [s.strip() for s in rt_cfg.split(",") if s.strip()]
+            # Ensure both Activity and RT_Activity are always included
+            base = {"Activity", "RT_Activity"}
+            rt_list = list(base | set(rt_list))
+            rt_vals = ", ".join([f"'{x}'" for x in rt_list])
+            rt_clause = f"RecordType.DeveloperName IN ({rt_vals})"
+            soql = (
+                f"SELECT {', '.join(fields)} FROM Opportunity "
+                f"WHERE AccountId = '{aid}' AND {rt_clause} "
+                f"ORDER BY CreatedDate DESC LIMIT 200"
+            )
+            recs = sf.query_all(soql).get("records", [])
+            for r in recs:
+                created = r.get("CreatedDate")
+                if cutoff and created:
+                    try:
+                        dt = datetime.fromisoformat(str(created).replace("Z","+00:00"))
+                        if dt < cutoff:
+                            continue
+                    except Exception:
+                        pass
+                stage = r.get("StageName")
+                if active_only and isinstance(stage, str) and stage:
+                    if any(s in stage.lower() for s in ("closed", "won", "lost", "inactive")):
+                        continue
+                out_rows.append({
+                    "account_id": aid,
+                    "site": acc_name,
+                    "assignment_name": r.get("Name"),
+                    "stage": stage,
+                    "type": r.get("Type"),
+                    "opportunity_name": r.get("Name"),
+                    "created": created,
+                })
+        except Exception as e:
+            _dbg("WARN: activity opp fallback failed for %s: %s", aid, e)
+    table = {
+        "columns": [
+            {"key":"account_id","label":"Account Id"},
+            {"key":"site","label":"Account Name"},
+            {"key":"assignment_name","label":"Assignment"},
+            {"key":"stage","label":"Stage"},
+            {"key":"type","label":"Type"},
+            {"key":"opportunity_name","label":"Opportunity"},
+            {"key":"created","label":"Created"},
+        ],
+        "rows": out_rows,
+    }
+    return _normalize_table_for_ui(table)
+
+
 def tool_sql_query_fill_sf(
     db: Session,
     sf,
