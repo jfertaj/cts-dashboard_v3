@@ -154,3 +154,31 @@ cuando se cruzan módulos.
 
 Total: **44 tests cubren las áreas que se moverán en Fases 1-3**. Todas con
 mocks de Anthropic; ninguna requiere SF ni API key real.
+
+## 5d. Notas de Fase 3
+
+Extracción de helpers indirectos a `app/moby/helpers/`:
+
+| Commit | SHA | Helpers movidos | Archivo destino |
+|---|---|---|---|
+| 1 | `47a7aab` | `_dbg` | `helpers/debug.py` |
+| 2 | `4cacf56` | `_ok_table`, `_normalize_table_for_ui` | `helpers/tables.py` |
+| 3 | `b5463ab` | `_validate_soql`, `_ensure_soql_has_account_id`, `_sanitize_soql_basic` | `helpers/soql.py` |
+| 4 | `b5e5c97` | `_pretty_label` | `helpers/labels.py` |
+| 5 | `b093b37` | `_resolve_metric` | `helpers/metrics.py` |
+| 6 | `18e2acb` | (no extraction) tools/* → direct helper imports | `tools/{salesforce,explorer,aggregates}.py` |
+
+Las indirecciones documentadas en §5c (`_dbg`, `_pretty_label`, `_resolve_metric`,
+`_ok_table`, `_normalize_table_for_ui`, `_validate_soql`,
+`_ensure_soql_has_account_id`, `_sanitize_soql_basic`) quedan **resueltas**:
+los módulos en `app/moby/tools/` ya importan los helpers directamente desde
+`app/moby/helpers/*` y no pasan por `_ai.<helper>`.
+
+`backend/app/routers/ai_chat.py` queda en **7721 líneas** (desde 8017 al inicio
+de Fase 3, –296 líneas). Todos los nombres antiguos siguen accesibles desde
+`app.routers.ai_chat` vía shims `from app.moby.helpers.<mod> import <name>`,
+de modo que `@patch("app.routers.ai_chat._foo")` sigue funcionando en los
+tests existentes.
+
+Pytest tras cada commit: **624 passed, 3 failed** (los 3 fallos pre-existentes
+en `test_moby_planner.py` no relacionados con la refactorización).
