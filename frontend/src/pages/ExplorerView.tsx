@@ -1129,8 +1129,15 @@ function normalizeAccountIdCsvToOr(f: FilterGroup): FilterGroup {
       // If any direct child expansion returned a "csv-expanded" marker, we should OR them
       const hasCsv = children.some((c: any) => c && c.__csvExpanded === true);
 
+      // Preserve expression-mode logic strings like "1 AND (2 OR 3)" verbatim
+      // (only collapse to plain AND/OR when a CSV expansion forced new sub-rules).
+      const isExprLogic = typeof node.logic === "string" && /\d/.test(node.logic);
+      const nextLogic = hasCsv
+        ? "OR"
+        : (isExprLogic ? node.logic : (node.logic === "OR" ? "OR" : "AND"));
+
       return {
-        logic: hasCsv ? "OR" : (node.logic === "OR" ? "OR" : "AND"),
+        logic: nextLogic,
         rules: children.map((c: any) => (c && c.__csvExpanded === true ? c.rules : c)).flat(),
       };
     }
