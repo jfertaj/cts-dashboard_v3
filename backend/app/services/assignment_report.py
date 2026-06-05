@@ -83,8 +83,12 @@ def resolve_role(idx: AcrIndex, center_account_id: Optional[str], contact_id: st
         if center_account_id and r.get("AccountId") == center_account_id and (r.get("Role__c") or "").strip():
             return r["Role__c"]
     # 2) latest non-empty for the contact
+    # An empty role on the center pair intentionally yields to a non-center non-empty role.
     nonempty = [r for r in recs if (r.get("Role__c") or "").strip()]
     if not nonempty:
         return ""
-    nonempty.sort(key=lambda r: r.get("LastModifiedDate") or "", reverse=True)
+    # Lexical sort of LastModifiedDate works because Salesforce returns fixed-width
+    # ISO-8601 'YYYY-MM-DDThh:mm:ss.sssZ'. Secondary key (AccountId) breaks
+    # same-timestamp ties deterministically instead of relying on SOQL order.
+    nonempty.sort(key=lambda r: (r.get("LastModifiedDate") or "", r.get("AccountId") or ""), reverse=True)
     return nonempty[0]["Role__c"]

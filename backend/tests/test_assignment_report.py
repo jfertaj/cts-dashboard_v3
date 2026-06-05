@@ -58,6 +58,18 @@ class TestRoleResolution:
         ])
         assert resolve_role(idx, center_account_id="ACENTER", contact_id="C1") == "Study Coordinator"
 
+    def test_same_timestamp_tie_breaks_deterministically_by_account_id(self):
+        # Equal LastModifiedDate: AccountId secondary key (reverse-sorted) makes
+        # the highest AccountId win regardless of input/SOQL order.
+        recs = [
+            _acr("AAAA", "C1", "Study Nurse", lm="2026-05-01T00:00:00.000Z"),
+            _acr("AZZZ", "C1", "Investigator", lm="2026-05-01T00:00:00.000Z"),
+        ]
+        idx_forward = build_acr_index(recs)
+        idx_reverse = build_acr_index(list(reversed(recs)))
+        assert resolve_role(idx_forward, center_account_id=None, contact_id="C1") == "Investigator"
+        assert resolve_role(idx_reverse, center_account_id=None, contact_id="C1") == "Investigator"
+
     def test_blank_when_no_roles(self):
         idx = build_acr_index([_acr("ACENTER", "C1", "")])
         assert resolve_role(idx, center_account_id="ACENTER", contact_id="C1") == ""
