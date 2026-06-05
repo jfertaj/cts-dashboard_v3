@@ -181,6 +181,13 @@ def _claude_chat(
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": CLAUDE_THINKING_BUDGET}
         kwargs["max_tokens"] = CLAUDE_THINKING_BUDGET + 8192
         kwargs["betas"] = ["interleaved-thinking-2025-05-14"]
+        # The Anthropic API rejects extended thinking combined with a forced
+        # tool_choice ({"type": "any"}) — 400 "Thinking may not be enabled when
+        # tool_choice forces tool use." Downgrade to a non-forced choice here so
+        # the incompatible combination can never reach the API, regardless of
+        # what the caller passed (fixes SC03/FA01/GL04/MC03).
+        if kwargs.get("tool_choice") == {"type": "any"}:
+            kwargs["tool_choice"] = {"type": "auto"}
         _dbg("Extended thinking ENABLED — budget=%d tokens", CLAUDE_THINKING_BUDGET)
 
     # 4. Call Claude API
