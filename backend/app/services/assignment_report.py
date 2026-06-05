@@ -6,7 +6,9 @@ docs/superpowers/specs/2026-06-05-assignment-contact-report-design.md
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List
+
+from app.utils.soql_helpers import soql_escape_quote
 
 
 @dataclass
@@ -20,8 +22,12 @@ class AssignmentFilters:
 
 
 def _soql_str_list(values: List[str]) -> str:
-    """Quote+escape a list of strings for a SOQL IN(...) clause."""
-    return ",".join("'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'" for v in values)
+    """Quote+escape a list of strings for a SOQL IN(...) clause.
+
+    NOTE: returns "" for an empty list — callers MUST guard against passing
+    an empty list into an IN(...) clause (IN () is a SOQL syntax error).
+    """
+    return ",".join(f"'{soql_escape_quote(str(v))}'" for v in values)
 
 
 # Fields fetched per assignment. Display fields come from the contact's primary
@@ -38,13 +44,13 @@ _SOQL_FIELDS = (
 )
 
 
-def build_assignment_soql(f: AssignmentFilters) -> str:
+def build_assignment_soql(filters: AssignmentFilters) -> str:
     where: List[str] = []
-    if f.studies:
-        where.append(f"C_Opportunity_Name__r.Name IN ({_soql_str_list(f.studies)})")
-    if f.stages:
-        where.append(f"C_Assignment_Stage__c IN ({_soql_str_list(f.stages)})")
-    if f.referral_only:
+    if filters.studies:
+        where.append(f"C_Opportunity_Name__r.Name IN ({_soql_str_list(filters.studies)})")
+    if filters.stages:
+        where.append(f"C_Assignment_Stage__c IN ({_soql_str_list(filters.stages)})")
+    if filters.referral_only:
         where.append("Referral_Contact__c = true")
     where.append("C_Contact_Name__c != null")
     clause = " WHERE " + " AND ".join(where) if where else ""
