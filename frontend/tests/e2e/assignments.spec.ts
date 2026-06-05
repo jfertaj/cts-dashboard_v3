@@ -1,0 +1,54 @@
+import { test, expect } from "@playwright/test";
+
+test.describe("Referral DB tab", () => {
+  test.beforeEach(async ({ page }) => {
+    // Auth gate: GET /api/salesforce/me — return the full real shape so the
+    // app treats the session as authenticated and renders the header/tabs.
+    await page.route("**/api/salesforce/me", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          authenticated: true,
+          instance_url: "https://example.my.salesforce.com",
+          issued_at: 1,
+          has_refresh: true,
+        }),
+      })
+    );
+  });
+
+  test("runs report and renders table", async ({ page }) => {
+    await page.route("**/api/assignments/report/options", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          studies: ["Baricade Delay (JAJJ)", "Safeguard", "Beta Preserve"],
+          stages: ["Activated"],
+        }),
+      })
+    );
+    await page.route("**/api/assignments/report", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          columns: [
+            { key: "first_name", label: "First Name" },
+            { key: "email", label: "Email" },
+            { key: "role", label: "Role" },
+          ],
+          rows: [{ first_name: "Bart", email: "bart@uzbrussel.be", role: "Investigator" }],
+        }),
+      })
+    );
+
+    await page.goto("/");
+    await page.getByTestId("tab-assignments").click();
+    await expect(page.getByTestId("assignments-view")).toBeVisible();
+    await page.getByTestId("assignments-run").click();
+    await expect(page.getByTestId("assignments-table")).toContainText("Investigator");
+    await expect(page.getByTestId("assignments-table")).toContainText("bart@uzbrussel.be");
+  });
+});
