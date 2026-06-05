@@ -57,6 +57,9 @@ from app.routers import salesforce_extras
 # --- Members view
 from app.routers import members_explorer
 
+# --- Assignment → Contact report
+from app.routers import assignments_report
+
 # --- OpenAI
 from app.routers import ai_chat, explorer_bridge
 
@@ -169,6 +172,7 @@ app.include_router(salesforce_extras.router)  # /api/salesforce/...
 
 # Members view
 app.include_router(members_explorer.router)  # /api/members/...
+app.include_router(assignments_report.router)  # /api/assignments/...
 
 # OpenAI
 app.include_router(ai_chat.router)

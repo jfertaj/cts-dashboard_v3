@@ -678,3 +678,30 @@ export async function getSalesforceAccountExtrasMany(accountIds: string[]): Prom
   );
   return Object.fromEntries(pairs);
 }
+
+export type AssignmentReportFilters = {
+  studies?: string[];
+  stages?: string[];
+  referral_only?: boolean;
+  roles?: string[];
+  exclude_countries?: string[];
+  include_countries?: string[];
+};
+
+export type ReportTable = {
+  columns: { key: string; label?: string }[];
+  rows: Array<Record<string, any>>;
+};
+
+export async function assignmentReport(filters: AssignmentReportFilters): Promise<ReportTable> {
+  return api<ReportTable>("/api/assignments/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(filters),
+    timeoutMs: 90_000,
+  });
+}
+
+export async function assignmentReportOptions(): Promise<{ studies: string[]; stages: string[]; roles: string[] }> {
+  return api<{ studies: string[]; stages: string[]; roles: string[] }>("/api/assignments/report/options", { retries: 1 });
+}

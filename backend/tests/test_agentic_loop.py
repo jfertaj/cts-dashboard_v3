@@ -463,6 +463,44 @@ def test_loop_retry_on_text_only_with_tabular_intent(mock_dispatch, mock_claude,
 
 @patch("app.routers.ai_chat._claude_chat")
 @patch("app.routers.moby_tools.dispatch_tool")
+def test_loop_retry_prompt_lists_whitelist_tools(mock_dispatch, mock_claude, tool_ctx):
+    """The forced-retry prompt must list EVERY tool in TABLE_RETURNING_TOOLS.
+
+    Guards against the prompt drifting out of sync with the whitelist
+    (e.g. omitting assignment_contact_report).
+    """
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    from app.routers.moby_tools import ToolResult
+
+    tool_call = _make_mock_tool_call("t1", "assignment_contact_report", {})
+    mock_claude.side_effect = [
+        _text_response("<p>Here is the referral info.</p>"),  # turn 1: text only
+        _tool_response([tool_call], text="Found referrals"),   # retry: produces a table
+    ]
+    mock_dispatch.return_value = ToolResult(
+        last_table={"rows": [{"account_id": "a1"}], "columns": ["account_id"]},
+    )
+
+    _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List the referral contact report",
+    )
+
+    # The retry user prompt is appended in place to tool_ctx.msgs.
+    retry_prompts = [
+        m["content"] for m in tool_ctx.msgs
+        if m.get("role") == "user" and "lacked a table" in m.get("content", "")
+    ]
+    assert retry_prompts, "Expected a forced-retry user prompt to be appended"
+    prompt = retry_prompts[0]
+    assert "assignment_contact_report" in prompt
+    for name in TABLE_RETURNING_TOOLS:
+        assert name in prompt, f"Retry prompt missing whitelisted tool {name!r}"
+
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_retry_noop_without_tabular_intent(mock_dispatch, mock_claude, tool_ctx):
     """Text-only response + non-tabular intent → NO retry."""
     from app.routers.ai_chat import _agentic_loop

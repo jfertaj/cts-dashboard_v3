@@ -2,14 +2,40 @@
 from __future__ import annotations
 
 
-def test_table_returning_tools_constant_has_four_entries():
+def test_table_returning_tools_constant_entries():
     from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
     assert TABLE_RETURNING_TOOLS == frozenset({
         "explorer_search",
         "nearest_filtered_sites",
         "study_coordinators_with_activities",
         "members_search",
+        "assignment_contact_report",
     })
+
+
+def test_assignment_contact_report_in_table_returning_tools():
+    """Regression (PR #3 Codex P2): the report tool must be reachable via the
+    forced tabular-intent path. 'report' is a tabular trigger, so prompts like
+    'give me the referral report' force the first turn to TABLE_RETURNING_TOOLS;
+    the tool can only be selected if it is in that whitelist.
+    """
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    assert "assignment_contact_report" in TABLE_RETURNING_TOOLS
+
+
+def test_filter_tools_spec_includes_assignment_contact_report():
+    """filter_tools_spec must surface assignment_contact_report when it appears
+    in a TOOLS_SPEC-like list (default whitelist = TABLE_RETURNING_TOOLS)."""
+    from app.routers.moby_tool_policy import filter_tools_spec
+    spec = [
+        _fake_spec("explorer_search"),
+        _fake_spec("soql_query"),
+        _fake_spec("assignment_contact_report"),
+    ]
+    out = filter_tools_spec(spec)  # default whitelist → TABLE_RETURNING_TOOLS
+    names = {t["function"]["name"] for t in out}
+    assert "assignment_contact_report" in names
+    assert "soql_query" not in names
 
 
 def test_table_returning_tools_is_frozenset():
@@ -170,6 +196,6 @@ def test_filter_tools_spec_against_real_tools_spec():
     from app.routers.moby_tool_policy import filter_tools_spec, TABLE_RETURNING_TOOLS
 
     out = filter_tools_spec(TOOLS_SPEC)
-    assert len(out) == 4
+    assert len(out) == len(TABLE_RETURNING_TOOLS)
     names = {t["function"]["name"] for t in out}
     assert names == TABLE_RETURNING_TOOLS

@@ -1,0 +1,629 @@
+{
+ "rows": [
+  {
+   "pop": "Adult",
+   "city": "Leiden",
+   "stage": "Activated",
+   "first": "Eelco",
+   "last": "de Koning",
+   "email": "e.j.p.de_koning@lumc.nl"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Liege",
+   "stage": "Activated",
+   "first": "Nicole",
+   "last": "Seret",
+   "email": "nicole.seret@chc.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Liege",
+   "stage": "Activated",
+   "first": "Alexandra",
+   "last": "Van Eyck",
+   "email": "alexandra.vaneyck@chc.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Liege",
+   "stage": "Activated",
+   "first": "Audrey",
+   "last": "Courtois",
+   "email": "audrey.courtois@chc.be"
+  },
+  {
+   "pop": "Both",
+   "city": "Novara",
+   "stage": "Activated",
+   "first": "Ivana",
+   "last": "Rabbone",
+   "email": "ivana.rabbone@uniupo.it"
+  },
+  {
+   "pop": "Both",
+   "city": "Jette",
+   "stage": "Activated",
+   "first": "Klara",
+   "last": "Godderis",
+   "email": "klara.godderis@uzbrussel.be"
+  },
+  {
+   "pop": "Both",
+   "city": "Jette",
+   "stage": "Activated",
+   "first": "Karen",
+   "last": "Hanssens",
+   "email": "karen.hanssens@uzbrussel.be"
+  },
+  {
+   "pop": "Both",
+   "city": "Warszawa",
+   "stage": "Activated",
+   "first": "Ewa",
+   "last": "Pankowska",
+   "email": "ewa.pankowska@instytutdiabetologii.pl"
+  },
+  {
+   "pop": "Both",
+   "city": "Warszawa",
+   "stage": "Activated",
+   "first": "Marta",
+   "last": "Puchalska",
+   "email": "marta.puchalska@instytutdiabetologii.pl"
+  },
+  {
+   "pop": "Both",
+   "city": "Ulm",
+   "stage": "Activated",
+   "first": "Christian",
+   "last": "Denzer",
+   "email": "christian.denzer@uniklinik-ulm.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Hannover",
+   "stage": "Activated",
+   "first": "Felix",
+   "last": "Reschke",
+   "email": "felix.reschke@hka.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Hannover",
+   "stage": "Activated",
+   "first": "Olga",
+   "last": "Kordonouri",
+   "email": "kordonouri@hka.de"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Prague",
+   "stage": "Activated",
+   "first": "Zdenek",
+   "last": "Sumn\u00edk",
+   "email": "zdenek.sumnik@lfmotol.cuni.cz"
+  },
+  {
+   "pop": "Adult",
+   "city": "Prague",
+   "stage": "Activated",
+   "first": "Martin",
+   "last": "Prazny",
+   "email": "martin.prazny@vfn.cz"
+  },
+  {
+   "pop": "Both",
+   "city": "Ulm",
+   "stage": "Activated",
+   "first": "Barbara",
+   "last": "Saile",
+   "email": "barbara.saile@uniklinik-ulm.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Ulm",
+   "stage": "Activated",
+   "first": "Christian",
+   "last": "Denzer",
+   "email": "christian.denzer@uniklinik-ulm.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Ulm",
+   "stage": "Activated",
+   "first": "Pauline",
+   "last": "Kleger",
+   "email": "pauline.kleger@uniklinik-ulm.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Barakalda, Bizkaia",
+   "stage": "Activated",
+   "first": "Luis",
+   "last": "Castano",
+   "email": "lcastano@osakidetza.eus"
+  },
+  {
+   "pop": "Both",
+   "city": "Barakalda, Bizkaia",
+   "stage": "Activated",
+   "first": "Nuria",
+   "last": "Valdes",
+   "email": "nuria.valdesgallego@osakidetza.eus"
+  },
+  {
+   "pop": "Both",
+   "city": "Warszawa",
+   "stage": "Activated",
+   "first": "Ewa",
+   "last": "Pankowska",
+   "email": "ewa.pankowska@instytutdiabetologii.pl"
+  },
+  {
+   "pop": "Both",
+   "city": "Warszawa",
+   "stage": "Activated",
+   "first": "Marta",
+   "last": "Puchalska",
+   "email": "marta.puchalska@instytutdiabetologii.pl"
+  },
+  {
+   "pop": "Adult",
+   "city": "Paris",
+   "stage": "Activated",
+   "first": "Chlo\u00e9",
+   "last": "AMOUYAL",
+   "email": "chloe.amouyal@aphp.fr"
+  },
+  {
+   "pop": "Both",
+   "city": "Grenoble",
+   "stage": "Activated",
+   "first": "Sandrine",
+   "last": "La Blanche",
+   "email": "slablanche@chu-grenoble.fr"
+  },
+  {
+   "pop": "Adult",
+   "city": "Barcelona",
+   "stage": "Activated",
+   "first": "D\u00eddac",
+   "last": "Mauricio",
+   "email": "dmauricio@santpau.cat"
+  },
+  {
+   "pop": "Adult",
+   "city": "Madrid",
+   "stage": "Activated",
+   "first": "L\u00eda",
+   "last": "Nattero-Ch\u00e1vez",
+   "email": "marialia.nattero@salud.madrid.org"
+  },
+  {
+   "pop": "Adult",
+   "city": "Roma",
+   "stage": "Activated",
+   "first": "Raffaella",
+   "last": "Buzzetti",
+   "email": "raffaella.buzzetti@uniroma1.it"
+  },
+  {
+   "pop": "-",
+   "city": "Madrid",
+   "stage": "Activated",
+   "first": "Nerea",
+   "last": "Itza",
+   "email": "nerea.itza@salud.madrid.org"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Vigo",
+   "stage": "Activated",
+   "first": "Jose Luis",
+   "last": "Chamorro Martin",
+   "email": "jose.luis.chamorro.martin@sergas.es"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Liege",
+   "stage": "Activated",
+   "first": "Alexandra",
+   "last": "Van Eyck",
+   "email": "alexandra.vaneyck@chc.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Liege",
+   "stage": "Activated",
+   "first": "Nicole",
+   "last": "Seret",
+   "email": "nicole.seret@chc.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Liege",
+   "stage": "Activated",
+   "first": "Audrey",
+   "last": "Courtois",
+   "email": "audrey.courtois@chc.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Paris",
+   "stage": "Activated",
+   "first": "Elise",
+   "last": "Bismuth Reisman",
+   "email": "elise.bismuth@aphp.fr"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Paris",
+   "stage": "Activated",
+   "first": "Laurence",
+   "last": "Corvez",
+   "email": "laurence.corvez@aphp.fr"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Edegem",
+   "stage": "Activated",
+   "first": "Marieke",
+   "last": "den Brinker",
+   "email": "marieke.denbrinker@uza.be"
+  },
+  {
+   "pop": "Both",
+   "city": "Milano",
+   "stage": "Activated",
+   "first": "Gian Vincenzo",
+   "last": "Zuccotti",
+   "email": "gianvincenzo.zuccotti@unimi.it"
+  },
+  {
+   "pop": "Both",
+   "city": "Torino",
+   "stage": "Activated",
+   "first": "Luisa",
+   "last": "De Sanctis",
+   "email": "luisa.desanctis@unito.it"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Genova",
+   "stage": "Activated",
+   "first": "Marta",
+   "last": "Bassi",
+   "email": "martabassi@gaslini.org"
+  },
+  {
+   "pop": "Both",
+   "city": "Jette",
+   "stage": "Activated",
+   "first": "Karen",
+   "last": "Hanssens",
+   "email": "karen.hanssens@uzbrussel.be"
+  },
+  {
+   "pop": "Both",
+   "city": "Jette",
+   "stage": "Activated",
+   "first": "Klara",
+   "last": "Godderis",
+   "email": "klara.godderis@uzbrussel.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Ljubljana",
+   "stage": "Activated",
+   "first": "Darja",
+   "last": "Smigoc Schweiger",
+   "email": "darja.smigoc@kclj.si"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Amersfoort",
+   "stage": "Activated",
+   "first": "Roos",
+   "last": "Nuboer",
+   "email": "r.nuboer@meandermc.nl"
+  },
+  {
+   "pop": "Both",
+   "city": "Leuven",
+   "stage": "Activated",
+   "first": "Trial Office",
+   "last": "UZ Leuven",
+   "email": "studiebureel.endocrino@uzleuven.be"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Turku",
+   "stage": "Activated",
+   "first": "Jaakko",
+   "last": "Koskenniemi",
+   "email": "jajoko@utu.fi"
+  },
+  {
+   "pop": "Both",
+   "city": "Milan",
+   "stage": "Activated",
+   "first": "Sabina",
+   "last": "Martinenghi",
+   "email": "martinenghi.sabina@hsr.it"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Lodz",
+   "stage": "Activated",
+   "first": "Agnieszka",
+   "last": "Szadkowska",
+   "email": "agnieszka.szadkowska@umed.lodz.pl"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Leipzig",
+   "stage": "Activated",
+   "first": "Thomas",
+   "last": "Kapellen",
+   "email": "thomas.kapellen@medizin.uni-leipzig.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Kaunas",
+   "stage": "Activated",
+   "first": "Rasa",
+   "last": "Verkauskiene",
+   "email": "rasa.verkauskiene@lsmu.lt"
+  },
+  {
+   "pop": "Adult",
+   "city": "Prague",
+   "stage": "Activated",
+   "first": "Martin",
+   "last": "Haluzik",
+   "email": "halm@ikem.cz"
+  },
+  {
+   "pop": "Both",
+   "city": "Seville",
+   "stage": "Activated",
+   "first": "Maria Asuncion",
+   "last": "Martinez-Brocca",
+   "email": "masuncion.martinez.sspa@juntadeandalucia.es"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Paris",
+   "stage": "Activated",
+   "first": "Elise",
+   "last": "Bismuth Reisman",
+   "email": "elise.bismuth@aphp.fr"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Paris",
+   "stage": "Activated",
+   "first": "Laurence",
+   "last": "Corvez",
+   "email": "laurence.corvez@aphp.fr"
+  },
+  {
+   "pop": "Adult",
+   "city": "Paris",
+   "stage": "Activated",
+   "first": "Jean-Pierre",
+   "last": "Riveline",
+   "email": "jeanpierre.riveline@aphp.fr"
+  },
+  {
+   "pop": "Both",
+   "city": "Braga",
+   "stage": "Activated",
+   "first": "Ana Sofia",
+   "last": "Martins",
+   "email": "ana.sofia.martins@ulsb.min-saude.pt"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Verona",
+   "stage": "Activated",
+   "first": "Claudia",
+   "last": "Piona",
+   "email": "claudia.piona@univr.it"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Verona",
+   "stage": "Activated",
+   "first": "Claudio",
+   "last": "Maffeis",
+   "email": "claudio.maffeis@univr.it"
+  },
+  {
+   "pop": "Adult",
+   "city": "Madrid",
+   "stage": "Activated",
+   "first": "L\u00eda",
+   "last": "Nattero-Ch\u00e1vez",
+   "email": "marialia.nattero@salud.madrid.org"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Madrid",
+   "stage": "Activated",
+   "first": "Patricia",
+   "last": "Enes Romero",
+   "email": "patricia.enes@salud.madrid.org"
+  },
+  {
+   "pop": "Both",
+   "city": "Hannover",
+   "stage": "Activated",
+   "first": "Felix",
+   "last": "Reschke",
+   "email": "felix.reschke@hka.de"
+  },
+  {
+   "pop": "Both",
+   "city": "Novara",
+   "stage": "Activated",
+   "first": "Ivana",
+   "last": "Rabbone",
+   "email": "ivana.rabbone@uniupo.it"
+  },
+  {
+   "pop": "Both",
+   "city": "Sevilla",
+   "stage": "Activated",
+   "first": "Ana Luc\u00eda",
+   "last": "Gomez Gila",
+   "email": "analucia.gomez.sspa@juntadeandalucia.es"
+  },
+  {
+   "pop": "Both",
+   "city": "Seville",
+   "stage": "Activated",
+   "first": "Maria Asuncion",
+   "last": "Martinez-Brocca",
+   "email": "masuncion.martinez.sspa@juntadeandalucia.es"
+  },
+  {
+   "pop": "Both",
+   "city": "Barakalda, Bizkaia",
+   "stage": "Activated",
+   "first": "Luis",
+   "last": "Castano",
+   "email": "lcastano@osakidetza.eus"
+  },
+  {
+   "pop": "Both",
+   "city": "Barakalda, Bizkaia",
+   "stage": "Activated",
+   "first": "Nuria",
+   "last": "Valdes",
+   "email": "nuria.valdesgallego@osakidetza.eus"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Yvoir",
+   "stage": "Activated",
+   "first": "Dominique",
+   "last": "Beckers",
+   "email": "dominique.beckers@chuuclnamur.uclouvain.be"
+  },
+  {
+   "pop": "Adult",
+   "city": "Paris Cedex",
+   "stage": "Activated",
+   "first": "Sarah",
+   "last": "Zaimeddine",
+   "email": "sarah.zaimeddine@aphp.fr"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Messina",
+   "stage": "Activated",
+   "first": "Fortunato",
+   "last": "Lombardo",
+   "email": "fortunato.lombardo@unime.it"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Florence",
+   "stage": "Activated",
+   "first": "Lorenzo",
+   "last": "Lenzi",
+   "email": "lorenzo.lenzi@meyer.it"
+  },
+  {
+   "pop": "Pediatrics",
+   "city": "Rome",
+   "stage": "Activated",
+   "first": "Riccardo",
+   "last": "Schiaffini",
+   "email": "riccardo.schiaffini@opbg.net"
+  },
+  {
+   "pop": "Adult",
+   "city": "Brussels",
+   "stage": "Activated",
+   "first": "Aicha",
+   "last": "Hamouda",
+   "email": "aicha.hamouda@hubruxelles.be"
+  },
+  {
+   "pop": "Adult",
+   "city": "Brussels",
+   "stage": "Activated",
+   "first": "Dimitri",
+   "last": "Oger",
+   "email": "dimitri.oger@hubruxelles.be"
+  },
+  {
+   "pop": "Adult",
+   "city": "Brussels",
+   "stage": "Activated",
+   "first": "Miriam",
+   "last": "Cnop",
+   "email": "miriam.cnop@ulb.be"
+  }
+ ],
+ "unique_emails": [
+  "agnieszka.szadkowska@umed.lodz.pl",
+  "aicha.hamouda@hubruxelles.be",
+  "alexandra.vaneyck@chc.be",
+  "ana.sofia.martins@ulsb.min-saude.pt",
+  "analucia.gomez.sspa@juntadeandalucia.es",
+  "audrey.courtois@chc.be",
+  "barbara.saile@uniklinik-ulm.de",
+  "chloe.amouyal@aphp.fr",
+  "christian.denzer@uniklinik-ulm.de",
+  "claudia.piona@univr.it",
+  "claudio.maffeis@univr.it",
+  "darja.smigoc@kclj.si",
+  "dimitri.oger@hubruxelles.be",
+  "dmauricio@santpau.cat",
+  "dominique.beckers@chuuclnamur.uclouvain.be",
+  "e.j.p.de_koning@lumc.nl",
+  "elise.bismuth@aphp.fr",
+  "ewa.pankowska@instytutdiabetologii.pl",
+  "felix.reschke@hka.de",
+  "fortunato.lombardo@unime.it",
+  "gianvincenzo.zuccotti@unimi.it",
+  "halm@ikem.cz",
+  "ivana.rabbone@uniupo.it",
+  "jajoko@utu.fi",
+  "jeanpierre.riveline@aphp.fr",
+  "jose.luis.chamorro.martin@sergas.es",
+  "karen.hanssens@uzbrussel.be",
+  "klara.godderis@uzbrussel.be",
+  "kordonouri@hka.de",
+  "laurence.corvez@aphp.fr",
+  "lcastano@osakidetza.eus",
+  "lorenzo.lenzi@meyer.it",
+  "luisa.desanctis@unito.it",
+  "marialia.nattero@salud.madrid.org",
+  "marieke.denbrinker@uza.be",
+  "marta.puchalska@instytutdiabetologii.pl",
+  "martabassi@gaslini.org",
+  "martin.prazny@vfn.cz",
+  "martinenghi.sabina@hsr.it",
+  "masuncion.martinez.sspa@juntadeandalucia.es",
+  "miriam.cnop@ulb.be",
+  "nerea.itza@salud.madrid.org",
+  "nicole.seret@chc.be",
+  "nuria.valdesgallego@osakidetza.eus",
+  "patricia.enes@salud.madrid.org",
+  "pauline.kleger@uniklinik-ulm.de",
+  "r.nuboer@meandermc.nl",
+  "raffaella.buzzetti@uniroma1.it",
+  "rasa.verkauskiene@lsmu.lt",
+  "riccardo.schiaffini@opbg.net",
+  "sarah.zaimeddine@aphp.fr",
+  "slablanche@chu-grenoble.fr",
+  "studiebureel.endocrino@uzleuven.be",
+  "thomas.kapellen@medizin.uni-leipzig.de",
+  "zdenek.sumnik@lfmotol.cuni.cz"
+ ]
+}

@@ -4,6 +4,7 @@ import LinkAuthView from "./pages/UploadLinkView";
 import ChatView from "./pages/ChatView";
 import ExplorerView from "./pages/ExplorerView";
 import MembersView from "./pages/MembersView";
+import AssignmentsView from "./pages/AssignmentsView";
 import { sfLoginRedirect } from "./lib/salesforce";
 import { useSalesforceAuth } from "./hooks/useSalesforceAuth";
 import { useIdleTimer } from "./hooks/useIdleTimer";
@@ -17,10 +18,11 @@ function getTabFromURL(): Tab {
   if (path === "/explorer") return "explorer";
   if (path === "/members") return "members";
   if (path === "/chat") return "chat";
+  if (path === "/assignments") return "assignments";
   // 2) Fallback al query param ?tab=...
   const p = new URLSearchParams(window.location.search);
   const t = (p.get("tab") || "").toLowerCase();
-  return t === "explorer" ? "explorer" : t === "members" ? "members" : t === "chat" ? "chat" : "upload";
+  return t === "explorer" ? "explorer" : t === "members" ? "members" : t === "chat" ? "chat" : t === "assignments" ? "assignments" : "upload";
 }
 
 export default function App() {
@@ -54,7 +56,7 @@ export default function App() {
   const goTab = (next: Tab) => {
     // Soporta rutas limpias /explorer y /chat para deep-linking
     const base = `${window.location.origin}`;
-    const nextPath = next === "explorer" ? "/explorer" : next === "members" ? "/members" : next === "chat" ? "/chat" : "/";
+    const nextPath = next === "explorer" ? "/explorer" : next === "members" ? "/members" : next === "chat" ? "/chat" : next === "assignments" ? "/assignments" : "/";
     window.history.pushState({}, "", base + nextPath);
     setTab(next);
   };
@@ -108,6 +110,7 @@ export default function App() {
         {tab === "explorer" && <ExplorerView />}
         {tab === "members" && <MembersView prefetchedRows={membersPrefetch} />}
         {tab === "chat" && <ChatView />}
+        {tab === "assignments" && <AssignmentsView />}
       </main>
       <footer className="mt-10 py-6 text-center text-xs text-slate-500" aria-hidden={sessionExpired}>
         © {new Date().getFullYear()} INNODIA — Clinical Trial Support
