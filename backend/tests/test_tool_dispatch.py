@@ -45,6 +45,7 @@ EXPECTED_TOOLS = [
     "sql_query_fill_sf",
     "contacts_by_group",
     "study_coordinators_with_activities",
+    "assignment_contact_report",
     "qual_search",
     "manipulate_data",
     "render_chart",
@@ -62,7 +63,7 @@ def test_all_expected_tools_registered():
 
 
 def test_tool_count():
-    """Exactly 33 tools registered (includes merged aliases)."""
+    """Exactly 34 tools registered (includes merged aliases)."""
     assert len(TOOL_DISPATCH) == len(EXPECTED_TOOLS)
 
 
