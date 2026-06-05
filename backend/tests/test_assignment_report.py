@@ -77,3 +77,46 @@ class TestRoleResolution:
     def test_blank_when_contact_absent(self):
         idx = build_acr_index([])
         assert resolve_role(idx, center_account_id="ACENTER", contact_id="CX") == ""
+
+
+from app.services.assignment_report import assemble_rows, REPORT_COLUMNS
+
+
+def _assignment(con, acc, study="Baricade", stage="Activated", referral=True,
+                first="Jane", last="Doe", email="j@x.org",
+                city="Liege", country="Belgium", pop="Both"):
+    return {
+        "C_Assignment_Stage__c": stage, "Referral_Contact__c": referral,
+        "C_Account__c": acc, "C_Opportunity_Name__r": {"Name": study},
+        "C_Contact_Name__c": con,
+        "C_Contact_Name__r": {
+            "FirstName": first, "LastName": last, "Email": email,
+            "Account": {"Name": "Center X", "ShippingCity": city,
+                        "ShippingCountry": country, "Patient_Population__c": pop},
+        },
+    }
+
+
+class TestAssembleRows:
+    def test_basic_row_shape_and_role(self):
+        assignments = [_assignment("C1", "ACENTER")]
+        idx = build_acr_index([_acr("ACENTER", "C1", "Investigator")])
+        out = assemble_rows(assignments, idx, AssignmentFilters())
+        assert [c["key"] for c in out["columns"]] == REPORT_COLUMNS
+        row = out["rows"][0]
+        assert row["role"] == "Investigator"
+        assert row["email"] == "j@x.org"
+        assert row["study"] == "Baricade"
+        assert row["city"] == "Liege"
+
+    def test_exclude_country_drops_row(self):
+        assignments = [_assignment("C1", "ACENTER", country="United Kingdom")]
+        out = assemble_rows(assignments, build_acr_index([]), AssignmentFilters(exclude_countries=["United Kingdom"]))
+        assert out["rows"] == []
+
+    def test_role_filter_keeps_only_matching(self):
+        assignments = [_assignment("C1", "AC1"), _assignment("C2", "AC2", email="b@x.org")]
+        idx = build_acr_index([_acr("AC1", "C1", "Investigator"), _acr("AC2", "C2", "Study Nurse")])
+        out = assemble_rows(assignments, idx, AssignmentFilters(roles=["Investigator"]))
+        assert len(out["rows"]) == 1
+        assert out["rows"][0]["role"] == "Investigator"

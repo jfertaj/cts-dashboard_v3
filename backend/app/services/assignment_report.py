@@ -92,3 +92,54 @@ def resolve_role(idx: AcrIndex, center_account_id: Optional[str], contact_id: st
     # same-timestamp ties deterministically instead of relying on SOQL order.
     nonempty.sort(key=lambda r: (r.get("LastModifiedDate") or "", r.get("AccountId") or ""), reverse=True)
     return nonempty[0]["Role__c"]
+
+
+REPORT_COLUMNS = ["study", "stage", "referral", "center", "city",
+                  "patient_population", "first_name", "last_name", "email", "role"]
+
+_COLUMN_LABELS = {
+    "study": "Study", "stage": "Stage", "referral": "Referral", "center": "Center",
+    "city": "City", "patient_population": "Patient Population", "first_name": "First Name",
+    "last_name": "Last Name", "email": "Email", "role": "Role",
+}
+
+
+def _nested(rec: Dict[str, Any], path: str) -> Any:
+    cur: Any = rec
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def assemble_rows(assignments: List[Dict[str, Any]], acr_index: AcrIndex,
+                  f: AssignmentFilters) -> Dict[str, Any]:
+    excl = {c.strip().lower() for c in (f.exclude_countries or [])}
+    incl = {c.strip().lower() for c in (f.include_countries or [])}
+    role_filter = {r.strip().lower() for r in (f.roles or [])}
+    rows: List[Dict[str, Any]] = []
+    for a in assignments or []:
+        country = _nested(a, "C_Contact_Name__r.Account.ShippingCountry") or ""
+        cl = country.strip().lower()
+        if excl and cl in excl:
+            continue
+        if incl and cl not in incl:
+            continue
+        role = resolve_role(acr_index, a.get("C_Account__c"), a.get("C_Contact_Name__c") or "")
+        if role_filter and role.strip().lower() not in role_filter:
+            continue
+        rows.append({
+            "study": _nested(a, "C_Opportunity_Name__r.Name") or "",
+            "stage": a.get("C_Assignment_Stage__c") or "",
+            "referral": bool(a.get("Referral_Contact__c")),
+            "center": _nested(a, "C_Contact_Name__r.Account.Name") or "",
+            "city": _nested(a, "C_Contact_Name__r.Account.ShippingCity") or "",
+            "patient_population": _nested(a, "C_Contact_Name__r.Account.Patient_Population__c") or "",
+            "first_name": _nested(a, "C_Contact_Name__r.FirstName") or "",
+            "last_name": _nested(a, "C_Contact_Name__r.LastName") or "",
+            "email": _nested(a, "C_Contact_Name__r.Email") or "",
+            "role": role,
+        })
+    columns = [{"key": k, "label": _COLUMN_LABELS[k]} for k in REPORT_COLUMNS]
+    return {"columns": columns, "rows": rows}
