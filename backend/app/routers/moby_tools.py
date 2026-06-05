@@ -651,7 +651,11 @@ def handle_study_coordinators_with_activities(ctx: ToolContext) -> ToolResult:
 def handle_assignment_contact_report(ctx: ToolContext) -> ToolResult:
     from app.services.assignment_report import AssignmentFilters, fetch_report
     result = ToolResult()
-    a = ctx.tool_args or ctx.args or {}
+    if not ctx.sf:
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": "No active Salesforce session"})})
+        return result
+    a = ctx.args or {}
     f = AssignmentFilters(
         studies=a.get("studies") or [],
         stages=a.get("stages") or [],
