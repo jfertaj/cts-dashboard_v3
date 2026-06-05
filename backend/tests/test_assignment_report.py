@@ -33,3 +33,35 @@ class TestBuildAssignmentSoql:
         soql = build_assignment_soql(AssignmentFilters())
         assert "C_Contact_Name__c != null" in soql
         assert "Referral_Contact__c = true" not in soql
+
+
+from app.services.assignment_report import build_acr_index, resolve_role
+
+
+def _acr(acc, con, role, direct=False, lm="2026-01-01T00:00:00Z"):
+    return {"AccountId": acc, "ContactId": con, "Role__c": role,
+            "IsDirect": direct, "LastModifiedDate": lm}
+
+
+class TestRoleResolution:
+    def test_prefers_center_pair_nonempty(self):
+        idx = build_acr_index([
+            _acr("ACENTER", "C1", "Investigator"),
+            _acr("AOTHER", "C1", "Study Nurse"),
+        ])
+        assert resolve_role(idx, center_account_id="ACENTER", contact_id="C1") == "Investigator"
+
+    def test_falls_back_to_latest_nonempty_for_contact(self):
+        idx = build_acr_index([
+            _acr("ACENTER", "C1", "", lm="2026-01-01T00:00:00Z"),
+            _acr("AOTHER", "C1", "Study Coordinator", lm="2026-05-01T00:00:00Z"),
+        ])
+        assert resolve_role(idx, center_account_id="ACENTER", contact_id="C1") == "Study Coordinator"
+
+    def test_blank_when_no_roles(self):
+        idx = build_acr_index([_acr("ACENTER", "C1", "")])
+        assert resolve_role(idx, center_account_id="ACENTER", contact_id="C1") == ""
+
+    def test_blank_when_contact_absent(self):
+        idx = build_acr_index([])
+        assert resolve_role(idx, center_account_id="ACENTER", contact_id="CX") == ""

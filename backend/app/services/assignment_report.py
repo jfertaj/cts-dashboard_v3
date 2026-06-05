@@ -6,7 +6,7 @@ docs/superpowers/specs/2026-06-05-assignment-contact-report-design.md
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from app.utils.soql_helpers import soql_escape_quote
 
@@ -59,3 +59,32 @@ def build_assignment_soql(filters: AssignmentFilters) -> str:
         "ORDER BY C_Contact_Name__r.Account.ShippingCountry, "
         "C_Opportunity_Name__r.Name, C_Contact_Name__r.LastName"
     )
+
+
+# ACR index: maps each contactId -> list of its AccountContactRelation records.
+AcrIndex = Dict[str, List[Dict[str, Any]]]
+
+
+def build_acr_index(acr_records: List[Dict[str, Any]]) -> AcrIndex:
+    idx: AcrIndex = {}
+    for r in acr_records or []:
+        cid = r.get("ContactId")
+        if cid:
+            idx.setdefault(cid, []).append(r)
+    return idx
+
+
+def resolve_role(idx: AcrIndex, center_account_id: Optional[str], contact_id: str) -> str:
+    """Prefer a non-empty role on the center pair, else the most recently
+    modified non-empty role for the contact; '' if none."""
+    recs = idx.get(contact_id) or []
+    # 1) center-pair, non-empty
+    for r in recs:
+        if center_account_id and r.get("AccountId") == center_account_id and (r.get("Role__c") or "").strip():
+            return r["Role__c"]
+    # 2) latest non-empty for the contact
+    nonempty = [r for r in recs if (r.get("Role__c") or "").strip()]
+    if not nonempty:
+        return ""
+    nonempty.sort(key=lambda r: r.get("LastModifiedDate") or "", reverse=True)
+    return nonempty[0]["Role__c"]
