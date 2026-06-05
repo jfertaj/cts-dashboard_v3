@@ -18,10 +18,11 @@ function getTabFromURL(): Tab {
   if (path === "/explorer") return "explorer";
   if (path === "/members") return "members";
   if (path === "/chat") return "chat";
+  if (path === "/assignments") return "assignments";
   // 2) Fallback al query param ?tab=...
   const p = new URLSearchParams(window.location.search);
   const t = (p.get("tab") || "").toLowerCase();
-  return t === "explorer" ? "explorer" : t === "members" ? "members" : t === "chat" ? "chat" : "upload";
+  return t === "explorer" ? "explorer" : t === "members" ? "members" : t === "chat" ? "chat" : t === "assignments" ? "assignments" : "upload";
 }
 
 export default function App() {
@@ -55,7 +56,7 @@ export default function App() {
   const goTab = (next: Tab) => {
     // Soporta rutas limpias /explorer y /chat para deep-linking
     const base = `${window.location.origin}`;
-    const nextPath = next === "explorer" ? "/explorer" : next === "members" ? "/members" : next === "chat" ? "/chat" : "/";
+    const nextPath = next === "explorer" ? "/explorer" : next === "members" ? "/members" : next === "chat" ? "/chat" : next === "assignments" ? "/assignments" : "/";
     window.history.pushState({}, "", base + nextPath);
     setTab(next);
   };

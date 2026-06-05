@@ -46,7 +46,7 @@ export default function AssignmentsView() {
 
   const exportCsv = () => {
     if (!table) return;
-    const blob = new Blob([toCsv(table)], { type: "text/csv" });
+    const blob = new Blob(["﻿" + toCsv(table)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "referral_contacts_with_role.csv"; a.click();
