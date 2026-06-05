@@ -183,7 +183,10 @@ test.describe("Performance — time budgets", () => {
 
     const rowCount = await page.locator(S.AI_RESULT_ROW).count();
     console.log(`[PERF-6] 50-row table render: ${tableElapsed}ms, rows: ${rowCount}`);
-    expect(rowCount).toBe(50);
+    // AIResultTable paginates at PAGE_SIZE=20, so the first page renders 20 of
+    // the 50 rows in the DOM; the footer reports the full total.
+    expect(rowCount).toBe(20);
+    await expect(page.getByText(/of\s*50\s*rows/i)).toBeVisible();
     expect(tableElapsed).toBeLessThan(1000);
   });
 });
