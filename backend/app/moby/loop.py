@@ -315,12 +315,17 @@ def _agentic_loop(
     # user asked for a table and no table was produced this request.
     if _tabular and text_out and not _table_produced_this_request and _whitelist_spec is not None:
         _dbg("Retry triggered: loop exited text-only with tabular intent, re-calling with whitelist")
+        # Derive the offered tool names from the actual whitelist spec (single
+        # source of truth) so the prompt never drifts from TABLE_RETURNING_TOOLS.
+        _offered_names = sorted(
+            t.get("function", {}).get("name", "") for t in _whitelist_spec
+        )
+        _offered_list = ", ".join(n for n in _offered_names if n)
         msgs.append({
             "role": "user",
             "content": (
                 "The previous answer lacked a table. The user asked for a list/table — "
-                "you MUST call one of: explorer_search, nearest_filtered_sites, "
-                "study_coordinators_with_activities, members_search."
+                f"you MUST call one of: {_offered_list}."
             ),
         })
         try:
