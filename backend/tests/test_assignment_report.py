@@ -84,15 +84,24 @@ from app.services.assignment_report import assemble_rows, REPORT_COLUMNS
 
 def _assignment(con, acc, study="Baricade", stage="Activated", referral=True,
                 first="Jane", last="Doe", email="j@x.org",
-                city="Liege", country="Belgium", pop="Both"):
+                center="Center X", city="Liege", country="Belgium", pop="Both",
+                contact_country="Belgium"):
+    # Center/city/country/patient_population come from the assignment center
+    # (C_Account__r). The contact's primary account (C_Contact_Name__r.Account)
+    # is intentionally present-but-unused so tests can prove the report keys off
+    # the center, not the contact account (Codex P1).
     return {
         "C_Assignment_Stage__c": stage, "Referral_Contact__c": referral,
-        "C_Account__c": acc, "C_Opportunity_Name__r": {"Name": study},
+        "C_Account__c": acc,
+        "C_Account__r": {"Name": center, "ShippingCity": city,
+                         "ShippingCountry": country, "Patient_Population__c": pop},
+        "C_Opportunity_Name__r": {"Name": study},
         "C_Contact_Name__c": con,
         "C_Contact_Name__r": {
             "FirstName": first, "LastName": last, "Email": email,
-            "Account": {"Name": "Center X", "ShippingCity": city,
-                        "ShippingCountry": country, "Patient_Population__c": pop},
+            "Account": {"Name": "Contact Primary Acct",
+                        "ShippingCity": "ContactCity",
+                        "ShippingCountry": contact_country},
         },
     }
 
@@ -112,6 +121,36 @@ class TestAssembleRows:
     def test_exclude_country_drops_row(self):
         assignments = [_assignment("C1", "ACENTER", country="United Kingdom")]
         out = assemble_rows(assignments, build_acr_index([]), AssignmentFilters(exclude_countries=["United Kingdom"]))
+        assert out["rows"] == []
+
+    def test_country_filter_uses_center_not_contact_account(self):
+        # Codex P1: center is in the UK, contact's primary account is in Belgium.
+        # exclude_countries=["United Kingdom"] must drop the row on the CENTER's
+        # country, not the contact's unrelated primary account.
+        a = _assignment("C1", "ACENTER", country="United Kingdom", contact_country="Belgium")
+        out = assemble_rows([a], build_acr_index([]), AssignmentFilters(exclude_countries=["United Kingdom"]))
+        assert out["rows"] == []
+
+    def test_center_display_fields_come_from_center_account(self):
+        a = _assignment("C1", "ACENTER", center="CS-Leuven", city="Leuven",
+                        pop="T1D", contact_country="France")
+        row = assemble_rows([a], build_acr_index([]), AssignmentFilters())["rows"][0]
+        assert row["center"] == "CS-Leuven"
+        assert row["city"] == "Leuven"
+        assert row["patient_population"] == "T1D"
+
+    def test_include_countries_keeps_only_matching(self):
+        rows = [_assignment("C1", "AC1", country="Belgium"),
+                _assignment("C2", "AC2", country="Spain", email="b@x.org")]
+        out = assemble_rows(rows, build_acr_index([]), AssignmentFilters(include_countries=["Belgium"]))
+        assert len(out["rows"]) == 1
+        assert out["rows"][0]["email"] == "j@x.org"
+
+    def test_exclude_takes_precedence_over_include(self):
+        # A country present in both lists is dropped (exclude wins).
+        a = _assignment("C1", "ACENTER", country="United Kingdom")
+        out = assemble_rows([a], build_acr_index([]), AssignmentFilters(
+            include_countries=["United Kingdom"], exclude_countries=["United Kingdom"]))
         assert out["rows"] == []
 
     def test_role_filter_keeps_only_matching(self):
@@ -152,3 +191,29 @@ class TestFetchReport:
         out = fetch_report(sf, AssignmentFilters())
         assert len(sf.queries) == 1
         assert out["rows"] == []
+
+    def test_acr_chunking_more_than_200_contacts(self):
+        # 205 distinct contacts -> ACR query is chunked at 200 (2 ACR calls).
+        assignment_resp = {"records": [_assignment(f"C{i}", "ACENTER") for i in range(1, 206)]}
+        acr_chunk_1 = {"records": [_acr("ACENTER", f"C{i}", "Investigator") for i in range(1, 201)]}
+        acr_chunk_2 = {"records": [_acr("ACENTER", f"C{i}", "Sub-Investigator") for i in range(201, 206)]}
+        sf = _FakeSF([assignment_resp, acr_chunk_1, acr_chunk_2])
+
+        out = fetch_report(sf, AssignmentFilters())
+
+        # 1 Assignment__c query + 2 ACR queries
+        assert len(sf.queries) == 3
+        assert "FROM Assignment__c" in sf.queries[0]
+        # contact_ids are sorted; chunk boundaries verified by membership, not order
+        assert "FROM AccountContactRelation" in sf.queries[1]
+        assert "FROM AccountContactRelation" in sf.queries[2]
+        # every contact id appears in exactly one ACR chunk query
+        for i in range(1, 206):
+            in_first = f"'C{i}'" in sf.queries[1]
+            in_second = f"'C{i}'" in sf.queries[2]
+            assert in_first != in_second, f"C{i} must be in exactly one chunk"
+        # roles from both chunks survive into the assembled rows
+        roles = {row["role"] for row in out["rows"]}
+        assert "Investigator" in roles
+        assert "Sub-Investigator" in roles
+        assert len(out["rows"]) == 205
