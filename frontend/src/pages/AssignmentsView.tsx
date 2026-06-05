@@ -13,8 +13,10 @@ function toCsv(t: ReportTable): string {
 export default function AssignmentsView() {
   const [studies, setStudies] = useState<string[]>([]);
   const [stages, setStages] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[]>([]);
   const [selStudies, setSelStudies] = useState<string[]>(STUDIES_DEFAULT);
   const [selStages, setSelStages] = useState<string[]>(["Activated"]);
+  const [selRoles, setSelRoles] = useState<string[]>([]);  // empty = all roles
   const [referralOnly, setReferralOnly] = useState(true);
   const [excludeUK, setExcludeUK] = useState(true);
   const [table, setTable] = useState<ReportTable | null>(null);
@@ -23,7 +25,7 @@ export default function AssignmentsView() {
 
   useEffect(() => {
     assignmentReportOptions()
-      .then((o) => { setStudies(o.studies); setStages(o.stages); })
+      .then((o) => { setStudies(o.studies); setStages(o.stages); setRoles(o.roles ?? []); })
       .catch(() => { /* options are best-effort; defaults still work */ });
   }, []);
 
@@ -34,6 +36,7 @@ export default function AssignmentsView() {
         studies: selStudies,
         stages: selStages,
         referral_only: referralOnly,
+        roles: selRoles,
         exclude_countries: excludeUK ? ["United Kingdom"] : [],
       });
       setTable(t);
@@ -80,6 +83,18 @@ export default function AssignmentsView() {
             </label>
           ))}
         </fieldset>
+
+        {roles.length > 0 && (
+          <fieldset className="border rounded p-2 max-h-40 overflow-auto">
+            <legend className="text-xs px-1">Roles</legend>
+            {roles.map((r) => (
+              <label key={r} className="block text-sm">
+                <input type="checkbox" checked={selRoles.includes(r)}
+                       onChange={() => toggle(selRoles, r, setSelRoles)} /> {r}
+              </label>
+            ))}
+          </fieldset>
+        )}
 
         <div className="flex flex-col gap-1 text-sm">
           <label><input type="checkbox" checked={referralOnly}

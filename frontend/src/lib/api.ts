@@ -702,6 +702,6 @@ export async function assignmentReport(filters: AssignmentReportFilters): Promis
   });
 }
 
-export async function assignmentReportOptions(): Promise<{ studies: string[]; stages: string[] }> {
-  return api<{ studies: string[]; stages: string[] }>("/api/assignments/report/options", { retries: 1 });
+export async function assignmentReportOptions(): Promise<{ studies: string[]; stages: string[]; roles: string[] }> {
+  return api<{ studies: string[]; stages: string[]; roles: string[] }>("/api/assignments/report/options", { retries: 1 });
 }

@@ -26,10 +26,13 @@ test.describe("Referral DB tab", () => {
         body: JSON.stringify({
           studies: ["Baricade Delay (JAJJ)", "Safeguard", "Beta Preserve"],
           stages: ["Activated"],
+          roles: ["Investigator", "Study Coordinator"],
         }),
       })
     );
-    await page.route("**/api/assignments/report", (route) =>
+    let reportBody: any = null;
+    await page.route("**/api/assignments/report", (route, request) => {
+      reportBody = request.postDataJSON();
       route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -41,14 +44,22 @@ test.describe("Referral DB tab", () => {
           ],
           rows: [{ first_name: "Bart", email: "bart@uzbrussel.be", role: "Investigator" }],
         }),
-      })
-    );
+      });
+    });
 
     await page.goto("/");
     await page.getByTestId("tab-assignments").click();
     await expect(page.getByTestId("assignments-view")).toBeVisible();
+
+    // Role options from /report/options render and can be selected; the picked
+    // role must be sent in the report request body.
+    const roleFilter = page.getByText("Investigator", { exact: true });
+    await expect(roleFilter).toBeVisible();
+    await roleFilter.click();
+
     await page.getByTestId("assignments-run").click();
     await expect(page.getByTestId("assignments-table")).toContainText("Investigator");
     await expect(page.getByTestId("assignments-table")).toContainText("bart@uzbrussel.be");
+    expect(reportBody?.roles).toEqual(["Investigator"]);
   });
 });

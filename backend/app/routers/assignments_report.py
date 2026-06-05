@@ -45,7 +45,12 @@ def assignments_report_options(request: Request) -> Dict[str, Any]:
         "SELECT C_Assignment_Stage__c FROM Assignment__c "
         "WHERE C_Assignment_Stage__c != null GROUP BY C_Assignment_Stage__c"
     ).get("records", [])
+    roles = sf.query_all(
+        "SELECT Role__c FROM AccountContactRelation "
+        "WHERE Role__c != null GROUP BY Role__c"
+    ).get("records", [])
     return {
         "studies": sorted({r.get("Name") for r in studies if r.get("Name")}),
         "stages": sorted({r.get("C_Assignment_Stage__c") for r in stages if r.get("C_Assignment_Stage__c")}),
+        "roles": sorted({r.get("Role__c") for r in roles if r.get("Role__c")}),
     }
