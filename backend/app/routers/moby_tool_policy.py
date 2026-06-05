@@ -15,6 +15,7 @@ TABLE_RETURNING_TOOLS: frozenset[str] = frozenset({
     "nearest_filtered_sites",
     "study_coordinators_with_activities",
     "members_search",
+    "assignment_contact_report",
 })
 
 
