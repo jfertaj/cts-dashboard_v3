@@ -12,6 +12,8 @@ def test_table_returning_tools_constant_entries():
         "assignment_contact_report",
         "salesforce_account_contacts",
         "contacts_by_group",
+        "site_contacts_report",
+        "site_role_presence",
     })
 
 

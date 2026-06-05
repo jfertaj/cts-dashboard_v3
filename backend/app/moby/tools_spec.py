@@ -548,4 +548,66 @@ TOOLS_SPEC = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "site_contacts_report",
+            "description": (
+                "Contact-grain report for a FILTERED SET of clinical trial sites: one row per "
+                "(site, contact) with site name, country, city, contact first/last name, email, "
+                "title, and the contact's Role at that site's account (AccountContactRelation.Role__c). "
+                "A 'site' is a SubAccount Clinical Account; country/city come from the site's own "
+                "account (ShippingCountry/ShippingCity). "
+                "Use for: 'list the contacts/coordinators/PIs at sites in <country/city>', "
+                "'contacts and their roles for sites in study X', 'who works at the sites in <place>'. "
+                "Filter by countries/cities/studies (study = participation via Assignment__c), "
+                "and optionally restrict to specific roles (post-join). "
+                "When NOT to use: for per-account contacts when you already have one Account Id "
+                "(use salesforce_account_contacts), or for assignment/referral-grain reports "
+                "(use assignment_contact_report)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "countries": {"type": "array", "items": {"type": "string"}, "description": "Site ShippingCountry full names, e.g. Spain, Italy, Belgium"},
+                    "cities": {"type": "array", "items": {"type": "string"}, "description": "Site ShippingCity, e.g. Barcelona, Leuven"},
+                    "studies": {"type": "array", "items": {"type": "string"}, "description": "Study/Opportunity names — restricts to sites participating via Assignment__c"},
+                    "roles": {"type": "array", "items": {"type": "string"}, "description": "Keep only contacts with these ACR roles, e.g. Investigator, Study Coordinator"},
+                    "limit": {"type": "integer", "description": "Cap on number of returned contact rows"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "site_role_presence",
+            "description": (
+                "Site-grain coverage report answering 'which sites HAVE / DON'T HAVE role R'. "
+                "Returns one row per clinical trial site (SubAccount Clinical Account) with country, "
+                "city, site name, and a boolean has_role indicating whether any "
+                "AccountContactRelation with the target role exists at that site's account (plus the "
+                "matching contact when present). This is a left-anti join: every site in the filtered "
+                "set is listed, flagged by role presence. "
+                "Use for: 'which sites have a Study Coordinator?', 'sites in Germany WITHOUT a PI', "
+                "'centers missing an Investigator', 'do all sites in study X have a coordinator?'. "
+                "role is matched as a case-insensitive substring (e.g. 'Investigator' matches "
+                "'Principal Investigator' and 'Sub-Investigator'). "
+                "When NOT to use: when you want the contact list itself rather than per-site presence "
+                "(use site_contacts_report)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "role": {"type": "string", "description": "REQUIRED target role, e.g. Study Coordinator, Investigator, Principal Investigator"},
+                    "countries": {"type": "array", "items": {"type": "string"}, "description": "Site ShippingCountry full names"},
+                    "cities": {"type": "array", "items": {"type": "string"}, "description": "Site ShippingCity"},
+                    "studies": {"type": "array", "items": {"type": "string"}, "description": "Restrict to sites participating in these studies via Assignment__c"},
+                    "mode": {"type": "string", "enum": ["all", "present", "absent"], "default": "all", "description": "'all' = every site with flag; 'present' = only sites that have the role; 'absent' = only sites missing the role"}
+                },
+                "required": ["role"]
+            }
+        }
+    },
 ]
