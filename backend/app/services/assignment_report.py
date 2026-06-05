@@ -143,3 +143,24 @@ def assemble_rows(assignments: List[Dict[str, Any]], acr_index: AcrIndex,
         })
     columns = [{"key": k, "label": _COLUMN_LABELS[k]} for k in REPORT_COLUMNS]
     return {"columns": columns, "rows": rows}
+
+
+_ACR_CHUNK = 200
+
+
+def _chunked(seq: List[str], n: int) -> List[List[str]]:
+    return [seq[i:i + n] for i in range(0, len(seq), n)]
+
+
+def fetch_report(sf: Any, f: AssignmentFilters) -> Dict[str, Any]:
+    """Run the two-step query (assignments -> ACR roles) and assemble rows."""
+    arows = (sf.query_all(build_assignment_soql(f)) or {}).get("records", [])
+    contact_ids = sorted({a.get("C_Contact_Name__c") for a in arows if a.get("C_Contact_Name__c")})
+    acr_records: List[Dict[str, Any]] = []
+    for chunk in _chunked(contact_ids, _ACR_CHUNK):
+        soql = (
+            "SELECT AccountId, ContactId, Role__c, IsDirect, LastModifiedDate "
+            f"FROM AccountContactRelation WHERE ContactId IN ({_soql_str_list(chunk)})"
+        )
+        acr_records.extend((sf.query_all(soql) or {}).get("records", []))
+    return assemble_rows(arows, build_acr_index(acr_records), f)

@@ -120,3 +120,35 @@ class TestAssembleRows:
         out = assemble_rows(assignments, idx, AssignmentFilters(roles=["Investigator"]))
         assert len(out["rows"]) == 1
         assert out["rows"][0]["role"] == "Investigator"
+
+
+from app.services.assignment_report import fetch_report
+
+
+class _FakeSF:
+    """Records SOQL and returns canned {'records': [...]} per call."""
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.queries = []
+    def query_all(self, soql):
+        self.queries.append(soql)
+        return self._responses.pop(0)
+
+
+class TestFetchReport:
+    def test_two_queries_and_join(self):
+        assignment_resp = {"records": [_assignment("C1", "ACENTER")]}
+        acr_resp = {"records": [_acr("ACENTER", "C1", "Investigator")]}
+        sf = _FakeSF([assignment_resp, acr_resp])
+        out = fetch_report(sf, AssignmentFilters(studies=["Baricade"], referral_only=True))
+        assert len(sf.queries) == 2
+        assert "FROM Assignment__c" in sf.queries[0]
+        assert "FROM AccountContactRelation" in sf.queries[1]
+        assert "ContactId IN ('C1')" in sf.queries[1]
+        assert out["rows"][0]["role"] == "Investigator"
+
+    def test_no_assignments_skips_acr_query(self):
+        sf = _FakeSF([{"records": []}])
+        out = fetch_report(sf, AssignmentFilters())
+        assert len(sf.queries) == 1
+        assert out["rows"] == []
