@@ -529,4 +529,23 @@ TOOLS_SPEC = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "assignment_contact_report",
+            "description": "Assignment/contact-level report: referral contacts for given studies and assignment stages, with each contact's Role at the center (AccountContactRelation.Role__c). Use for queries about referral contacts, study coordinators/investigators per study, or 'who is the X at the sites in study Y', especially when a contact-grain table with Role is requested. NOT for account/site-level filtering (use explorer_search for that).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "studies": {"type": "array", "items": {"type": "string"}, "description": "Opportunity/study names, e.g. Baricade Delay (JAJJ), Safeguard, Beta Preserve"},
+                    "stages": {"type": "array", "items": {"type": "string"}, "description": "Assignment stages, e.g. Activated"},
+                    "referral_only": {"type": "boolean", "description": "Only assignments flagged Referral Contact"},
+                    "roles": {"type": "array", "items": {"type": "string"}, "description": "Filter to these roles, e.g. Investigator, Study Coordinator"},
+                    "exclude_countries": {"type": "array", "items": {"type": "string"}, "description": "Center countries to exclude, e.g. United Kingdom"},
+                    "include_countries": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": []
+            }
+        }
+    },
 ]

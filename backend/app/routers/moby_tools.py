@@ -647,6 +647,29 @@ def handle_study_coordinators_with_activities(ctx: ToolContext) -> ToolResult:
     return result
 
 
+@register_tool("assignment_contact_report")
+def handle_assignment_contact_report(ctx: ToolContext) -> ToolResult:
+    from app.services.assignment_report import AssignmentFilters, fetch_report
+    result = ToolResult()
+    a = ctx.tool_args or ctx.args or {}
+    f = AssignmentFilters(
+        studies=a.get("studies") or [],
+        stages=a.get("stages") or [],
+        referral_only=bool(a.get("referral_only") or False),
+        roles=a.get("roles") or [],
+        exclude_countries=a.get("exclude_countries") or [],
+        include_countries=a.get("include_countries") or [],
+    )
+    try:
+        result.last_table = fetch_report(ctx.sf, f)
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"ok": True, "rows": len(result.last_table["rows"])})})
+    except Exception as ee:
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": str(ee)})})
+    return result
+
+
 @register_tool("qual_search")
 def handle_qual_search(ctx: ToolContext) -> ToolResult:
     from app.routers.ai_chat import tool_qual_search
