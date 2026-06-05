@@ -4,8 +4,8 @@ import { sfLoginRedirect, sfMe, sfLogout } from "../lib/salesforce";
 import Moby from "../assets/Moby.png";
 
 type Props = {
-  active: "upload" | "explorer" | "members" | "chat";
-  onTab: (tab: "upload" | "explorer" | "members" | "chat") => void;
+  active: "upload" | "explorer" | "members" | "chat" | "assignments";
+  onTab: (tab: "upload" | "explorer" | "members" | "chat" | "assignments") => void;
 };
 
 export default function Header({ active, onTab }: Props) {
@@ -122,6 +122,15 @@ export default function Header({ active, onTab }: Props) {
                 height={20}
                 className="inline-block align-middle ml-1"
               />
+            </button>
+            <button
+              data-testid="tab-assignments"
+              className={`px-3 py-1.5 rounded-full text-sm transition ${
+                active === "assignments" ? "bg-white text-[#003f7d] shadow" : "hover:bg-white/20"
+              }`}
+              onClick={() => onTab("assignments")}
+            >
+              Referral DB
             </button>
           </nav>
         </div>

@@ -4,6 +4,7 @@ import LinkAuthView from "./pages/UploadLinkView";
 import ChatView from "./pages/ChatView";
 import ExplorerView from "./pages/ExplorerView";
 import MembersView from "./pages/MembersView";
+import AssignmentsView from "./pages/AssignmentsView";
 import { sfLoginRedirect } from "./lib/salesforce";
 import { useSalesforceAuth } from "./hooks/useSalesforceAuth";
 import { useIdleTimer } from "./hooks/useIdleTimer";
@@ -108,6 +109,7 @@ export default function App() {
         {tab === "explorer" && <ExplorerView />}
         {tab === "members" && <MembersView prefetchedRows={membersPrefetch} />}
         {tab === "chat" && <ChatView />}
+        {tab === "assignments" && <AssignmentsView />}
       </main>
       <footer className="mt-10 py-6 text-center text-xs text-slate-500" aria-hidden={sessionExpired}>
         © {new Date().getFullYear()} INNODIA — Clinical Trial Support
