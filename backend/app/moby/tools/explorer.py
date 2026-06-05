@@ -77,8 +77,6 @@ def tool_explorer_search(
     Proxy interno al endpoint /api/explorer/search.
     Acepta FilterGroup con reglas qual.*, sf.* y site.* y devuelve una tabla unificada.
     """
-    from app.routers import ai_chat as _ai
-
     # Phase 4: validate FilterGroup before executing — surface errors to Claude so it can fix them
     if filters:
         _vl_errors = validate_filter_group(filters)
@@ -162,7 +160,6 @@ def tool_nearest_filtered_sites(
     Fast path (no filters): queries local Site table directly — no Salesforce API call needed.
     Filtered path: calls /api/explorer/search internally (requires valid session cookie).
     """
-    from app.routers import ai_chat as _ai
     from app.models.site import Site as SiteModel
 
     # 1. Geocode location — try geonames_cities DB first (free, fast), Google API as fallback
