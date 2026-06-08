@@ -85,10 +85,10 @@ def tool_ctx():
 # ---------------------------------------------------------------------------
 
 def test_max_agent_turns_default():
-    """MOBY_MAX_AGENT_TURNS defaults to 5 (raised from 3 to give the loop room
-    to retry after a 0-row result)."""
+    """MOBY_MAX_AGENT_TURNS defaults to 3 (reverted from a brief 5 — extra turns
+    added latency / 504s without a quality gain)."""
     from app.routers.ai_chat import MOBY_MAX_AGENT_TURNS
-    assert MOBY_MAX_AGENT_TURNS == 5
+    assert MOBY_MAX_AGENT_TURNS == 3
 
 
 def test_max_tool_result_tokens_default():
