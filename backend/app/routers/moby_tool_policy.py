@@ -16,6 +16,15 @@ TABLE_RETURNING_TOOLS: frozenset[str] = frozenset({
     "study_coordinators_with_activities",
     "members_search",
     "assignment_contact_report",
+    # Contact/PI questions ("who is the PI in Barcelona?", "contacts in the
+    # Netherlands"). Both handlers set last_table to a {columns, rows} table.
+    "salesforce_account_contacts",
+    "contacts_by_group",
+    # Site-set join tools (contact-grain table + site-grain role presence).
+    # Both set last_table to a {columns, rows} table and answer the
+    # "contact/role per site" cluster (QO03, PC0x, OC0x, RE02, ES-05).
+    "site_contacts_report",
+    "site_role_presence",
 })
 
 

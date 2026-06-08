@@ -158,6 +158,37 @@ def test_use_thinking_attaches_thinking_block_and_beta_header(mock_sdk, captured
 
 
 @patch("app.routers.ai_chat._anthropic_sdk")
+def test_thinking_and_forced_tool_choice_are_not_combined(mock_sdk, captured_kwargs):
+    """Quick-win Fix 2: the Anthropic API returns a 400 ('Thinking may not be
+    enabled when tool_choice forces tool use.') when extended thinking is
+    enabled at the same time as a forced tool_choice ({"type": "any"}).
+
+    SC03/FA01/GL04/MC03 (complex multi-condition queries) trip this when a
+    caller passes use_thinking=True with the default tool_choice="required".
+    Guard inside _claude_chat: when thinking is on, never force tool use.
+    """
+    from app.routers.ai_chat import _claude_chat, CLAUDE_THINKING_BUDGET
+    client, captured = captured_kwargs
+    mock_sdk.Anthropic.return_value = client
+
+    # use_thinking=True AND tool_choice="required" (would force {"type": "any"})
+    _claude_chat([{"role": "user", "content": "hi"}],
+                 tool_choice="required", use_thinking=True)
+
+    create = captured["create"]
+    assert create is not None
+    if CLAUDE_THINKING_BUDGET > 0:
+        # Thinking is enabled...
+        assert create.get("thinking", {}).get("type") == "enabled"
+        # max_tokens must stay strictly greater than the thinking budget.
+        assert create["max_tokens"] > create["thinking"]["budget_tokens"]
+        # ...so tool_choice must NOT force tool use (no {"type": "any"}).
+        assert create.get("tool_choice") != {"type": "any"}, (
+            "thinking + forced tool_choice → Anthropic 400"
+        )
+
+
+@patch("app.routers.ai_chat._anthropic_sdk")
 def test_streaming_path_used_when_stream_q_set(mock_sdk, captured_kwargs):
     from app.routers.ai_chat import _claude_chat, _STREAM_Q
     client, captured = captured_kwargs

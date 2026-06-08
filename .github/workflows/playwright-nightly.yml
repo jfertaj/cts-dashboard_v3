@@ -31,7 +31,7 @@ jobs:
 
       - name: Start preview server + run deterministic E2E tests
         env:
-          PLAYWRIGHT_BASE_URL: http://localhost:4173
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
           CI: "true"
         run: |
           npm run preview &
@@ -43,7 +43,7 @@ jobs:
         env:
           PLAYWRIGHT_SMOKE: "1"
           SF_SESSION_COOKIE: ${{ secrets.SF_SESSION_COOKIE }}
-          PLAYWRIGHT_BASE_URL: http://localhost:4173
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
           CI: "true"
         run: npx playwright test --grep @smoke --project=chromium
 

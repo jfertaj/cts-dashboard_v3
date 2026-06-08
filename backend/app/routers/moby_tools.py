@@ -674,6 +674,62 @@ def handle_assignment_contact_report(ctx: ToolContext) -> ToolResult:
     return result
 
 
+@register_tool("site_contacts_report")
+def handle_site_contacts_report(ctx: ToolContext) -> ToolResult:
+    from app.services.site_contacts import SiteContactFilters, fetch_site_contacts
+    result = ToolResult()
+    if not ctx.sf:
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": "No active Salesforce session"})})
+        return result
+    a = ctx.args or {}
+    f = SiteContactFilters(
+        countries=a.get("countries") or [],
+        cities=a.get("cities") or [],
+        studies=a.get("studies") or [],
+        roles=a.get("roles") or [],
+        limit=a.get("limit"),
+    )
+    try:
+        result.last_table = fetch_site_contacts(ctx.sf, f)
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"ok": True, "rows": len(result.last_table["rows"])})})
+    except Exception as ee:
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": str(ee)})})
+    return result
+
+
+@register_tool("site_role_presence")
+def handle_site_role_presence(ctx: ToolContext) -> ToolResult:
+    from app.services.site_contacts import SiteRolePresenceFilters, fetch_site_role_presence
+    result = ToolResult()
+    if not ctx.sf:
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": "No active Salesforce session"})})
+        return result
+    a = ctx.args or {}
+    f = SiteRolePresenceFilters(
+        role=a.get("role") or "",
+        countries=a.get("countries") or [],
+        cities=a.get("cities") or [],
+        studies=a.get("studies") or [],
+        mode=a.get("mode") or "all",
+    )
+    if not f.role.strip():
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": "Missing required 'role'"})})
+        return result
+    try:
+        result.last_table = fetch_site_role_presence(ctx.sf, f)
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"ok": True, "rows": len(result.last_table["rows"])})})
+    except Exception as ee:
+        ctx.msgs.append({"role": "tool", "tool_call_id": ctx.tool_call_id,
+                         "content": json.dumps({"error": str(ee)})})
+    return result
+
+
 @register_tool("qual_search")
 def handle_qual_search(ctx: ToolContext) -> ToolResult:
     from app.routers.ai_chat import tool_qual_search

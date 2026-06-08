@@ -10,7 +10,37 @@ def test_table_returning_tools_constant_entries():
         "study_coordinators_with_activities",
         "members_search",
         "assignment_contact_report",
+        "salesforce_account_contacts",
+        "contacts_by_group",
+        "site_contacts_report",
+        "site_role_presence",
     })
+
+
+def test_contact_tools_in_table_returning_tools():
+    """Quick-win Fix 1: contact/PI questions ('who is the PI at the site in
+    Barcelona?', 'show me all contacts in the Netherlands') must be routable
+    via the forced tabular path. Both handlers genuinely set last_table to a
+    {columns, rows} table, so they belong in the whitelist."""
+    from app.routers.moby_tool_policy import TABLE_RETURNING_TOOLS
+    assert "salesforce_account_contacts" in TABLE_RETURNING_TOOLS
+    assert "contacts_by_group" in TABLE_RETURNING_TOOLS
+
+
+def test_filter_tools_spec_includes_contact_tools():
+    """filter_tools_spec must surface the contact tools under the default
+    whitelist (= TABLE_RETURNING_TOOLS)."""
+    from app.routers.moby_tool_policy import filter_tools_spec
+    spec = [
+        _fake_spec("salesforce_account_contacts"),
+        _fake_spec("soql_query"),
+        _fake_spec("contacts_by_group"),
+    ]
+    out = filter_tools_spec(spec)  # default whitelist → TABLE_RETURNING_TOOLS
+    names = {t["function"]["name"] for t in out}
+    assert "salesforce_account_contacts" in names
+    assert "contacts_by_group" in names
+    assert "soql_query" not in names
 
 
 def test_assignment_contact_report_in_table_returning_tools():

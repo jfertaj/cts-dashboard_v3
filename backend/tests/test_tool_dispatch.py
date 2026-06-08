@@ -46,6 +46,8 @@ EXPECTED_TOOLS = [
     "contacts_by_group",
     "study_coordinators_with_activities",
     "assignment_contact_report",
+    "site_contacts_report",
+    "site_role_presence",
     "qual_search",
     "manipulate_data",
     "render_chart",
@@ -63,7 +65,7 @@ def test_all_expected_tools_registered():
 
 
 def test_tool_count():
-    """Exactly 34 tools registered (includes merged aliases)."""
+    """Exactly len(EXPECTED_TOOLS) tools registered (includes merged aliases)."""
     assert len(TOOL_DISPATCH) == len(EXPECTED_TOOLS)
 
 
@@ -170,6 +172,32 @@ def test_salesforce_account_contacts_no_session():
     assert len(ctx.msgs) == 1
     content = json.loads(ctx.msgs[0]["content"])
     assert "error" in content
+
+
+def test_site_contacts_report_no_session():
+    ctx = _make_ctx(sf=None, args={"countries": ["Spain"]})
+    result = dispatch_tool("site_contacts_report", ctx)
+    assert len(ctx.msgs) == 1
+    content = json.loads(ctx.msgs[0]["content"])
+    assert "error" in content
+
+
+def test_site_role_presence_no_session():
+    ctx = _make_ctx(sf=None, args={"role": "Study Coordinator"})
+    result = dispatch_tool("site_role_presence", ctx)
+    assert len(ctx.msgs) == 1
+    content = json.loads(ctx.msgs[0]["content"])
+    assert "error" in content
+
+
+def test_site_role_presence_missing_role():
+    """role is required — empty role yields an error even with an SF session."""
+    ctx = _make_ctx(sf=MagicMock(), args={"countries": ["Spain"]})
+    result = dispatch_tool("site_role_presence", ctx)
+    assert len(ctx.msgs) == 1
+    content = json.loads(ctx.msgs[0]["content"])
+    assert "error" in content
+    assert "role" in content["error"]
 
 
 def test_activities_with_countries_no_session():
