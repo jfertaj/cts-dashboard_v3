@@ -34,9 +34,10 @@ CLAUDE_THINKING_BUDGET = int(os.environ.get("CLAUDE_THINKING_BUDGET", "8000"))
 CLAUDE_TEMPERATURE = float(os.getenv("CLAUDE_TEMPERATURE", "0"))
 
 # Agentic loop limits
-# 5 turns (was 3) gives the loop room to detect a 0-row result and retry with a
-# different formulation before exhausting its budget.
-MOBY_MAX_AGENT_TURNS = int(os.getenv("MOBY_MAX_AGENT_TURNS", "5"))
+# Kept at 3: raising to 5 added latency (more LLM turns) and pushed some qual
+# queries past the gateway 504 timeout, without a demonstrated quality gain
+# (the determinism win came from temperature=0, not extra turns). Env-overridable.
+MOBY_MAX_AGENT_TURNS = int(os.getenv("MOBY_MAX_AGENT_TURNS", "3"))
 MAX_TOOL_RESULT_TOKENS = int(os.getenv("MAX_TOOL_RESULT_TOKENS", "4000"))
 MOBY_AGENT_TIMEOUT_S = int(os.getenv("MOBY_AGENT_TIMEOUT_S", "30"))
 
