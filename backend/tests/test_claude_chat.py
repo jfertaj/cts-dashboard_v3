@@ -248,3 +248,32 @@ def test_missing_api_key_raises(mock_sdk, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(Exception, match="ANTHROPIC_API_KEY"):
         _claude_chat([{"role": "user", "content": "hi"}])
+
+
+@patch("app.routers.ai_chat._anthropic_sdk")
+def test_temperature_pinned_when_thinking_off(mock_sdk, captured_kwargs):
+    """Without thinking, a deterministic temperature is set to cut variance."""
+    from app.routers.ai_chat import _claude_chat
+    from app.moby.config import CLAUDE_TEMPERATURE
+    client, captured = captured_kwargs
+    mock_sdk.Anthropic.return_value = client
+
+    _claude_chat([{"role": "user", "content": "hi"}])
+
+    assert captured["create"]["temperature"] == CLAUDE_TEMPERATURE
+
+
+@patch("app.routers.ai_chat._anthropic_sdk")
+def test_temperature_not_set_when_thinking_on(mock_sdk, captured_kwargs):
+    """Extended thinking requires temperature=1; we must NOT pin temperature
+    (e.g. 0) alongside thinking or the API 400s. Guard: temperature absent."""
+    from app.routers.ai_chat import _claude_chat, CLAUDE_THINKING_BUDGET
+    client, captured = captured_kwargs
+    mock_sdk.Anthropic.return_value = client
+
+    _claude_chat([{"role": "user", "content": "hi"}], use_thinking=True)
+
+    if CLAUDE_THINKING_BUDGET > 0:
+        assert captured["create"]["thinking"]["type"] == "enabled"
+        assert "temperature" not in captured["create"], \
+            "temperature must not be set when thinking is enabled (API requires 1)"

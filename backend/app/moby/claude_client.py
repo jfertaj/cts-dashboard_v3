@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import anthropic as _anthropic_sdk  # noqa: F401  (kept for back-compat / direct callers)
 
-from app.moby.config import CLAUDE_THINKING_BUDGET, DEBUG
+from app.moby.config import CLAUDE_THINKING_BUDGET, CLAUDE_TEMPERATURE, DEBUG
 from app.moby.streaming import _STREAM_Q
 from app.moby.tools_spec import TOOLS_SPEC
 
@@ -182,6 +182,13 @@ def _claude_chat(
         kwargs["max_tokens"] = CLAUDE_THINKING_BUDGET + 8192
         kwargs["betas"] = ["interleaved-thinking-2025-05-14"]
         _dbg("Extended thinking ENABLED — budget=%d tokens", CLAUDE_THINKING_BUDGET)
+
+    # Pin a deterministic temperature to reduce run-to-run variance in tool
+    # selection and generated SOQL/filters. The Anthropic API requires
+    # temperature=1 whenever extended thinking is enabled, so only set it when
+    # thinking is OFF (the "thinking" key is absent).
+    if "thinking" not in kwargs:
+        kwargs["temperature"] = CLAUDE_TEMPERATURE
 
     # 4. Call Claude API
     # When thinking is enabled we pass `betas` via extra_headers so the standard
