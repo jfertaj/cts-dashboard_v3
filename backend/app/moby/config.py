@@ -27,8 +27,16 @@ MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "12"))
 # max_tokens is automatically raised to budget + 8192 when thinking is enabled.
 CLAUDE_THINKING_BUDGET = int(os.environ.get("CLAUDE_THINKING_BUDGET", "8000"))
 
+# Sampling temperature for Claude calls. 0 = deterministic, to cut run-to-run
+# variance in tool selection and generated SOQL/filters (a measured driver of
+# "same question -> 8 rows vs 0 rows"). NOTE: extended thinking requires
+# temperature=1, so this is only applied when thinking is OFF (see claude_client).
+CLAUDE_TEMPERATURE = float(os.getenv("CLAUDE_TEMPERATURE", "0"))
+
 # Agentic loop limits
-MOBY_MAX_AGENT_TURNS = int(os.getenv("MOBY_MAX_AGENT_TURNS", "3"))
+# 5 turns (was 3) gives the loop room to detect a 0-row result and retry with a
+# different formulation before exhausting its budget.
+MOBY_MAX_AGENT_TURNS = int(os.getenv("MOBY_MAX_AGENT_TURNS", "5"))
 MAX_TOOL_RESULT_TOKENS = int(os.getenv("MAX_TOOL_RESULT_TOKENS", "4000"))
 MOBY_AGENT_TIMEOUT_S = int(os.getenv("MOBY_AGENT_TIMEOUT_S", "30"))
 

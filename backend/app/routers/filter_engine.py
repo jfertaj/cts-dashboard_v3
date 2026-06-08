@@ -81,6 +81,30 @@ def _normalize_list(v: Any) -> Iterable[Any]:
     return [p.strip() for p in s.split(",")] if "," in s else [v]
 
 
+# Affirmative / negative representations a qual checkbox may be stored as. The
+# LLM typically emits `equals "Yes"`, but the JSONB may hold the bool-ish value
+# as True, "yes", "Y", or "X" (Excel-origin). Pure numbers (1/0) are deliberately
+# excluded so a real numeric qual is never hijacked.
+_AFFIRMATIVE_TOKENS = {"yes", "y", "true", "t", "x", "✓", "checked", "check", "on", "si", "sí", "oui", "ja"}
+_NEGATIVE_TOKENS = {"no", "n", "false", "f", "off", "none", "non", "nein"}
+
+
+def _bool_token(x: Any) -> Optional[str]:
+    """Map a boolean-ish value to 'yes'/'no', or None if not boolean-ish."""
+    if isinstance(x, bool):
+        return "yes" if x else "no"
+    if x is None:
+        return None
+    s = str(x).strip().lower()
+    if not s:
+        return None
+    if s in _AFFIRMATIVE_TOKENS:
+        return "yes"
+    if s in _NEGATIVE_TOKENS:
+        return "no"
+    return None
+
+
 def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
     op = (op or "").lower()
     v, tv = _coerce_scalar(value)
@@ -106,16 +130,25 @@ def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
 
     # IN / NOT IN
     if op in ("in","not_in"):
-        items = [_coerce_scalar(x)[0] for x in _normalize_list(raw)]
+        raw_items = list(_normalize_list(raw))
+        items = [_coerce_scalar(x)[0] for x in raw_items]
         present = any(_cmp(v, it) == 0 for it in items)
+        if not present:
+            bt_v = _bool_token(value)
+            if bt_v is not None:
+                present = any(_bool_token(it) == bt_v for it in raw_items)
         return present if op == "in" else (not present)
 
     # Binarios escalares
     tgt, _ = _coerce_scalar(raw)
-    if op in ("equals","=","eq"):
-        return _cmp(v, tgt) == 0
-    if op in ("not_equals","!=","ne"):
-        return _cmp(v, tgt) != 0
+    if op in ("equals","=","eq","not_equals","!=","ne"):
+        # Affirmative/negative robustness: when BOTH sides are boolean-ish
+        # (Yes/True/yes/Y/X ↔ No/false), compare on the normalized token so a
+        # checkbox stored as True/"yes"/"X" still matches a filter of "Yes".
+        # Falls back to exact comparison for numeric / free-text values.
+        bt_v, bt_t = _bool_token(value), _bool_token(raw)
+        eq = (bt_v == bt_t) if (bt_v is not None and bt_t is not None) else (_cmp(v, tgt) == 0)
+        return eq if op in ("equals","=","eq") else (not eq)
     # Comparison operators: None values never satisfy gt/gte/lt/lte
     # (guards against str("None") > str("0") lexicographic false positives)
     if op in ("gt",">"):

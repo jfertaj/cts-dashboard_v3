@@ -85,9 +85,10 @@ def tool_ctx():
 # ---------------------------------------------------------------------------
 
 def test_max_agent_turns_default():
-    """MOBY_MAX_AGENT_TURNS defaults to 3."""
+    """MOBY_MAX_AGENT_TURNS defaults to 5 (raised from 3 to give the loop room
+    to retry after a 0-row result)."""
     from app.routers.ai_chat import MOBY_MAX_AGENT_TURNS
-    assert MOBY_MAX_AGENT_TURNS == 3
+    assert MOBY_MAX_AGENT_TURNS == 5
 
 
 def test_max_tool_result_tokens_default():
@@ -174,20 +175,19 @@ def test_loop_fast_exits_with_companion_text(mock_dispatch, mock_claude, tool_ct
 @patch("app.routers.ai_chat._claude_chat")
 @patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_forces_text_on_final_turn(mock_dispatch, mock_claude, tool_ctx):
-    """On turn 3 (final), _claude_chat is called with force_no_tools=True."""
+    """On the final turn, _claude_chat is called with force_no_tools=True.
+    MAX-agnostic: tool calls on turns 1..MAX-1, forced text on the last turn."""
     from app.routers.ai_chat import _agentic_loop, MOBY_MAX_AGENT_TURNS
     from app.routers.moby_tools import ToolResult
 
-    # Turn 1: tool call
-    tc1 = _make_mock_tool_call("tc_1", "salesforce_query", {"soql": "SELECT Id FROM Account"})
-    # Turn 2: different tool call
-    tc2 = _make_mock_tool_call("tc_2", "sql_query", {"sql": "SELECT * FROM sites"})
-    # Turn 3: forced text (no tools)
-    mock_claude.side_effect = [
-        _tool_response([tc1]),
-        _tool_response([tc2]),
-        _text_response("<p>Summary of results.</p>"),
+    # A tool call on every turn except the last; the loop keeps going until it
+    # hits the final turn, where it forces a text-only response.
+    tool_turns = [
+        _tool_response([_make_mock_tool_call(f"tc_{i}", "salesforce_query",
+                                             {"soql": f"SELECT Id FROM Account LIMIT {i}"})])
+        for i in range(1, MOBY_MAX_AGENT_TURNS)
     ]
+    mock_claude.side_effect = tool_turns + [_text_response("<p>Summary of results.</p>")]
     mock_dispatch.return_value = ToolResult(last_table={"rows": [], "columns": []})
 
     result = _agentic_loop(msgs=tool_ctx.msgs, tool_ctx=tool_ctx)
@@ -195,17 +195,13 @@ def test_loop_forces_text_on_final_turn(mock_dispatch, mock_claude, tool_ctx):
     assert result["turns_used"] == MOBY_MAX_AGENT_TURNS
     assert result["text"] == "<p>Summary of results.</p>"
 
-    # Verify the 3rd call had force_no_tools=True
     calls = mock_claude.call_args_list
-    assert len(calls) == 3
-    # Turn 3 (index 2) should have force_no_tools=True
-    _, kwargs3 = calls[2]
-    assert kwargs3["force_no_tools"] is True
-    # Turn 1 and 2 should have force_no_tools=False
-    _, kwargs1 = calls[0]
-    assert kwargs1["force_no_tools"] is False
-    _, kwargs2 = calls[1]
-    assert kwargs2["force_no_tools"] is False
+    assert len(calls) == MOBY_MAX_AGENT_TURNS
+    # The final turn forces text (no tools); every earlier turn allows tools.
+    _, kwargs_final = calls[-1]
+    assert kwargs_final["force_no_tools"] is True
+    for _, kw in calls[:-1]:
+        assert kw["force_no_tools"] is False
 
 
 @patch("app.routers.ai_chat._claude_chat")

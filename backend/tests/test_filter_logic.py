@@ -7,7 +7,9 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from app.routers.filter_engine import _is_logic_expr, _eval_logic_expr_be, _filter_group_to_expr
+from app.routers.filter_engine import (
+    _is_logic_expr, _eval_logic_expr_be, _filter_group_to_expr, _eval_qual_rule,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -188,3 +190,42 @@ class TestFilterGroupToExpr:
         assert len(result["rules"]) == 4
         assert result["rules"][0] is leaf1
         assert result["rules"][3] is leaf2
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _eval_qual_rule — affirmative/negative ("Yes" vs True/yes/Y/X) robustness.
+# The LLM emits `equals "Yes"` but qual JSONB may store the boolean-ish value as
+# True, "yes", "Y", or "X" (Excel-origin checkboxes). These must all match so a
+# correct filter doesn't silently return 0 rows.
+# ──────────────────────────────────────────────────────────────────────────────
+class TestQualBooleanMatch:
+    @pytest.mark.parametrize("stored", ["Yes", "yes", "YES", "Y", "y", True, "x", "X", "true", "checked", "✓"])
+    def test_equals_yes_matches_affirmative_representations(self, stored):
+        assert _eval_qual_rule(stored, "equals", "Yes") is True
+
+    @pytest.mark.parametrize("stored", ["No", "no", "N", False, "false", "off", None, ""])
+    def test_equals_yes_does_not_match_negative_or_empty(self, stored):
+        assert _eval_qual_rule(stored, "equals", "Yes") is False
+
+    @pytest.mark.parametrize("stored", ["No", False, "n"])
+    def test_not_equals_yes_true_for_negatives(self, stored):
+        assert _eval_qual_rule(stored, "not_equals", "Yes") is True
+
+    def test_in_yes_matches_affirmative(self):
+        assert _eval_qual_rule(True, "in", ["Yes"]) is True
+        assert _eval_qual_rule("yes", "in", "Yes") is True
+
+    # Guardrails: numeric and free-text comparisons must NOT be hijacked by the
+    # boolean normalization.
+    def test_numeric_equals_unaffected(self):
+        assert _eval_qual_rule(5, "equals", "5") is True
+        assert _eval_qual_rule(1, "equals", "1") is True       # 1 is NOT treated as affirmative
+        assert _eval_qual_rule("yes", "equals", "1") is False  # affirmative word != numeric 1
+
+    def test_freetext_equals_unaffected(self):
+        assert _eval_qual_rule("Both", "equals", "Both") is True
+        assert _eval_qual_rule("Both", "equals", "Yes") is False
+
+    def test_gt_unaffected(self):
+        assert _eval_qual_rule(30, "gt", "20") is True
+        assert _eval_qual_rule(10, "gt", "20") is False
