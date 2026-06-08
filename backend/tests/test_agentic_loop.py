@@ -695,6 +695,158 @@ def test_loop_multi_tool_same_turn_dispatches_each(mock_dispatch, mock_claude, t
     assert result["text"] == "<p>Combined results.</p>"
 
 
+# ---------------------------------------------------------------------------
+# last_table clobber regression (fix/moby-last-table-clobber)
+# ---------------------------------------------------------------------------
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
+def test_loop_non_empty_table_not_clobbered_by_later_empty(mock_dispatch, mock_claude, tool_ctx):
+    """Turn 1 produces a 3-row table (forced call, no companion text); turn 2
+    calls another tool whose ToolResult.last_table is EMPTY (rows=[]) while
+    emitting the final prose. The returned last_table MUST keep the 3 rows,
+    not be clobbered by the empty aggregate table.
+
+    This reproduces the prod bug: prose is correct, table comes back rows=0.
+    """
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
+
+    good_table = {
+        "rows": [{"account_id": "a1"}, {"account_id": "a2"}, {"account_id": "a3"}],
+        "columns": [{"key": "account_id", "label": "Account Id"}],
+    }
+    empty_table = {"rows": [], "columns": [{"key": "country", "label": "Country"}]}
+
+    tc1 = _make_mock_tool_call("t1", "explorer_search", {"filters": {}})
+    tc2 = _make_mock_tool_call("t2", "manipulate_data", {"op": "group_count"})
+    mock_claude.side_effect = [
+        _tool_response([tc1], text=""),  # turn 1: forced call, no companion text
+        _tool_response([tc2], text="44 sites across the network confirm overnight stay capacity."),  # turn 2: empty table + prose
+        _text_response("<p>fallback should not be needed</p>"),
+    ]
+    mock_dispatch.side_effect = [
+        ToolResult(last_table=good_table),
+        ToolResult(last_table=empty_table),
+    ]
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites with overnight stay capacity",
+    )
+
+    assert result["last_table"] is not None
+    assert result["last_table"]["rows"] == good_table["rows"], (
+        "Non-empty 3-row table was clobbered by a later empty table"
+    )
+
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
+def test_loop_single_tool_zero_rows_returns_empty_table(mock_dispatch, mock_claude, tool_ctx):
+    """A legitimate single-tool query that genuinely returns 0 rows must still
+    return the empty table (so the UI shows 'no results'), NOT None or stale data.
+
+    Within a single request there is no prior table, so the empty result is the
+    correct answer to surface.
+    """
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
+
+    empty_table = {"rows": [], "columns": [{"key": "account_id", "label": "Account Id"}]}
+
+    tc1 = _make_mock_tool_call("t1", "explorer_search", {"filters": {}})
+    mock_claude.side_effect = [
+        _tool_response([tc1], text=""),
+        _text_response("<p>No sites match those criteria.</p>"),
+    ]
+    mock_dispatch.return_value = ToolResult(last_table=empty_table)
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites in Antarctica",
+    )
+
+    assert result["last_table"] is not None
+    assert result["last_table"]["rows"] == []
+    assert result["last_table"]["columns"] == empty_table["columns"]
+
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
+def test_loop_non_empty_transform_updates_last_table(mock_dispatch, mock_claude, tool_ctx):
+    """manipulate_data that intentionally transforms the table to a NON-empty
+    smaller/aggregated table MUST update last_table (the new table has rows)."""
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
+
+    big_table = {
+        "rows": [{"account_id": f"a{i}"} for i in range(10)],
+        "columns": [{"key": "account_id", "label": "Account Id"}],
+    }
+    aggregated = {
+        "rows": [{"country": "ES", "count": 6}, {"country": "FR", "count": 4}],
+        "columns": [{"key": "country", "label": "Country"}, {"key": "count", "label": "Count"}],
+    }
+
+    tc1 = _make_mock_tool_call("t1", "explorer_search", {"filters": {}})
+    tc2 = _make_mock_tool_call("t2", "manipulate_data", {"op": "group_count"})
+    mock_claude.side_effect = [
+        _tool_response([tc1], text=""),
+        _tool_response([tc2], text="Breakdown by country: ES leads with 6 sites."),
+        _text_response("<p>unused</p>"),
+    ]
+    mock_dispatch.side_effect = [
+        ToolResult(last_table=big_table),
+        ToolResult(last_table=aggregated),
+    ]
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="Group sites by country",
+    )
+
+    assert result["last_table"] == aggregated, (
+        "A non-empty transform must update last_table to the new aggregated table"
+    )
+
+
+@patch("app.routers.ai_chat._claude_chat")
+@patch("app.routers.moby_tools.dispatch_tool")
+def test_dispatch_tool_calls_keeps_non_empty_within_batch(mock_dispatch, mock_claude, tool_ctx):
+    """Two tools in the SAME turn: first non-empty, second empty.
+    _dispatch_tool_calls accumulation must not let the empty second result
+    clobber the non-empty first one within the batch."""
+    from app.routers.ai_chat import _agentic_loop
+    from app.routers.moby_tools import ToolResult
+
+    good_table = {
+        "rows": [{"account_id": "a1"}, {"account_id": "a2"}],
+        "columns": [{"key": "account_id", "label": "Account Id"}],
+    }
+    empty_table = {"rows": [], "columns": [{"key": "x", "label": "X"}]}
+
+    tc1 = _make_mock_tool_call("t1", "explorer_search", {"filters": {"a": 1}})
+    tc2 = _make_mock_tool_call("t2", "members_search", {"q": "Madrid"})
+    mock_claude.side_effect = [
+        _tool_response([tc1, tc2], text=""),
+        _text_response("<p>Combined.</p>"),
+    ]
+    mock_dispatch.side_effect = [
+        ToolResult(last_table=good_table),
+        ToolResult(last_table=empty_table),
+    ]
+
+    result = _agentic_loop(
+        msgs=tool_ctx.msgs, tool_ctx=tool_ctx,
+        user_msg="List sites and members in Madrid",
+    )
+
+    assert result["last_table"]["rows"] == good_table["rows"], (
+        "Empty second tool result clobbered the non-empty first within the batch"
+    )
+
+
 @patch("app.routers.ai_chat._claude_chat")
 @patch("app.routers.moby_tools.dispatch_tool")
 def test_loop_anthropic_api_error_returns_friendly_message(

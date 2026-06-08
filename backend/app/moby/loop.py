@@ -27,6 +27,31 @@ from app.moby.streaming import _STREAM_Q
 from app.moby.tools_spec import TOOLS_SPEC
 
 
+def _keep_table(
+    current: Optional[Dict[str, Any]],
+    new: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Decide which `last_table` to keep when a new tool result arrives.
+
+    Preserves the last NON-EMPTY table so a later turn/tool that returns an
+    empty table (rows == []) — e.g. an aggregate or chart helper — does not
+    clobber a previously-produced, populated table.
+
+    Overwrite with `new` only when:
+      - `new` is not None, AND
+      - `new` has rows, OR we are not already holding a non-empty table.
+
+    This keeps legitimate behaviour intact: a genuine 0-row result still
+    surfaces when there is no prior non-empty table, and a non-empty
+    transform/aggregate still replaces the prior table.
+    """
+    if new is None:
+        return current
+    if new.get("rows") or not (current and current.get("rows")):
+        return new
+    return current
+
+
 def _is_complex_query(text: str) -> bool:
     """
     Return True for queries that benefit from extended thinking:
@@ -166,7 +191,7 @@ def _dispatch_tool_calls(
                 break
 
         if tool_result.last_table is not None:
-            last_table = tool_result.last_table
+            last_table = _keep_table(last_table, tool_result.last_table)
             tool_ctx.last_table = last_table
             table_produced_now = True
         if tool_result.last_visualization is not None:
@@ -282,7 +307,7 @@ def _agentic_loop(
             assistant_msg, msgs, tool_ctx, seen_hashes, dm_called, tool_calls_made, turn,
         )
         if _lt is not None:
-            last_table = _lt
+            last_table = _keep_table(last_table, _lt)
         if _lv is not None:
             last_visualization = _lv
         if _lf is not None:
@@ -360,7 +385,7 @@ def _agentic_loop(
                     except Exception:
                         pass
                 if _lt is not None:
-                    last_table = _lt
+                    last_table = _keep_table(last_table, _lt)
                 if _lv is not None:
                     last_visualization = _lv
                 if _lf is not None:
