@@ -2,11 +2,11 @@
   "aliases": [
     {
       "alias": "onsite pharmacy",
-      "key": "onsite_pharmacy"
+      "key": "3.6__is_your_pharmacy_on_site_or_off_campus"
     },
     {
       "alias": "overnight stay",
-      "key": "overnight_stay"
+      "key": "3.5.2__overnight_stay"
     },
     {
       "alias": "Acceptable Process",

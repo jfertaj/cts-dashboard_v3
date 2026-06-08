@@ -191,6 +191,12 @@ def _qual_get(qual_data: Dict[str, Any], key: str) -> Any:
       5. Base sin prefijo y sin último sufijo _word:
          "3_8__autoantibodies_aab" -> "autoantibodies"
          "3_3__estimate_arrival_time_of_emergency_personnel_min" -> "estimate_arrival_time_of_emergency_personnel"
+      6. Reverse fallback (bare → section-prefixed): a BARE key with no "__"
+         prefix (e.g. "overnight_stay") matched against stored section-prefixed
+         keys whose suffix after "__" equals it ("3_5_2__overnight_stay").
+         Only applied when EXACTLY ONE stored key matches — ambiguous suffixes
+         (e.g. both "3_5__overnight_stay" and "3_5_2__overnight_stay") return
+         None rather than silently picking the wrong field.
     """
     v = qual_data.get(key)
     if v is None and "_" in key:
@@ -210,6 +216,17 @@ def _qual_get(qual_data: Dict[str, Any], key: str) -> Any:
             last_sep = rest.rfind("_")
             if last_sep > 0:
                 v = qual_data.get(rest[:last_sep])
+    if v is None and "__" not in key:
+        # Fallback 6: reverse — bare lookup key → unambiguous section-prefixed
+        # stored key. Match stored "<section>__<key>" only when exactly one
+        # stored key shares the suffix, to avoid cross-field collisions.
+        suffix = f"__{key}"
+        matches = [
+            sk for sk in qual_data
+            if isinstance(sk, str) and sk.endswith(suffix) and len(sk) > len(suffix)
+        ]
+        if len(matches) == 1:
+            v = qual_data.get(matches[0])
     return v
 
 

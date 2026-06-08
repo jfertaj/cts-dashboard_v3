@@ -122,6 +122,57 @@ class TestQualGet:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# _qual_get — reverse fallback: bare key → unambiguous section-prefixed stored key
+# (fix/moby-qual-key-resolution). The knowledge-index alias path historically
+# emitted bare keys (e.g. "overnight_stay") that never resolved because the JSONB
+# stores section-prefixed keys ("3_5_2__overnight_stay"). The reverse fallback
+# resolves a bare key ONLY when exactly one stored key has it as the suffix after
+# "__"; ambiguous matches must NOT silently pick a field.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestQualGetReverseFallback:
+    def test_bare_overnight_resolves_to_unique_section_key(self):
+        # Only one stored key ends in "__overnight_stay" → resolves
+        d = {"3_5_2__overnight_stay": "Yes"}
+        assert _qual_get(d, "overnight_stay") == "Yes"
+
+    def test_bare_hla_resolves_to_unique_section_key(self):
+        d = {"3_8__can_you_do_hla_typing": "No"}
+        # Bare alias that already strips/contains the suffix exactly
+        assert _qual_get(d, "can_you_do_hla_typing") == "No"
+
+    def test_bare_key_ambiguous_returns_none(self):
+        # TWO stored keys share the suffix "__overnight_stay" → must NOT guess.
+        d = {
+            "3_5__overnight_stay": "No",     # a DIFFERENT field (36 sites on prod)
+            "3_5_2__overnight_stay": "Yes",  # the intended field (48 sites on prod)
+        }
+        assert _qual_get(d, "overnight_stay") is None
+
+    def test_reverse_fallback_does_not_override_exact(self):
+        # Exact key still wins over any reverse suffix match.
+        d = {
+            "overnight_stay": "Exact",
+            "3_5_2__overnight_stay": "Prefixed",
+        }
+        assert _qual_get(d, "overnight_stay") == "Exact"
+
+    def test_reverse_fallback_dot_subcode_stored(self):
+        # Stored with dotted subcode; bare lookup still resolves uniquely.
+        d = {"3.5.2__overnight_stay": "Yes"}
+        assert _qual_get(d, "overnight_stay") == "Yes"
+
+    def test_reverse_fallback_no_match_returns_none(self):
+        d = {"3_8__can_you_do_hla_typing": "Yes"}
+        assert _qual_get(d, "overnight_stay") is None
+
+    def test_section_prefixed_lookup_unaffected_by_reverse(self):
+        # The normal forward path (prefixed lookup → stored prefixed) is untouched.
+        d = {"3_5_2__overnight_stay": "Yes"}
+        assert _qual_get(d, "3_5_2__overnight_stay") == "Yes"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # pass_account expression-mode (regression for bug fixed 2026-03-18)
 # Verify that account rules respect expression logic strings, not just AND/OR.
 # We test this via explorer_search's internal pass_account by calling it through
