@@ -19,3 +19,7 @@
 - [2026-07-13] [coder] → code-notes.md — Vitest en el frontend + `readDataCell` extraído a `lib/rowAccess` (empty-string = ausente; el build NO hace typecheck)
 - [2026-07-13] [revisor] → reviews.md#2026-07-13-revisor--5550a881689f4c--task-1 — Task 1 (5550a88..1689f4c) — approved-with-issues (verbatim OK; cobertura de tests floja en las ramas de fallback)
 - [2026-07-13] [coder] → code-notes.md — `readDataCell`: L40-41 son código muerto, `0` cuenta como valor, y cobertura de rama != cobertura de línea (mutation check)
+- [2026-07-13] [revisor] → reviews.md#2026-07-13-revisor--1689f4c4604c40--task-1-fix-cobertura-de-fallback-de-readdatacell-re-review-del-important — Task 1 fix (1689f4c..4604c40) — approved
+- [2026-07-13] [coder] → code-notes.md — Task 2 `chartAggregation`: ausente = `null` nunca `0` (sites cuenta reportadores), orden comas-antes-de-Number, y mutation check en ficheros nuevos necesita copia pristine
+- [2026-07-13] [revisor] → reviews.md#2026-07-13-revisor--4604c401d19965--task-2-chartaggregation-parseo-de-métrica-cobertura-agrupación-por-país — Task 2 (4604c40..1d19965) — approved-with-issues (regla ausente≠cero correcta y bien testeada; `sites` = reportadores necesita JSDoc; `extra.AssignmentsCount` viene con 0 por defecto del backend)
+- [2026-07-13] [coder] → code-notes.md — Task 2 fix: JSDoc de `CountryBucket.sites` + test de la rama `"(sin país)"` (commit f7c1062)

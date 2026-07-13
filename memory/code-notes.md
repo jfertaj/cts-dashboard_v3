@@ -1,3 +1,30 @@
+### [2026-07-13] [coder] — Task 2 fix: JSDoc de `CountryBucket.sites` + test de la rama `"(sin país)"`
+
+**Contexto**: fixes puntuales pedidos por la review de Task 2 (`memory/reviews.md` — approved-with-issues), sobre `frontend/src/lib/chartAggregation.ts` / `chartAggregation.test.ts`. Sin renames, sin refactors.
+
+**Gotcha/Patrón**: el mutation check de la entrada de abajo (punto 3) decía usar copia pristine porque el fichero era NUEVO y sin trackear. Aquí el fichero ya estaba commiteado y limpio (`git status --porcelain` vacío) — con eso `git checkout --` habría sido seguro. Aun así usé copia pristine (`cp` a scratchpad + `diff` tras restaurar) por venir explícitamente pedido en la tarea; es la opción más barata y nunca falla en silencio, así que sirve como default sin tener que verificar primero el estado de git.
+
+**Por qué importa**: confirma que la regla "sites = reportadores, no total del país" ahora está documentada en el tipo (antes solo vivía en code-notes/reviews, invisible para quien solo lee el código), y cierra el mutante superviviente de `"(sin país)"` — 12 tests verdes en el fichero (antes 11), 32/32 en todo el frontend.
+
+**Dónde aplicar**: `frontend/src/lib/chartAggregation.ts` — cualquier vista de Tasks 3/6/7/8 que lea `CountryBucket.sites` como "total de centros del país" está leyendo mal el campo; ahora el JSDoc lo dice explícitamente.
+
+---
+
+### [2026-07-13] [coder] — `chartAggregation`: ausente = `null` (nunca `0`), y el mutation check sobre ficheros NUEVOS necesita copia pristine (no `git checkout --`)
+
+**Contexto**: Task 2 del rediseño del chart modal — `frontend/src/lib/chartAggregation.ts` (`toMetricValue` / `coverageFor` / `groupByCountry`).
+
+**Gotcha/Patrón**:
+1. **La regla del módulo: ausente, vacío, no numérico y NEGATIVO → `null`; el `0` reportado se conserva.** Una fila `null` no contribuye NADA: ni al `value` (suma) ni al `sites` (contador) de su `CountryBucket`, y un país donde nadie reporta desaparece del array. La mayoría de los 215 centros no reportan `screened`/`stage1`/`stage2`; si el hueco se plegara como `0`, un centro que nunca reportó sería indistinguible de uno que reclutó a cero — el gráfico saldría bonito y mentiría. Ojo al tocar `groupByCountry`: `bucket.sites` cuenta **centros que reportan**, no centros del país; para el total de centros hay que usar `COUNT_METRIC` (que corta en `valueOf` devolviendo `1` siempre) o `coverageFor(...).total`.
+2. **`toMetricValue` strippea comas ANTES de `Number()`** (`"1,240"` → `1240`). Es deliberado: SF devuelve enteros formateados como string. Consecuencia: `Number("")` es `0`, así que la guarda `text === ""` tiene que ir **antes** del `Number()`, no después — invertir ese orden convierte el vacío en un `0` legítimo y rompe la regla entera en silencio.
+3. **Mutation check sobre un fichero aún NO trackeado: `git checkout -- <f>` falla con `pathspec ... did not match any file(s)`, y el script sigue.** Me pasó: los mutantes se acumularon uno encima de otro y las 7 "muertes" que leí eran ruido de un fichero corrupto. Para ficheros nuevos: `cp` a una copia pristine y restaurar desde ella, verificando con `diff -q` al final. Añadir siempre una línea de BASELINE al principio y otra al final del script — si la final no vuelve a verde, el experimento no vale nada.
+
+**Por qué importa**: los tests de este módulo son el único gate de la regla "ausente ≠ cero" (recordatorio: en este frontend ni `npm test` ni `npm run build` hacen typecheck). 9 mutantes probados, 9 muertos — pero sólo tras arreglar el método, que en la primera pasada daba falsos positivos.
+
+**Dónde aplicar**: `frontend/src/lib/chartAggregation.ts` (1-2) y todas las vistas del chart modal que lo consuman (Tasks 3/6/7/8); el punto 3 vale para cualquier mutation check del repo sobre ficheros nuevos.
+
+---
+
 ### [2026-07-13] [coder] — `readDataCell`: dos líneas muertas, `0` es valor, y la capa 2 sólo se distingue con bases con punto
 
 **Contexto**: `frontend/src/lib/rowAccess.ts`, al ampliar `rowAccess.test.ts` para cubrir las ramas de fallback (hallazgo Important de la review de Task 1).
