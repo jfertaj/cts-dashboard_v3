@@ -38,6 +38,7 @@ import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
 import { readDataCell } from "../lib/rowAccess";
+import { buildChartDataset } from "../lib/chartDataset";
 import Moby from "../assets/Moby.png";
 
 const OP_LABELS: Record<string, string> = {
@@ -2387,54 +2388,14 @@ export default function ExplorerView() {
     return seen > 0 && numeric / seen >= 0.8;
   }, []);
 
-  // Construye el dataset plano para Recharts
-  const buildChartDataset = useCallback((
-    rowsIn: ExplorerRow[],
-    xKey: string,
-    yKeys: string[]
-  ) => {
-    // If X is 'country' or 'city', aggregate values by that dimension (sum per group)
-    const wantGroup = (xKey === 'country' || xKey === 'city');
-    if (wantGroup) {
-      const buckets = new Map<string, Record<string, any>>();
-      for (const r of rowsIn) {
-        const key = String(readDataCell(r as any, xKey) ?? '').trim() || '(empty)';
-        const bucket = buckets.get(key) || { [xKey]: key, __count__: 0 };
-        bucket.__count__ = (bucket.__count__ || 0) + 1;
-        for (const y of yKeys) {
-          if (y === '__count__') continue;
-          const raw = readDataCell(r as any, y);
-          const n = Number(String(raw ?? '').replace(/,/g, ''));
-          bucket[y] = (Number.isFinite(n) ? (bucket[y] || 0) + n : (bucket[y] || 0));
-        }
-        buckets.set(key, bucket);
-      }
-      return Array.from(buckets.values()).sort((a, b) => (b.__count__ ?? 0) - (a.__count__ ?? 0));
-    }
-    // Default: row-wise dataset
-    const arr: Array<Record<string, any>> = [];
-    for (const r of rowsIn) {
-      const row: Record<string, any> = {};
-      row[xKey] = readDataCell(r as any, xKey) ?? "";
-      row.__count__ = 1;
-      for (const y of yKeys) {
-        if (y === '__count__') continue;
-        const raw = readDataCell(r as any, y);
-        const n = Number(String(raw ?? '').replace(/,/g, ''));
-        row[y] = Number.isFinite(n) ? n : null;
-      }
-      arr.push(row);
-    }
-    return arr;
-  }, []);
-
-  // chartData is derived (not stored) — auto-updates whenever rows or axis config changes
+  // chartData is derived (not stored) — auto-updates whenever rows or axis config changes.
+  // El builder vive en lib/chartDataset: es una función pura y así queda testeable.
   const chartData = useMemo(() => {
     if (!chartOpen || !chartYKeys.length) return [];
     const currentRows = nearbyActive ? fullNearbyRows : fullRows;
     if (!currentRows?.length) return [];
     return buildChartDataset(currentRows, chartXKey, chartYKeys);
-  }, [chartOpen, nearbyActive, fullNearbyRows, fullRows, chartXKey, chartYKeys, buildChartDataset]);
+  }, [chartOpen, nearbyActive, fullNearbyRows, fullRows, chartXKey, chartYKeys]);
 
   // Abre el modal con defaults razonables
   const openChartWizard = useCallback(() => {
@@ -2474,7 +2435,7 @@ export default function ExplorerView() {
     setChartStacked(true);
     setChartTitle("Explorer Chart");
     setChartOpen(true); // chartData recomputes automatically via useMemo
-  }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn, buildChartDataset]);
+  }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn]);
 
   // ====== Export TSV (toda la tabla filtrada) ======
   const sanitizeTSV = (val: any): string => {
