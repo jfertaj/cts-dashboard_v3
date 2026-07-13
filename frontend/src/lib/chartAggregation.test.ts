@@ -119,6 +119,22 @@ describe("topN / bottomN", () => {
   it("devuelve menos de N si no hay suficientes centros con dato", () => {
     expect(topN([named("a", 1)], SCREENED, 10)).toHaveLength(1);
   });
+
+  it("sin account_id, accountId cae al account_name", () => {
+    const rows: DataRow[] = [
+      { account_name: "Centro sin id", country: "ES", data: { [SCREENED]: 3 } },
+    ];
+    expect(topN(rows, SCREENED, 1)).toEqual([
+      { accountId: "Centro sin id", name: "Centro sin id", value: 3 },
+    ]);
+  });
+
+  it("sin account_id ni account_name, accountId es \"\" y el nombre es \"(sin nombre)\"", () => {
+    const rows: DataRow[] = [{ country: "ES", data: { [SCREENED]: 3 } }];
+    expect(topN(rows, SCREENED, 1)).toEqual([
+      { accountId: "", name: "(sin nombre)", value: 3 },
+    ]);
+  });
 });
 
 describe("distribution", () => {
@@ -170,6 +186,21 @@ describe("funnel", () => {
     ]);
     expect(out.sitesIncluded).toBe(1);
     expect(out.sitesExcluded).toBe(1);
+  });
+
+  it("incluye al centro que reporta CEROS legítimos en las etapas tardías", () => {
+    // Cribó a 50 personas y no siguió a ninguna: reporta las tres métricas,
+    // así que entra. Un filtro por truthiness lo borraría del embudo — y es
+    // justo el centro que más interesa ver.
+    const rows = [full("cribó pero no siguió", 50, 0, 0)];
+    const out = funnel(rows);
+    expect(out.sitesIncluded).toBe(1);
+    expect(out.sitesExcluded).toBe(0);
+    expect(out.stages).toEqual([
+      { stage: "Cribados", value: 50 },
+      { stage: "Stage 1 seguidos", value: 0 },
+      { stage: "Stage 2 seguidos", value: 0 },
+    ]);
   });
 
   it("sin ningún centro completo, las etapas van a 0 y sitesIncluded es 0", () => {
