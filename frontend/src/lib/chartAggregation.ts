@@ -86,6 +86,14 @@ export function bottomN(rows: DataRow[], metricKey: string, n: number): SiteValu
   return sitesWithData(rows, metricKey).sort((a, b) => a.value - b.value).slice(0, n);
 }
 
+/**
+ * Pareto de centros por métrica.
+ *
+ * NO llamar con `COUNT_METRIC`: `valueOf` devuelve 1 para toda fila, así que
+ * saldrían N barras de valor 1 y una curva acumulada perfectamente recta —
+ * un Pareto que no dice nada. "Nº de centros" no es una métrica distribuible;
+ * las vistas no deben ofrecerla en este gráfico.
+ */
 export function distribution(rows: DataRow[], metricKey: string): Pareto {
   const bars = sitesWithData(rows, metricKey).sort((a, b) => b.value - a.value);
   const total = bars.reduce((acc, b) => acc + b.value, 0);
@@ -97,24 +105,35 @@ export function distribution(rows: DataRow[], metricKey: string): Pareto {
   return { bars, cumulativePct, missingSites: rows.length - bars.length };
 }
 
+/** Centro que reporta las tres métricas del embudo. Un cero aquí es un cero real. */
+type CompleteSite = { screened: number; stage1: number; stage2: number };
+
 /**
  * Embudo cribados → Stage 1 → Stage 2.
  * Solo entran los centros que reportan las TRES métricas: sumar un centro que
  * reporta cribados pero no Stage 1 inventaría una caída del embudo que no existe.
+ * Ojo: reportar 0 es reportar. El centro que cribó a 50 y no siguió a ninguno
+ * entra en el embudo con sus ceros — es el que más interesa ver.
  */
 export function funnel(rows: DataRow[]): Funnel {
-  const complete = rows.filter((row) =>
-    valueOf(row, SCREENED) !== null &&
-    valueOf(row, STAGE1) !== null &&
-    valueOf(row, STAGE2) !== null
-  );
-  const sum = (key: string) =>
-    complete.reduce((acc, row) => acc + (valueOf(row, key) ?? 0), 0);
+  // Los valores se extraen DENTRO del filtro, así que la colección que
+  // sobrevive lleva `number`s de verdad: no hay ningún `?? 0` por el que un
+  // valor ausente pueda colarse como cero si algún día se afloja el filtro.
+  const complete: CompleteSite[] = [];
+  for (const row of rows) {
+    const screened = valueOf(row, SCREENED);
+    const stage1 = valueOf(row, STAGE1);
+    const stage2 = valueOf(row, STAGE2);
+    if (screened === null || stage1 === null || stage2 === null) continue;
+    complete.push({ screened, stage1, stage2 });
+  }
+  const sum = (pick: (site: CompleteSite) => number) =>
+    complete.reduce((acc, site) => acc + pick(site), 0);
   return {
     stages: [
-      { stage: "Cribados", value: sum(SCREENED) },
-      { stage: "Stage 1 seguidos", value: sum(STAGE1) },
-      { stage: "Stage 2 seguidos", value: sum(STAGE2) },
+      { stage: "Cribados", value: sum((s) => s.screened) },
+      { stage: "Stage 1 seguidos", value: sum((s) => s.stage1) },
+      { stage: "Stage 2 seguidos", value: sum((s) => s.stage2) },
     ],
     sitesIncluded: complete.length,
     sitesExcluded: rows.length - complete.length,
