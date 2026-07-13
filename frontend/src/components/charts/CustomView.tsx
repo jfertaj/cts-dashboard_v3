@@ -237,13 +237,13 @@ export default function CustomView({
       </div>
 
       {/* Chart */}
-      <div ref={chartRef} className="h-[420px] pt-4 bg-white">
+      <div ref={chartRef} className="p-4 bg-white">
         {Empty ? (
-          <div className="h-full flex items-center justify-center text-gray-500 text-sm">
+          <div className="h-[420px] flex items-center justify-center text-gray-500 text-sm">
             Select at least one Y series.
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={420}>
             {type === "bar" ? (
               // bottom margin just enough for angled tick labels; legend sits inside SVG
               <BarChart data={data} margin={{ top: 16, right: 30, left: 60, bottom: 16 }}>

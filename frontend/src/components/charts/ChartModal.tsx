@@ -28,12 +28,27 @@ export default function ChartModal({
   const [tab, setTab] = useState<ChartTab>("countries");
   useEffect(() => { if (open) setTab("countries"); }, [open]);
 
+  // Segunda vía de cierre: si el panel crece más que el viewport (Ranking con
+  // N alto, p.ej.) el usuario debe poder salir sin depender de que el botón
+  // Close siga visible. Solo escucha mientras el modal está abierto.
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-5xl rounded-xl bg-white shadow-xl" data-testid="chart-modal">
-        <div className="flex items-center justify-between border-b px-4 py-3">
+      <div
+        className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-xl bg-white shadow-xl"
+        data-testid="chart-modal"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
           {onChangeTitle ? (
             <input
               className="min-w-0 flex-1 rounded-md border px-2 py-1 font-semibold"
@@ -48,7 +63,7 @@ export default function ChartModal({
           </button>
         </div>
 
-        <div className="flex gap-1 border-b px-4 pt-2">
+        <div className="flex shrink-0 gap-1 border-b px-4 pt-2">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -65,7 +80,7 @@ export default function ChartModal({
           ))}
         </div>
 
-        <div className="p-4">
+        <div className="overflow-y-auto p-4">
           {/* Guard de 0 filas: las vistas dicen "ningún centro reporta esta métrica",
               consejo que sería FALSO cuando el problema real es que la búsqueda no
               devolvió nada. Con rows vacío NO se renderiza ninguna vista. */}
