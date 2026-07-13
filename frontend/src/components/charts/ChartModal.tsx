@@ -30,10 +30,14 @@ export default function ChartModal({
   useEffect(() => { if (open) setTab("countries"); }, [open]);
 
   const tabs = (
-    <div className="flex shrink-0 gap-1 border-b px-4 pt-2">
+    <div role="tablist" className="flex shrink-0 gap-1 border-b px-4 pt-2">
       {TABS.map((t) => (
         <button
           key={t.key}
+          role="tab"
+          // Las cinco pestañas están siempre visibles: `aria-selected` es lo único
+          // que distingue cuál está activa (y lo único que puede aseverar el E2E).
+          aria-selected={tab === t.key}
           data-testid={`chart-tab-${t.key}`}
           onClick={() => setTab(t.key)}
           className={`rounded-t-md px-3 py-1.5 text-sm ${

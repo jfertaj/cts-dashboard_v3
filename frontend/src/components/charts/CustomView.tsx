@@ -159,7 +159,7 @@ export default function CustomView({
   };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" data-testid="chart-custom-builder">
       {/* Controls */}
       <div className="pb-3 border-b bg-white">
         <div className="flex flex-wrap items-center gap-3">

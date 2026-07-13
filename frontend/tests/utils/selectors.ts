@@ -72,6 +72,21 @@ export const S = {
   FILTER_LOGIC_APPLY_BTN:   '[data-testid="filter-logic-apply-btn"]',
   FILTER_PANEL_COLLAPSE_BTN:'[data-testid="filter-panel-collapse-btn"]',
 
+  // ── Chart modal (ExplorerView → components/charts) ─────────────────────
+  CHART_MODAL:              '[data-testid="chart-modal"]',
+  CHART_BUILDER_MODAL:      '[data-testid="chart-builder-modal"]',   // el del chat (sin pestañas)
+  CHART_TAB_COUNTRIES:      '[data-testid="chart-tab-countries"]',
+  CHART_TAB_RANKING:        '[data-testid="chart-tab-ranking"]',
+  CHART_TAB_DISTRIBUTION:   '[data-testid="chart-tab-distribution"]',
+  CHART_TAB_FUNNEL:         '[data-testid="chart-tab-funnel"]',
+  CHART_TAB_CUSTOM:         '[data-testid="chart-tab-custom"]',
+  CHART_COVERAGE:           '[data-testid="chart-coverage"]',        // "N de M centros reportan …"
+  CHART_METRIC_SELECT:      '[data-testid="chart-metric-select"]',
+  CHART_CUSTOM_BUILDER:     '[data-testid="chart-custom-builder"]',  // el constructor de ejes de siempre
+  CHART_EMPTY:              '[data-testid="chart-empty"]',
+  CHART_NO_ROWS:            '[data-testid="chart-no-rows"]',
+  CHART_SILENT_SITES:       '[data-testid="chart-silent-sites"]',
+
   // ── Site Details Modal ─────────────────────────────────────────────────
   SITE_DETAILS_MODAL:       '[data-testid="site-details-modal"]',
   SITE_DETAILS_CLOSE:       '[data-testid="site-details-close"]',

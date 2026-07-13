@@ -35,6 +35,7 @@ export default function MetricPicker({
       <label className="flex items-center gap-2">
         <span className="text-gray-600">Métrica</span>
         <select
+          data-testid="chart-metric-select"
           className="border rounded-md px-2 py-1"
           value={metricKey}
           onChange={(e) => onChange(e.target.value)}
