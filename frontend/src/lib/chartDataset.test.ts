@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildChartDataset } from "./chartDataset";
+import { buildChartDataset, toPieSlices, PIE_TOTAL_KEY } from "./chartDataset";
 import { COUNT_METRIC, SCREENED, STAGE1 } from "./chartAggregation";
 import type { DataRow } from "./rowAccess";
 
@@ -49,5 +49,40 @@ describe("buildChartDataset — agrupado por país", () => {
     const out = buildChartDataset(rows, "country", [SCREENED]);
     expect(out.find((r) => r.country === "ES")?.__count__).toBe(2);
     expect(out.find((r) => r.country === "IT")?.__count__).toBe(1);
+  });
+});
+
+describe("toPieSlices", () => {
+  const NAME_KEY = "name";
+  const pieRows = [
+    { [NAME_KEY]: "Madrid",    a: 10, b: 5 },
+    { [NAME_KEY]: "Barcelona", a: 0,  b: null },
+    { [NAME_KEY]: "Milano",    a: null, b: null },
+  ];
+
+  it("deja fuera al que no reporta ninguna serie: no es una porción de cero", () => {
+    const slices = toPieSlices(pieRows, NAME_KEY, ["a"]);
+    expect(slices.map((s) => s[NAME_KEY])).toEqual(["Madrid", "Barcelona"]);
+  });
+
+  it("conserva el cero reportado como porción legítima", () => {
+    const slices = toPieSlices(pieRows, NAME_KEY, ["a"]);
+    expect(slices.find((s) => s[NAME_KEY] === "Barcelona")?.a).toBe(0);
+  });
+
+  it("con varias series suma solo lo reportado en la clave de total", () => {
+    const slices = toPieSlices(pieRows, NAME_KEY, ["a", "b"]);
+    expect(slices[0][PIE_TOTAL_KEY]).toBe(15);
+    expect(slices.find((s) => s[NAME_KEY] === "Barcelona")?.[PIE_TOTAL_KEY]).toBe(0);
+    expect(slices.map((s) => s[NAME_KEY])).not.toContain("Milano");
+  });
+
+  it("ordena de mayor a menor y agrupa la cola en \"Others\" pasadas 15 porciones", () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ [NAME_KEY]: `c${i}`, a: i + 1 }));
+    const slices = toPieSlices(many, NAME_KEY, ["a"]);
+    expect(slices).toHaveLength(15);
+    expect(slices[0].a).toBe(20);
+    // Los 6 más pequeños (1..6) caen en "Others".
+    expect(slices[14]).toMatchObject({ [NAME_KEY]: "Others", a: 21 });
   });
 });

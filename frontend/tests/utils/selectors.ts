@@ -86,7 +86,12 @@ export const S = {
   CHART_EMPTY:              '[data-testid="chart-empty"]',
   CHART_NO_ROWS:            '[data-testid="chart-no-rows"]',
   CHART_SILENT_SITES:       '[data-testid="chart-silent-sites"]',
-  CHART_CUSTOM_WARNING:     '[data-testid="chart-custom-warning"]',   // "esta pestaña pinta valores crudos…"
+  CHART_CUSTOM_NOTE:        '[data-testid="chart-custom-note"]',      // "el que no reporta aparece como hueco, no como cero"
+  // Recharts pinta un <g class="recharts-bar-rectangle"> también para los null,
+  // así que las barras NO distinguen ausente de cero: el pie sí (una porción de
+  // tamaño cero existe en el DOM y en la leyenda).
+  CHART_PIE_SECTORS:        '.recharts-pie-sector',                   // una por porción = un centro que SÍ reporta
+  CHART_LEGEND_ITEMS:       '.recharts-legend-item',
   CHART_LEGEND_MAX:         '[data-testid="chart-legend-max"]',       // selector "Legend max" del constructor
   CHART_OVERLAY:            '[data-testid="chart-modal-overlay"]',    // capa fixed del modal (z-index)
 

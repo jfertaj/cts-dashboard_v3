@@ -6,6 +6,7 @@ import {
   PieChart, Pie, Cell,
 } from "recharts";
 import html2canvas from "html2canvas";
+import { toPieSlices, PIE_TOTAL_KEY } from "../../lib/chartDataset";
 
 export type ChartType = "bar" | "line" | "pie";
 
@@ -52,7 +53,6 @@ export default function CustomView({
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
 
-  const Empty = data.length === 0 || yKeys.length === 0;
   const label = (k: string) => {
     if (k === '__count__') return 'Count (rows)';
     if (k === 'sf.Account.Name') return 'Account Name';
@@ -65,43 +65,21 @@ export default function CustomView({
   // Color palette for charts
   const COLORS = ["#0072CE", "#00A99D", "#F37021", "#8E44AD", "#E74C3C", "#3498DB", "#2ECC71", "#F39C12"];
 
-  // Pie safety: normalize and cap slices
-  // If multiple yKeys (stacked dataset), compute a total for pie use
-  let y0 = (yKeys && yKeys.length > 0 ? yKeys[0] : "value");
-  let plotData = Array.isArray(data) ? [...data] : [];
-  let showLegend = true;
-  if (type === "pie") {
-    if (Array.isArray(yKeys) && yKeys.length > 1) {
-      const SUM = "__total__";
-      plotData = (plotData || []).map((r: any) => {
-        let s = 0;
-        for (const k of yKeys) {
-          const v = Number(String((r || {})[k] ?? 0).replace(/,/g, ""));
-          s += Number.isFinite(v) ? v : 0;
-        }
-        return { ...r, [SUM]: s };
-      });
-      y0 = SUM; // use total for pie
-    }
-    // normalize numeric
-    const norm = plotData.map((r) => {
-      const raw = (r as any)[y0];
-      let v = 0;
-      try { v = Number(String(raw ?? 0).replace(/,/g, "")); if (!Number.isFinite(v)) v = 0; } catch { v = 0; }
-      return { ...r, [y0]: v } as any;
-    });
-    norm.sort((a: any, b: any) => (b[y0] ?? 0) - (a[y0] ?? 0));
-    const MAX_SLICES = 15;
-    if (norm.length > MAX_SLICES) {
-      const head = norm.slice(0, MAX_SLICES - 1);
-      const tail = norm.slice(MAX_SLICES - 1);
-      const others = tail.reduce((acc: number, r: any) => acc + (Number(r[y0]) || 0), 0);
-      plotData = [...head, { ...(head[0] || {}), [xKey]: "Others", [y0]: others, _color: "#95A5A6" }];
-    } else {
-      plotData = norm;
-    }
-    showLegend = plotData.length <= 25;
-  }
+  // Pie: las porciones las monta `toPieSlices` (lib/chartDataset), que deja fuera
+  // a quien no reporta ninguna serie en vez de pintarlo como porción de cero.
+  // Con varias series Y la porción es el total, bajo la clave PIE_TOTAL_KEY.
+  const y0 = yKeys.length > 1 ? PIE_TOTAL_KEY : (yKeys[0] ?? "value");
+  const plotData = type === "pie" ? toPieSlices(data, xKey, yKeys) : [];
+  const showLegend = plotData.length <= 25;
+
+  // Un pie sin porciones (nadie reporta la métrica) se pintaría como un lienzo en
+  // blanco sin explicación: hay que decirlo, no dejar el hueco mudo.
+  const emptyMessage =
+    data.length === 0 || yKeys.length === 0
+      ? "Select at least one Y series."
+      : type === "pie" && plotData.length === 0
+        ? "Ningún centro reporta esta métrica: no hay porciones que pintar."
+        : null;
 
   const Label = ({ children }: { children: React.ReactNode }) => (
     <span className="text-xs font-medium text-gray-700 mr-2">{children}</span>
@@ -242,9 +220,9 @@ export default function CustomView({
 
       {/* Chart */}
       <div ref={chartRef} className="p-4 bg-white">
-        {Empty ? (
-          <div className="h-[420px] flex items-center justify-center text-gray-500 text-sm">
-            Select at least one Y series.
+        {emptyMessage ? (
+          <div data-testid="chart-custom-empty" className="h-[420px] flex items-center justify-center text-gray-500 text-sm">
+            {emptyMessage}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={420}>

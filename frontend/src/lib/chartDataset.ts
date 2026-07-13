@@ -55,6 +55,47 @@ function groupedDataset(rows: DataRow[], xKey: string, yKeys: string[]): ChartDa
  * pinta como hueco, no como una barra de cero indistinguible del centro que sí
  * reportó y no reclutó a nadie.
  */
+/** Clave sintética donde va el total cuando el pie pinta varias series a la vez. */
+export const PIE_TOTAL_KEY = "__total__";
+/** Máximo de porciones antes de agrupar la cola en "Others". */
+const MAX_SLICES = 15;
+
+export type PieSlice = Record<string, unknown> & { _color?: string };
+
+/**
+ * Porciones de un pie a partir de un dataset ya montado (el del Explorer o el de
+ * la tabla de Moby).
+ *
+ * Ausente ≠ cero: la fila que no reporta NINGUNA de las series seleccionadas se
+ * cae del gráfico. Pintarla sería una porción de tamaño cero — invisible pero
+ * presente en la leyenda y contada como dato — que es exactamente la mentira que
+ * este rediseño existe para evitar. Un cero reportado de verdad sí es porción.
+ */
+export function toPieSlices(
+  rows: Array<Record<string, unknown>>,
+  xKey: string,
+  yKeys: string[],
+): PieSlice[] {
+  const multi = yKeys.length > 1;
+  const valueKey = multi ? PIE_TOTAL_KEY : (yKeys[0] ?? "value");
+
+  const slices: PieSlice[] = [];
+  for (const row of rows) {
+    const values = (multi ? yKeys : [valueKey]).map((k) => toMetricValue(row?.[k]));
+    if (values.every((v) => v === null)) continue;
+    const total = values.reduce<number>((acc, v) => acc + (v ?? 0), 0);
+    slices.push({ ...row, [valueKey]: total });
+  }
+  slices.sort((a, b) => Number(b[valueKey] ?? 0) - Number(a[valueKey] ?? 0));
+
+  if (slices.length <= MAX_SLICES) return slices;
+  const head = slices.slice(0, MAX_SLICES - 1);
+  const others = slices
+    .slice(MAX_SLICES - 1)
+    .reduce((acc, s) => acc + Number(s[valueKey] ?? 0), 0);
+  return [...head, { ...head[0], [xKey]: "Others", [valueKey]: others, _color: "#95A5A6" }];
+}
+
 export function buildChartDataset(rows: DataRow[], xKey: string, yKeys: string[]): ChartDatum[] {
   if (xKey === "country" || xKey === "city") return groupedDataset(rows, xKey, yKeys);
 

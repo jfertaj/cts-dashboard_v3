@@ -43,17 +43,27 @@ test.describe("Explorer — modal de gráficos", () => {
     await page.route("**/api/salesforce/map/bootstrap", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) })
     );
+    // OJO: `getExplorerFields` lee `raw.fields`, no un array pelado. Con el array
+    // pelado el catálogo quedaba VACÍO y el constructor de ejes se caía a
+    // country/"Count (rows)" — nunca llegaba a pintar una métrica de verdad.
     await page.route("**/api/explorer/fields", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([
-          { key: "sf.Account.Name", label: "Account Name", type: "string", source: "sf" },
-          { key: "site.country", label: "Country", type: "string", source: "site" },
-          { key: SCREENED, label: "Screened", type: "number", source: "sf" },
-        ]),
+        body: JSON.stringify({
+          fields: [
+            { key: "sf.Account.Name", label: "Account Name", type: "string", source: "sf" },
+            { key: "site.country", label: "Country", type: "string", source: "site" },
+            { key: SCREENED, label: "Screened", type: "number", source: "sf" },
+          ],
+        }),
       })
     );
+    // Columnas visibles del usuario: Account Name + cribados. Así el constructor
+    // ofrece la métrica y usa el camino fila-a-fila (una barra por centro).
+    await page.addInitScript((screened) => {
+      localStorage.setItem("explorer:visibleColumns", JSON.stringify(["sf.Account.Name", screened]));
+    }, SCREENED);
     await page.route("**/api/explorer/search", (route) =>
       route.fulfill({
         status: 200,
@@ -131,20 +141,34 @@ test.describe("Explorer — modal de gráficos", () => {
     await expect(modal.getByText("Type", { exact: true })).toBeVisible();
   });
 
-  test("CHART-5: Personalizado avisa de que rellena con ceros", async ({ page }) => {
+  test("CHART-5: Personalizado excluye al que no reporta, no lo cuenta como cero", async ({ page }) => {
     const modal = await openChartModal(page);
-
-    // El constructor NO excluye al que no reporta: lo pinta como barra de cero.
-    // Al vivir en el mismo contenedor que las cuatro vistas honestas, el aviso es
-    // lo único que impide leer sus ceros como "reclutó a nadie".
     await modal.locator(S.CHART_TAB_CUSTOM).click();
-    const warning = modal.locator(S.CHART_CUSTOM_WARNING);
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText("cero");
 
-    // Y es exclusivo de esta pestaña: en las otras la exclusión sí ocurre.
+    // La Y por defecto es la única columna numérica visible: cribados, que solo
+    // reportan 3 de los 5 centros del fixture.
+    await expect(modal.locator(S.CHART_CUSTOM_BUILDER)).toBeVisible();
+
+    // El pie es donde el dato ausente se ve: una porción de tamaño cero es
+    // invisible pero cuenta como dato (leyenda, total, %). Si el builder volviera
+    // a parsear a mano — Number(String(undefined ?? "")) === 0 — o si el pie
+    // volviera a normalizar null -> 0, aquí habría 5 porciones y 5 entradas de
+    // leyenda en vez de 3. Verificado mutando el código: con el parseo viejo esta
+    // aserción da 5.
+    await modal.getByRole("button", { name: "Pie", exact: true }).click();
+    await expect(modal.locator(S.CHART_PIE_SECTORS)).toHaveCount(3);
+    await expect(modal.locator(S.CHART_LEGEND_ITEMS)).toHaveCount(3);
+
+    // Y la nota dice justo eso: hueco, no cero. (El aviso viejo prometía ceros;
+    // dejarlo puesto sería mentir en la otra dirección.)
+    const note = modal.locator(S.CHART_CUSTOM_NOTE);
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("hueco");
+    await expect(note).not.toContainText("aparece como cero");
+
+    // Y es exclusiva de esta pestaña: las otras cuatro sí declaran su cobertura.
     await modal.locator(S.CHART_TAB_COUNTRIES).click();
-    await expect(modal.locator(S.CHART_CUSTOM_WARNING)).toHaveCount(0);
+    await expect(modal.locator(S.CHART_CUSTOM_NOTE)).toHaveCount(0);
   });
 
   test("CHART-6: el modal se pinta por encima del botón flotante de Nearby", async ({ page }) => {

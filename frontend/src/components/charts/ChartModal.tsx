@@ -76,15 +76,14 @@ export default function ChartModal({
           {tab === "funnel" && <FunnelView rows={rows} />}
           {tab === "custom" && (
             <div className="space-y-3">
-              {/* El constructor NO excluye al centro que no reporta: lo pinta como
-                  una barra de cero, indistinguible del que reclutó a nadie. Su
-                  agregación se conserva a propósito (ChatView comparte el
-                  componente), así que el aviso es lo único que impide leer estos
-                  ceros como las cuatro vistas de al lado, que sí excluyen. */}
-              <p data-testid="chart-custom-warning" className="text-sm text-amber-700">
-                Esta pestaña pinta valores crudos: el centro que no reporta una métrica
-                aparece como cero, no se excluye. No es comparable con Países, Ranking,
-                Distribución ni Embudo, que dejan fuera al que no reporta y lo declaran.
+              {/* El constructor ya NO rellena con ceros (buildChartDataset devuelve
+                  null para el que no reporta), pero tampoco declara su cobertura
+                  como las otras cuatro vistas: el hueco hay que nombrarlo, o el
+                  usuario lo lee como "no lo han pintado" en vez de "no hay dato". */}
+              <p data-testid="chart-custom-note" className="text-sm text-gray-600">
+                El centro que no reporta una métrica aparece como hueco, no como cero: no
+                se pinta barra. A diferencia de Países, Ranking, Distribución y Embudo,
+                esta pestaña no declara cuántos centros quedan fuera.
               </p>
               {custom}
             </div>
