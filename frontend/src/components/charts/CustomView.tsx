@@ -7,13 +7,10 @@ import {
 } from "recharts";
 import html2canvas from "html2canvas";
 
-type ChartType = "bar" | "line" | "pie";
-
-// El título editable vive ahora en el contenedor (ChartModal) y no baja hasta
-// aquí, así que la descarga usa un nombre de fichero fijo.
-const DOWNLOAD_FILENAME = "chart.png";
+export type ChartType = "bar" | "line" | "pie";
 
 export default function CustomView({
+  title,
   data,
   xKey,
   yKeys,
@@ -21,12 +18,16 @@ export default function CustomView({
   xCandidates = [],
   yCandidates = [],
   labelByKey,
+  stacked,
   onChangeType,
   onChangeXKey,
   onToggleYKey,
+  onChangeStacked,
   legendMax = 8,
   onChangeLegendMax,
 }: {
+  /** Título del modal: da nombre al PNG exportado (`<título>_chart.png`). */
+  title: string;
   data: Array<Record<string, any>>;
   xKey: string;
   yKeys: string[];
@@ -34,15 +35,18 @@ export default function CustomView({
   xCandidates?: string[];
   yCandidates?: string[];
   labelByKey?: Map<string, string>;
+  /** Stacked vs Grouped. Controlado por el dueño: esta vista se desmonta al
+   *  cambiar de pestaña y el modo elegido no debe perderse por el camino. */
+  stacked: boolean;
   onChangeType?: (v: ChartType) => void;
   onChangeXKey?: (v: string) => void;
   onToggleYKey?: (v: string) => void;
+  onChangeStacked?: (v: boolean) => void;
   legendMax?: number; // Máximo de entradas en la leyenda (por defecto 8)
   onChangeLegendMax?: (n: number) => void;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [legendMaxUI, setLegendMaxUI] = useState<number>(legendMax ?? 8);
-  const [stacked, setStacked] = useState<boolean>(true);
   useEffect(() => { setLegendMaxUI(legendMax ?? 8); }, [legendMax]);
 
   const Empty = data.length === 0 || yKeys.length === 0;
@@ -140,7 +144,7 @@ export default function CustomView({
         });
         const url = canvas.toDataURL("image/png");
         const link = document.createElement("a");
-        link.download = DOWNLOAD_FILENAME;
+        link.download = `${title.replace(/\s+/g, "_")}_chart.png`;
         link.href = url;
         link.click();
       } else {
@@ -201,8 +205,8 @@ export default function CustomView({
           {type === "bar" && yKeys.length > 1 && (
             <div className="flex items-center gap-2">
               <Label>Mode</Label>
-              <Pill active={stacked} onClick={() => setStacked(true)}>Stacked</Pill>
-              <Pill active={!stacked} onClick={() => setStacked(false)}>Grouped</Pill>
+              <Pill active={stacked} onClick={() => onChangeStacked?.(true)}>Stacked</Pill>
+              <Pill active={!stacked} onClick={() => onChangeStacked?.(false)}>Grouped</Pill>
             </div>
           )}
 

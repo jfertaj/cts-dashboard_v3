@@ -1,7 +1,8 @@
 // src/pages/ChatView.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { askAI, askAIStream, ChatResponse, getFieldsIndex } from "../lib/ai";
-import ChartModal from "../components/ChartModal";
+import BuilderModal from "../components/charts/BuilderModal";
+import CustomView, { type ChartType } from "../components/charts/CustomView";
 import Moby from "../assets/Moby.png";
 import AIResultTable from "../components/AIResultTable";
 import SiteDetailsModal from "../components/SiteDetailsModal";
@@ -73,14 +74,16 @@ export default function ChatView() {
   // AbortController for the active stream — lets the Stop button cancel mid-response
   const abortRef = useRef<AbortController | null>(null);
 
-  // Chart state (reuse your ChartModal)
-  type ChartType = "bar" | "line" | "pie";
+  // Chart state (el constructor genérico, ahora en charts/CustomView)
   const [chartOpen, setChartOpen] = useState(false);
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [chartTitle, setChartTitle] = useState<string>("Explorer Chart");
   const [chartXKey, setChartXKey] = useState<string>("sf.Account.Name");
   const [chartYKeys, setChartYKeys] = useState<string[]>([]);
   const [chartData, setChartData] = useState<Array<Record<string, any>>>([]);
+  // Igual que hacía el modal antiguo: cada apertura vuelve a Stacked.
+  const [chartStacked, setChartStacked] = useState<boolean>(true);
+  useEffect(() => { if (chartOpen) setChartStacked(true); }, [chartOpen]);
   const labelByKey = useMemo(() => new Map<string, string>(), []);
 
   // ---- Explorer field catalog (para saber qué columnas reconoce) ----
@@ -1199,23 +1202,30 @@ export default function ChatView() {
         </div>
       </div>
 
-      {/* Chart modal */}
-      <ChartModal
+      {/* Chart modal — Moby entrega el dataset ya agregado, así que aquí solo
+          vive el constructor genérico (sin las cuatro vistas del Explorer). */}
+      <BuilderModal
         open={chartOpen}
         onClose={() => setChartOpen(false)}
         title={chartTitle}
-        data={chartData}
-        xKey={chartXKey}
-        yKeys={chartYKeys}
-        type={chartType}
-        xCandidates={[]}
-        yCandidates={[]}
-        labelByKey={labelByKey}
         onChangeTitle={setChartTitle}
-        onChangeType={(t) => setChartType(t as ChartType)}
-        onChangeXKey={() => {}}
-        onToggleYKey={() => {}}
-      />
+      >
+        <CustomView
+          title={chartTitle}
+          data={chartData}
+          xKey={chartXKey}
+          yKeys={chartYKeys}
+          type={chartType}
+          xCandidates={[]}
+          yCandidates={[]}
+          labelByKey={labelByKey}
+          stacked={chartStacked}
+          onChangeType={(t) => setChartType(t)}
+          onChangeStacked={(v) => setChartStacked(v)}
+          onChangeXKey={() => {}}
+          onToggleYKey={() => {}}
+        />
+      </BuilderModal>
 
       {/* Site details modal — opens when user clicks a row in a Moby table */}
       <SiteDetailsModal

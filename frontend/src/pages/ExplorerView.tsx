@@ -15,7 +15,8 @@ import FilterBuilder from "../components/FilterBuilder";
 import { filterGroupToFlat, removeRuleFromExpr, defaultExpr } from "../lib/filterLogic";
 import MapView from "../components/MapView";
 import ColumnPicker from "../components/ColumnPicker";
-import ChartModal from "../components/ChartModal";
+import ChartModal from "../components/charts/ChartModal";
+import CustomView, { type ChartType } from "../components/charts/CustomView";
 import { displayCountry } from "../lib/countryUtils";
 import SiteDetailsModal from "../components/SiteDetailsModal";
 
@@ -2361,12 +2362,14 @@ export default function ExplorerView() {
   });
 
   // ==== Chart State (mover hooks DENTRO del componente) ====
-  type ChartType = "bar" | "line";
   const [chartOpen, setChartOpen] = useState(false);
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [chartTitle, setChartTitle] = useState<string>("Chart");
   const [chartXKey, setChartXKey] = useState<string>("sf.Account.Name");
   const [chartYKeys, setChartYKeys] = useState<string[]>([]);
+  // Stacked vive aquí, no en CustomView: la pestaña Personalizado se desmonta al
+  // cambiar de pestaña y el modo elegido se perdería en cada ida y vuelta.
+  const [chartStacked, setChartStacked] = useState<boolean>(true);
   const [chartYCandidates, setChartYCandidates] = useState<string[]>([]);
   const [chartXCandidates, setChartXCandidates] = useState<string[]>([]);
 
@@ -2467,6 +2470,7 @@ export default function ExplorerView() {
     // Default to Count if no numeric columns, otherwise use the numeric ones
     setChartYKeys(suggestedY.length ? suggestedY : ["__count__"]);
     setChartType("bar");
+    setChartStacked(true);
     setChartTitle("Explorer Chart");
     setChartOpen(true); // chartData recomputes automatically via useMemo
   }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn, buildChartDataset]);
@@ -3422,21 +3426,29 @@ showPresets={false}
         open={chartOpen}
         onClose={() => setChartOpen(false)}
         title={chartTitle}
-        data={chartData}
-        xKey={chartXKey}
-        yKeys={chartYKeys}
-        type={chartType}
-        xCandidates={chartXCandidates}
-        yCandidates={chartYCandidates}
-        labelByKey={labelByKey}
         onChangeTitle={(t) => setChartTitle(t)}
-        onChangeType={(t) => setChartType(t)}
-        onChangeXKey={(x) => setChartXKey(x)}
-        onToggleYKey={(y) => {
-          setChartYKeys(prev =>
-            prev.includes(y) ? prev.filter(k => k !== y) : [...prev, y]
-          );
-        }}
+        rows={nearbyActive ? fullNearbyRows : fullRows}
+        custom={
+          <CustomView
+            title={chartTitle}
+            data={chartData}
+            xKey={chartXKey}
+            yKeys={chartYKeys}
+            type={chartType}
+            xCandidates={chartXCandidates}
+            yCandidates={chartYCandidates}
+            labelByKey={labelByKey}
+            stacked={chartStacked}
+            onChangeType={(t) => setChartType(t)}
+            onChangeXKey={(x) => setChartXKey(x)}
+            onChangeStacked={(v) => setChartStacked(v)}
+            onToggleYKey={(y) => {
+              setChartYKeys(prev =>
+                prev.includes(y) ? prev.filter(k => k !== y) : [...prev, y]
+              );
+            }}
+          />
+        }
       />
     </div>
   );
