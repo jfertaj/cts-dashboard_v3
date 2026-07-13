@@ -38,7 +38,8 @@ export default function CountriesView({ rows }: { rows: DataRow[] }) {
               formatter={(value, _name, item) => {
                 // `bucket.sites` NO es "centros del país": son sólo los que
                 // reportan esta métrica (groupByCountry descarta a los mudos).
-                const bucket = item.payload as CountryBucket;
+                const bucket = item?.payload as CountryBucket | undefined;
+                if (!bucket) return [String(value), "Total"];
                 return [`${value} (${bucket.sites} centros que la reportan)`, "Total"];
               }}
             />
