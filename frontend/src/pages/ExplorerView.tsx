@@ -82,6 +82,11 @@ const FRIENDLY_LABEL_OVERRIDES = new Map<string, string>([
   ["Account.ShippingCity", "City"],
 ]);
 
+// Contiene el nombre de la cuenta + los botones Nearby / Details, así que por
+// defecto no se trunca: la tabla scrollea en horizontal en su lugar. Si el
+// usuario le fija un ancho arrastrando la cabecera, ese ancho manda y recorta.
+const ACCOUNT_NAME_COL_ID = "sf.Account.Name";
+
 // Build a normalized lookup for resilient matching
 function __normKeyForDict(k?: string): string {
   if (!k) return "";
@@ -354,9 +359,26 @@ const LS_KEYS = {
   globalFilter: `${STORAGE_NS}:globalFilter`,
   pageSize: `${STORAGE_NS}:pageSize`,
   columnOrder: `${STORAGE_NS}:columnOrder`,
+  columnWidths: `${STORAGE_NS}:columnWidths`,
   nearbyLayout: `${STORAGE_NS}:nearbyLayout`,
   nearbySideWidth: `${STORAGE_NS}:nearbySideWidth`,
 };
+
+// Límites al arrastrar el borde de una columna.
+const MIN_COLUMN_WIDTH = 80;
+const MAX_COLUMN_WIDTH = 1200;
+
+// localStorage es editable por el usuario y puede venir de una versión anterior:
+// nunca dejamos que un valor basura acabe en un style width.
+function sanitizeColumnWidths(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    out[key] = Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, Math.round(value)));
+  }
+  return out;
+}
 
 // Debug flag (puedes apagarlo luego)
 const DEBUG = true; // o lee de localStorage si prefieres
@@ -1246,6 +1268,11 @@ export default function ExplorerView() {
   const [columnOrder, setColumnOrder] = useState<string[]>(
     safeParse<string[]>(localStorage.getItem(LS_KEYS.columnOrder), [])
   );
+  // Anchos que el usuario ha fijado arrastrando el borde de la cabecera.
+  // Una columna ausente de este mapa se auto-dimensiona según su contenido.
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(
+    () => sanitizeColumnWidths(safeParse<unknown>(localStorage.getItem(LS_KEYS.columnWidths), {}))
+  );
 
   const [points, setPoints] = useState<ExplorerPoint[]>([]);
   const [rows, setRows] = useState<ExplorerRow[]>([]);
@@ -1308,8 +1335,66 @@ export default function ExplorerView() {
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.globalFilter, JSON.stringify(globalFilter)); }, [globalFilter]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.pageSize, JSON.stringify(pageSize)); }, [pageSize]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnOrder, JSON.stringify(columnOrder)); }, [columnOrder]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnWidths, JSON.stringify(columnWidths)); }, [columnWidths]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbyLayout, JSON.stringify(nearbyLayout)); }, [nearbyLayout]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbySideWidth, JSON.stringify(nearbySideWidth)); }, [nearbySideWidth]);
+
+  // --- Redimensionado de columnas (arrastrar el borde derecho de la cabecera) ---
+  // Guarda el "cierre" del drag en curso para poder abortarlo si desmontamos.
+  const endColumnResizeRef = useRef<(() => void) | null>(null);
+  // Mientras se arrastra el tirador, el <th> no debe iniciar su drag-to-reorder.
+  const isResizingRef = useRef(false);
+  useEffect(() => () => { endColumnResizeRef.current?.(); }, []);
+
+  const startColumnResize = useCallback((columnId: string, e: React.MouseEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = e.currentTarget.closest("th");
+    if (!th) return;
+
+    // Si un arrastre anterior se quedó vivo (mouseup perdido), ciérralo antes de
+    // registrar otro: si no, sus listeners quedarían huérfanos y seguirían escribiendo.
+    endColumnResizeRef.current?.();
+
+    // Arrancamos del ancho REAL renderizado, no de un tamaño por defecto,
+    // para que la columna no pegue un salto en el primer píxel de arrastre.
+    const startX = e.clientX;
+    const startWidth = th.getBoundingClientRect().width;
+
+    const onMove = (ev: MouseEvent) => {
+      // Si soltaste el botón fuera de la ventana no llega el mouseup: el drag
+      // se quedaría pegado. ev.buttons === 0 significa "ya no hay botón pulsado".
+      if (ev.buttons === 0) { onEnd(); return; }
+      const raw = Math.round(startWidth + ev.clientX - startX);
+      const next = Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, raw));
+      setColumnWidths((prev) => (prev[columnId] === next ? prev : { ...prev, [columnId]: next }));
+    };
+    const onEnd = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      isResizingRef.current = false;
+      // Solo suéltate del ref si sigues siendo el drag activo.
+      if (endColumnResizeRef.current === onEnd) endColumnResizeRef.current = null;
+    };
+
+    isResizingRef.current = true;
+    endColumnResizeRef.current = onEnd;
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onEnd);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  // Doble clic en el tirador: la columna vuelve a auto-dimensionarse al contenido.
+  const resetColumnWidth = useCallback((columnId: string) => {
+    setColumnWidths((prev) => {
+      if (!(columnId in prev)) return prev;
+      const { [columnId]: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, []);
 
   // Auto-search when all filter rules are removed so the map restores full results
   const prevFiltersRulesLenRef = useRef(0);
@@ -2141,7 +2226,7 @@ export default function ExplorerView() {
   const dynamicDefs = useMemo<ColumnDef<ExplorerRow>[]>(() =>
     (Array.isArray(visibleColumns) ? visibleColumns : []).map((k) => {
       // Dentro de dynamicDefs, en el caso especial de "sf.Account.Name"
-      if (k === "sf.Account.Name") {
+      if (k === ACCOUNT_NAME_COL_ID) {
         return {
           id: k,
           header: labelByKey.get(k) ?? prettyLabelFromKeyLabel(k, "Account Name"),
@@ -2740,6 +2825,7 @@ export default function ExplorerView() {
                 localStorage.removeItem(LS_KEYS.globalFilter);
                 localStorage.removeItem(LS_KEYS.pageSize);
                 localStorage.removeItem(LS_KEYS.columnOrder);
+                localStorage.removeItem(LS_KEYS.columnWidths);
                 setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
                 setSorting([{ id: "country", desc: false }]);
                 setColumnFilters([]);
@@ -2747,6 +2833,7 @@ export default function ExplorerView() {
                 setPageSize(10);
                 setPageIndex(0);
                 setColumnOrder([]);
+                setColumnWidths({});
               }}
               className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
               disabled={busy || bootLoading}
@@ -3099,7 +3186,7 @@ showPresets={false}
             </button>
           </div>
         )}
-        <table className="min-w-full text-sm">
+        <table className="w-max min-w-full text-sm">
           <thead className="bg-gray-50">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
@@ -3124,12 +3211,16 @@ showPresets={false}
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const dir = header.column.getIsSorted() as false | "asc" | "desc";
+                  const isAccountName = header.column.id === ACCOUNT_NAME_COL_ID;
+                  const fixedWidth = columnWidths[header.column.id];
                   return (
                     <th
                       key={header.id}
                       data-testid="explorer-table-header"
                       draggable
                       onDragStart={(e) => {
+                        // Un gesto que empieza en el tirador es un resize, no un reorder.
+                        if (isResizingRef.current) { e.preventDefault(); return; }
                         e.dataTransfer.setData("text/plain", header.column.id);
                         e.dataTransfer.effectAllowed = "move";
                       }}
@@ -3148,7 +3239,8 @@ showPresets={false}
                           return base;
                         });
                       }}
-                      className="px-3 py-2 text-left font-semibold text-gray-700 select-none align-bottom max-w-[180px]"
+                      className={`relative px-3 py-2 text-left font-semibold text-gray-700 select-none align-bottom ${fixedWidth || isAccountName ? "" : "max-w-[180px]"}`}
+                      style={fixedWidth ? { width: fixedWidth, minWidth: fixedWidth, maxWidth: fixedWidth } : undefined}
                       title={String(header.column.columnDef.header ?? "")}
                     >
                       <button
@@ -3163,13 +3255,27 @@ showPresets={false}
                       {header.column.getCanFilter() ? (
                         <div className="mt-1">
                           <input
-                            className="border rounded-md px-2 py-1 text-xs w-48"
+                            className="border rounded-md px-2 py-1 text-xs w-full min-w-0"
                             placeholder="filter…"
                             value={(header.column.getFilterValue() as string) ?? ""}
                             onChange={(e) => header.column.setFilterValue(e.target.value)}
                           />
                         </div>
                       ) : null}
+                      {/* Tirador de redimensionado. draggable=false para que arrastrarlo
+                          no dispare el drag-to-reorder de la cabecera. */}
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Resize ${String(header.column.columnDef.header ?? header.column.id)} column`}
+                        draggable={false}
+                        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onMouseDown={(e) => startColumnResize(header.column.id, e)}
+                        onDoubleClick={() => resetColumnWidth(header.column.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Drag to resize — double-click to auto-fit"
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-violet-400/60 active:bg-violet-500"
+                      />
                     </th>
                   );
                 })}
@@ -3220,18 +3326,23 @@ showPresets={false}
                     />
                   </td>
                   {row.getVisibleCells().map((cell) => {
+                    const isAccountName = cell.column.id === ACCOUNT_NAME_COL_ID;
+                    const fixedWidth = columnWidths[cell.column.id];
                     const raw = cell.getValue();
-                    const strVal = raw == null ? "" : String(raw);
+                    const strVal = isAccountName || raw == null ? "" : String(raw);
+                    const content = flexRender(
+                      cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
+                      cell.getContext()
+                    );
+                    // Sin ancho fijado, Account Name se muestra entera (la tabla scrollea).
+                    // Con ancho fijado manda el usuario: la celda recorta.
+                    const clips = !isAccountName || Boolean(fixedWidth);
                     return (
                     <td key={cell.id} data-testid="explorer-table-cell"
-                        className="px-3 py-2 max-w-[260px]"
+                        className={`px-3 py-2 overflow-hidden ${isAccountName ? "whitespace-nowrap" : ""} ${fixedWidth || isAccountName ? "" : "max-w-[260px]"}`}
+                        style={fixedWidth ? { width: fixedWidth, minWidth: fixedWidth, maxWidth: fixedWidth } : undefined}
                         title={strVal.length > 40 ? strVal : undefined}>
-                      <div className="truncate">
-                        {flexRender(
-                          cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
-                          cell.getContext()
-                        )}
-                      </div>
+                      {clips ? <div className="truncate">{content}</div> : content}
                     </td>
                     );
                   })}
