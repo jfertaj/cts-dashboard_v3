@@ -3302,7 +3302,10 @@ showPresets={false}
                     const isAccountName = cell.column.id === ACCOUNT_NAME_COL_ID;
                     const fixedWidth = columnWidths[cell.column.id];
                     const raw = cell.getValue();
-                    const strVal = isAccountName || raw == null ? "" : String(raw);
+                    // El title se calcula para TODA columna, incluida Account Name:
+                    // es la que más se recorta cuando el usuario estrecha su ancho,
+                    // y por tanto la que más necesita el tooltip.
+                    const strVal = raw == null ? "" : String(raw);
                     const content = flexRender(
                       cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
                       cell.getContext()
