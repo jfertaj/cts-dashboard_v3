@@ -7,6 +7,13 @@ export const STAGE2 = "sf.C_Number_of_Stage2_Individuals_followed__c";
 export const ASSIGNMENTS = "extra.AssignmentsCount";
 
 export type Coverage = { withData: number; total: number; missing: number };
+
+/**
+ * `sites` = número de centros de ese país que REPORTAN esta métrica, NO el
+ * total de centros del país (los que no reportan quedan fuera de la suma).
+ * El total por país NO es recuperable de un bucket calculado con otra
+ * métrica: para obtenerlo hay que llamar a `groupByCountry(rows, COUNT_METRIC)`.
+ */
 export type CountryBucket = { country: string; value: number; sites: number };
 
 /**

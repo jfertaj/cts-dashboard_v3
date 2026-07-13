@@ -77,4 +77,13 @@ describe("groupByCountry", () => {
   it("devuelve array vacío sin filas", () => {
     expect(groupByCountry([], SCREENED)).toEqual([]);
   });
+
+  it("agrupa bajo \"(sin país)\" cuando el país está vacío o ausente", () => {
+    const rows: DataRow[] = [
+      { account_id: "x-1", account_name: "Centro X", country: "", data: { [SCREENED]: 10 } },
+      { account_id: "x-2", account_name: "Centro Y", data: { [SCREENED]: 5 } },
+    ];
+    const out = groupByCountry(rows, SCREENED);
+    expect(out).toEqual([{ country: "(sin país)", value: 15, sites: 2 }]);
+  });
 });
