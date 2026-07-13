@@ -165,3 +165,17 @@ El POC original enganchaba `_semantic_top_matches` a `_top_matches` en `ai_chat.
 **Para activar el flag en local.** `MOBY_SEMANTIC_FIELD_RESOLVER=1 AWS_PROFILE=juan bash scripts/restart_local_backend.sh`. Si el JSON no existe o Bedrock falla → log warning + fallback léxico, comportamiento idéntico a hoy.
 
 **Pendiente.** Correr `AWS_PROFILE=juan python scripts/build_field_index_cohere.py` (cuesta ~$0.02), evaluar accuracy vs léxico con bulk eval, decidir si se persiste el índice con DB sources.
+
+---
+
+### [2026-07-13] [coder] — Un filtro `!== null` no está testeado hasta que un caso tiene un cero legítimo
+
+**Contexto**: `frontend/src/lib/chartAggregation.ts`, fix de review de Task 3 (commits 1e6885f, fc18954).
+
+**Gotcha/Patrón**: `funnel` filtraba con `valueOf(row, X) !== null` para las tres etapas, pero **los 43 tests pasaban igual si se cambiaba a un check por truthiness**. El único centro completo de la suite era `full("completo", 100, 10, 2)` — los tres valores truthy — así que `!== null` y `Boolean(...)` eran indistinguibles para los tests. En un módulo cuya regla entera es "ausente ≠ cero", la mitad "cero legítimo SÍ entra" estaba sin pinear. Regla general: **todo guard `!== null` necesita un caso de test cuyo valor sea `0`** (o `""`, o `false` — el falsy legítimo del dominio); si no, la suite no distingue el guard correcto del mutante por truthiness.
+
+**Corolario estructural**: el `?? 0` que acompañaba al filtro (`valueOf(row, key) ?? 0` en el `sum()`) era código muerto — pero es la puerta exacta por la que el bug vuelve si alguien afloja el filtro. En vez de dejarlo con un comentario, se extraen los valores DENTRO del paso de filtrado y la colección superviviente lleva `number`s reales (`CompleteSite[]`). El `null` deja de existir en el tipo que se suma, así que **no hay `?? 0` que escribir**: la invariante la sostiene el compilador, no la disciplina del siguiente que toque el archivo. Patrón preferido en este repo sobre "filtrar y luego rellenar con un default".
+
+**Por qué importa**: un centro que cribó a 50 personas y no siguió a ninguna (`screened=50, stage1=0, stage2=0`) desaparecía del embudo bajo el mutante — y es precisamente el centro que un gestor de ensayos quiere ver. El bug habría sido invisible: sin error, sin warning, solo un centro menos.
+
+**Dónde aplicar**: `chartAggregation.ts` y cualquier módulo futuro con la semántica ausente≠cero. El patrón "extrae dentro del filtro para que el tipo no admita null" aplica a todo el repo.
