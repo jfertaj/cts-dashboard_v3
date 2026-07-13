@@ -87,6 +87,16 @@ describe("groupByCountry", () => {
     const out = groupByCountry(rows, SCREENED);
     expect(out).toEqual([{ country: "(sin país)", value: 15, sites: 2 }]);
   });
+
+  // El backend manda `country: null` (así está tipado ExplorerRow), no undefined.
+  // Si DataRow no admitiera null, ExplorerRow[] no sería asignable a DataRow[] y
+  // el Explorer no podría pasar sus filas al modal sin castear.
+  it("agrupa bajo \"(sin país)\" cuando el país llega como null", () => {
+    const rows: DataRow[] = [
+      { account_id: "x-1", account_name: "Centro X", country: null, city: null, data: { [SCREENED]: 7 } },
+    ];
+    expect(groupByCountry(rows, SCREENED)).toEqual([{ country: "(sin país)", value: 7, sites: 1 }]);
+  });
 });
 
 const named = (name: string, screened?: unknown): DataRow => ({

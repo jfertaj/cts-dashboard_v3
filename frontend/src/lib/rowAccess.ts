@@ -1,9 +1,12 @@
 // frontend/src/lib/rowAccess.ts
+// `country` y `city` admiten null porque así los manda el backend (ver
+// `ExplorerRow` en lib/api.ts): sin el null, ExplorerRow[] no es asignable a
+// DataRow[] y el Explorer no podría pasar sus filas al modal sin castear.
 export type DataRow = {
   account_id?: string;
   account_name?: string;
-  country?: string;
-  city?: string;
+  country?: string | null;
+  city?: string | null;
   data?: Record<string, unknown>;
 };
 
