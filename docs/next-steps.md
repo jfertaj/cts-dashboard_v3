@@ -8,6 +8,18 @@ These items are directly supported by observations in the code. Each entry state
 
 **All P0 items resolved and shipped to prod.** Development unblocked. Full timeline and evidence: **`docs/incident-distance-matrix-cost.md`**.
 
+---
+
+## 18. ~~Rediseñar el chart modal del Explorer en vistas orientadas a preguntas~~ — DONE (2026-07-13)
+
+**Observation:** the Explorer chart modal was a generic axis-picker — the user chose X and Y and got whatever came out. Two problems, both silent. (1) Most of the ~215 sites do not report the recruitment metrics, and the chart gave no hint of that: a bar chart of "Stage 2 followed" looked like it covered every site when it covered a handful. (2) Zero-filling a non-reporting site is a lie — a site that never reported is not a site that recruited zero.
+
+**Shipped:** `frontend/src/components/charts/ChartModal.tsx` is now a five-tab container opening on **Países**, with `CountriesView` / `RankingView` / `DistributionView` (Pareto) / `FunnelView` over the pure `frontend/src/lib/chartAggregation.ts`, plus the old builder preserved in the **Personalizado** tab (`CustomView`). Non-reporting sites are **excluded, never zero-filled**, and every view prints a coverage line ("N de M centros reportan …") that moves with the metric. Ranking and Distribución do not offer the "Número de centros" metric (a ranking of 1s / a flat Pareto). `ChatView` uses `BuilderModal` — Moby ships an already-aggregated dataset, so the four views do not apply; both modals share `ModalFrame`. The old `frontend/src/components/ChartModal.tsx` is deleted. `readDataCell` moved to `frontend/src/lib/rowAccess.ts`.
+
+**Testing tier added:** **Vitest** — the frontend previously had only Playwright E2E. 47 unit tests (`chartAggregation.test.ts` 26, `rowAccess.test.ts` 21) via `cd frontend && npm test`. E2E `frontend/tests/e2e/charts.spec.ts` (CHART-1–4) is fully mocked with `page.route`, so unlike the older Explorer specs it needs neither a backend nor a Salesforce session.
+
+**Follow-up (not blocking):** the coverage/exclusion semantics apply only to the four new views. The **Personalizado** tab still runs the old `buildChartDataset` path in `ExplorerView`, which does zero-fill. Worth revisiting if users start reading that tab quantitatively.
+
 Summary: `within-drive-km` and `nearby-multi` had generated ~186,000 billable Distance Matrix elements in March 2026 (~$730 unexpected cost). All five P0 fixes are now live:
 
 - [x] ~~Shared Distance Matrix cache~~ — DONE (2026-04-21, deployed 2026-04-28). PostgreSQL `dm_cache` table backs `_cache_get` / `_cache_set`; survives container restarts; per-worker dict kept as fallback when DB is unreachable.

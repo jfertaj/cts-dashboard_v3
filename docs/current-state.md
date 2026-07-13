@@ -29,7 +29,12 @@ Legend:
 - Filter chip display, chip removal with auto-re-search (uses `removeRuleFromExpr` to update expression)
 - Row selection checkboxes + "Select all" banner
 - `SiteDetailsModal` on row click
-- `ChartModal` for bar/line/pie charts from Explorer data
+- **Chart modal — tabbed container** — CONFIRMED (2026-07-13): `frontend/src/components/charts/ChartModal.tsx` is no longer the generic axis-picker; it is a container with five tabs that opens on **Países** by default. Four question-oriented views (`CountriesView`, `RankingView`, `DistributionView` Pareto, `FunnelView`) sit over a pure aggregation module, and the old builder survives untouched in the fifth tab, **Personalizado** (`CustomView`). `ChatView` gets `BuilderModal` instead — Moby already hands over an aggregated dataset, so it has no raw `rows` to aggregate and no use for the four views. Both modals share the chrome (bounded height, inner scroll, Escape-to-close) via `ModalFrame`. The old `frontend/src/components/ChartModal.tsx` is deleted.
+  - **The coverage line is the point of the redesign**: most of the ~215 sites do not report the recruitment metrics. The views **exclude** the non-reporting site instead of zero-filling it (a site that did not report is not a site that recruited zero), and every view prints a `data-testid="chart-coverage"` line — "N de M centros reportan …" — that changes with the metric. Without it the chart is quietly misread as covering all sites.
+  - Ranking and Distribución deliberately **do not offer the "Número de centros" metric**: every site counts as 1, so a ranking is a list of 1s and a Pareto is a flat line. Países does offer it (counting sites per country is meaningful). Enforced by `SITE_METRIC_OPTIONS` in `MetricPicker.tsx` and asserted by E2E CHART-3.
+  - Aggregation is a pure, framework-free module: `frontend/src/lib/chartAggregation.ts` (`coverageFor`, `groupByCountry`, `topN`/`bottomN`, `distribution`, `funnel`; `toMetricValue` maps absent/empty/non-numeric to `null`, **never 0**, while preserving a legitimate reported `0`). `readDataCell` moved out of `ExplorerView` into `frontend/src/lib/rowAccess.ts` so the views and the table read cells the same way. `DataRow.country`/`.city` accept `null` because that is what `ExplorerRow` (and the backend) actually send.
+  - **Vitest added** (`npm test` → `vitest run`): 47 unit tests across `chartAggregation.test.ts` (26) and `rowAccess.test.ts` (21) — the first frontend unit tests in the repo, which until now had only Playwright E2E.
+  - E2E: `charts.spec.ts` (CHART-1–4), fully mocked via `page.route` — needs neither a backend nor a Salesforce session.
 - `GET /api/explorer/fields` drives field catalog in FilterBuilder; field groups from `fields_opportunity_curated.json`
 - SWR cache keyed by `EXPLORER_BOOT_KEY` warms the map bootstrap on auth
 - E2E coverage: `filters.spec.ts` (11 tests: FILTER-1–5 + FLOGIC-1–6), `table.spec.ts`, `map.spec.ts`, `qualification.spec.ts`, `parity.spec.ts`
@@ -251,9 +256,12 @@ Legend:
 ## Test Coverage Summary
 
 **Backend unit tests: 475 passing** (2026-03-18)
+**Frontend unit tests (Vitest): 47 passing** (2026-07-13) — `cd frontend && npm test`. New tier: before this the frontend had only E2E.
 
 | Area | Backend unit | Frontend E2E |
 |------|-------------|-------------|
+| Chart aggregation (`chartAggregation.ts`) | Yes, frontend Vitest (chartAggregation.test.ts — 26 tests) | Yes (charts.spec.ts CHART-1–4, fully mocked) |
+| Row cell access (`rowAccess.ts`) | Yes, frontend Vitest (rowAccess.test.ts — 21 tests) | — |
 | `_eval_qual_rule` + `_qual_get` | Yes (test_salesforce_explorer.py) | — |
 | `pass_account()` expression mode | Yes (test_salesforce_explorer.py — 8 new tests) | — |
 | Filter logic expressions | Yes (test_filter_logic.py — 27 tests) | Yes (filters.spec.ts FLOGIC-1–6) |
