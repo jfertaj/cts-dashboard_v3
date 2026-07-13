@@ -1,3 +1,19 @@
+### [2026-07-13] [coder] — Task 3 `chartAggregation`: el `?? 0` del `funnel` es la puerta trasera del bug ausente≠cero, y `distribution(rows, COUNT_METRIC)` no significa nada
+
+**Contexto**: Task 3 del rediseño del chart modal — `topN` / `bottomN` / `distribution` / `funnel` en `frontend/src/lib/chartAggregation.ts` (commit 381eb8c).
+
+**Gotcha/Patrón**:
+1. **`funnel()` sólo suma los centros que reportan las TRES métricas** (`SCREENED` && `STAGE1` && `STAGE2`). Un centro que reporta cribados pero no Stage 1 inventaría una caída del embudo que no existe. Dentro de `sum()` hay un `?? 0` que HOY es inalcanzable (el `filter` ya garantiza no-null) — pero es exactamente la puerta trasera del bug: si alguien afloja el filtro (p.ej. `&&` → `||`, o "basta con que reporte cribados"), el `?? 0` rellena en silencio las etapas que faltan con ceros y el embudo miente sin fallar. Mutation check: cambiar `&&` por `||` deja 2 tests en rojo. Si tocas el filtro, quita el `?? 0` a la vez.
+2. **`bottomN` es el otro punto caliente**: el centro que no reporta NO puede aparecer como "el peor". Ambas funciones de ranking pasan por el mismo choke point `sitesWithData()` (que descarta los `null` de `valueOf`); nunca mapees `rows` directo con `?? 0`. Mutante probado: `bottomN` sobre `rows.map(... ?? 0)` → 1 test en rojo.
+3. **`distribution(rows, COUNT_METRIC)` es un sinsentido**: `valueOf` devuelve `1` para toda fila con `COUNT_METRIC`, así que salen N barras de valor 1, `missingSites: 0` y un Pareto plano. El Pareto sólo tiene sentido con una métrica real (screened / stage1 / stage2 / assignments). Las vistas de Tasks 6-8 no deben ofrecer "Nº de centros" como métrica en la vista de distribución.
+4. `cumulativePct` va con `Math.round`, así que son enteros: el último SIEMPRE es 100 exacto (running == total), salvo el caso `total === 0` que devuelve `0` para evitar el `0/0 = NaN`.
+
+**Por qué importa**: la mayoría de los 215 centros no reportan estas métricas. Los dos mutantes de arriba producen gráficos que se pintan perfectos y mienten — no revientan, no logean, sólo dan un número plausible y falso.
+
+**Dónde aplicar**: `frontend/src/lib/chartAggregation.ts` y toda vista del chart modal que lo consuma (Tasks 6/7/8).
+
+---
+
 ### [2026-07-13] [coder] — Task 2 fix: JSDoc de `CountryBucket.sites` + test de la rama `"(sin país)"`
 
 **Contexto**: fixes puntuales pedidos por la review de Task 2 (`memory/reviews.md` — approved-with-issues), sobre `frontend/src/lib/chartAggregation.ts` / `chartAggregation.test.ts`. Sin renames, sin refactors.

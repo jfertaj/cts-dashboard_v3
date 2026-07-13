@@ -23,3 +23,4 @@
 - [2026-07-13] [coder] → code-notes.md — Task 2 `chartAggregation`: ausente = `null` nunca `0` (sites cuenta reportadores), orden comas-antes-de-Number, y mutation check en ficheros nuevos necesita copia pristine
 - [2026-07-13] [revisor] → reviews.md#2026-07-13-revisor--4604c401d19965--task-2-chartaggregation-parseo-de-métrica-cobertura-agrupación-por-país — Task 2 (4604c40..1d19965) — approved-with-issues (regla ausente≠cero correcta y bien testeada; `sites` = reportadores necesita JSDoc; `extra.AssignmentsCount` viene con 0 por defecto del backend)
 - [2026-07-13] [coder] → code-notes.md — Task 2 fix: JSDoc de `CountryBucket.sites` + test de la rama `"(sin país)"` (commit f7c1062)
+- [2026-07-13] [coder] → code-notes.md — Task 3 `chartAggregation`: el `?? 0` del `funnel` es la puerta trasera del bug ausente≠cero, y `distribution(rows, COUNT_METRIC)` no significa nada (commit 381eb8c)
