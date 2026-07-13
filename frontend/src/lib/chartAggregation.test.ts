@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   toMetricValue, coverageFor, groupByCountry,
-  COUNT_METRIC, SCREENED,
+  topN, bottomN, distribution, funnel,
+  COUNT_METRIC, SCREENED, STAGE1, STAGE2,
 } from "./chartAggregation";
 import type { DataRow } from "./rowAccess";
 
@@ -85,5 +86,96 @@ describe("groupByCountry", () => {
     ];
     const out = groupByCountry(rows, SCREENED);
     expect(out).toEqual([{ country: "(sin país)", value: 15, sites: 2 }]);
+  });
+});
+
+const named = (name: string, screened?: unknown): DataRow => ({
+  account_id: name, account_name: name, country: "ES",
+  data: screened === undefined ? {} : { [SCREENED]: screened },
+});
+
+describe("topN / bottomN", () => {
+  it("topN devuelve los N mayores, de mayor a menor", () => {
+    const rows = [named("a", 5), named("b", 50), named("c", 20)];
+    expect(topN(rows, SCREENED, 2)).toEqual([
+      { accountId: "b", name: "b", value: 50 },
+      { accountId: "c", name: "c", value: 20 },
+    ]);
+  });
+
+  it("bottomN devuelve los N menores, de menor a mayor", () => {
+    const rows = [named("a", 5), named("b", 50), named("c", 20)];
+    expect(bottomN(rows, SCREENED, 2)).toEqual([
+      { accountId: "a", name: "a", value: 5 },
+      { accountId: "c", name: "c", value: 20 },
+    ]);
+  });
+
+  it("los centros sin dato NUNCA aparecen en el bottom como si fueran cero", () => {
+    const rows = [named("reporta", 5), named("silencioso")];
+    expect(bottomN(rows, SCREENED, 5).map(s => s.name)).toEqual(["reporta"]);
+  });
+
+  it("devuelve menos de N si no hay suficientes centros con dato", () => {
+    expect(topN([named("a", 1)], SCREENED, 10)).toHaveLength(1);
+  });
+});
+
+describe("distribution", () => {
+  it("ordena descendente y calcula el % acumulado", () => {
+    const rows = [named("a", 50), named("b", 30), named("c", 20)];
+    const out = distribution(rows, SCREENED);
+    expect(out.bars.map(b => b.name)).toEqual(["a", "b", "c"]);
+    expect(out.cumulativePct).toEqual([50, 80, 100]);
+  });
+
+  it("cuenta aparte los centros sin dato, sin meterlos en las barras", () => {
+    const rows = [named("a", 100), named("mudo1"), named("mudo2")];
+    const out = distribution(rows, SCREENED);
+    expect(out.bars).toHaveLength(1);
+    expect(out.missingSites).toBe(2);
+  });
+
+  it("con un solo centro el acumulado es 100%", () => {
+    const out = distribution([named("a", 7)], SCREENED);
+    expect(out.cumulativePct).toEqual([100]);
+  });
+
+  it("no divide por cero cuando el total es 0", () => {
+    const out = distribution([named("a", 0)], SCREENED);
+    expect(out.cumulativePct).toEqual([0]);
+    expect(out.bars).toHaveLength(1);
+  });
+
+  it("sin centros con dato devuelve barras vacías", () => {
+    const out = distribution([named("mudo")], SCREENED);
+    expect(out.bars).toEqual([]);
+    expect(out.missingSites).toBe(1);
+  });
+});
+
+describe("funnel", () => {
+  const full = (name: string, s: number, s1: number, s2: number): DataRow => ({
+    account_id: name, account_name: name, country: "ES",
+    data: { [SCREENED]: s, [STAGE1]: s1, [STAGE2]: s2 },
+  });
+
+  it("suma solo los centros que reportan las TRES métricas", () => {
+    const rows = [full("completo", 100, 10, 2), named("parcial", 999)];
+    const out = funnel(rows);
+    expect(out.stages).toEqual([
+      { stage: "Cribados", value: 100 },
+      { stage: "Stage 1 seguidos", value: 10 },
+      { stage: "Stage 2 seguidos", value: 2 },
+    ]);
+    expect(out.sitesIncluded).toBe(1);
+    expect(out.sitesExcluded).toBe(1);
+  });
+
+  it("sin ningún centro completo, las etapas van a 0 y sitesIncluded es 0", () => {
+    const out = funnel([named("parcial", 999)]);
+    expect(out.sitesIncluded).toBe(0);
+    expect(out.sitesExcluded).toBe(1);
+    expect(out.stages.every(s => s.value === 0)).toBe(true);
   });
 });
