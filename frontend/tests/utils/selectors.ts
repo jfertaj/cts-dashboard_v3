@@ -86,6 +86,9 @@ export const S = {
   CHART_EMPTY:              '[data-testid="chart-empty"]',
   CHART_NO_ROWS:            '[data-testid="chart-no-rows"]',
   CHART_SILENT_SITES:       '[data-testid="chart-silent-sites"]',
+  CHART_CUSTOM_WARNING:     '[data-testid="chart-custom-warning"]',   // "esta pestaña pinta valores crudos…"
+  CHART_LEGEND_MAX:         '[data-testid="chart-legend-max"]',       // selector "Legend max" del constructor
+  CHART_OVERLAY:            '[data-testid="chart-modal-overlay"]',    // capa fixed del modal (z-index)
 
   // ── Site Details Modal ─────────────────────────────────────────────────
   SITE_DETAILS_MODAL:       '[data-testid="site-details-modal"]',

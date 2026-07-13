@@ -33,7 +33,14 @@ export default function ModalFrame({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+    // z-[11000] es el nivel que tenía el modal viejo, y no es arbitrario: por
+    // debajo quedan el pill flotante de Nearby (z-[9050]), su drawer (z-[9010]) y
+    // el overlay del drawer (z-[9000], con pointer-events). Con un z bajo el pill
+    // se pinta sobre el modal y un click suyo lo deja inalcanzable.
+    <div
+      data-testid="chart-modal-overlay"
+      className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/30 p-4"
+    >
       <div
         className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-xl bg-white shadow-xl"
         data-testid={testId}
