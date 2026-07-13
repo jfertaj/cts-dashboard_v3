@@ -210,3 +210,17 @@ El POC original enganchaba `_semantic_top_matches` a `_top_matches` en `ai_chat.
 **Por qué importa**: un centro que cribó a 50 personas y no siguió a ninguna (`screened=50, stage1=0, stage2=0`) desaparecía del embudo bajo el mutante — y es precisamente el centro que un gestor de ensayos quiere ver. El bug habría sido invisible: sin error, sin warning, solo un centro menos.
 
 **Dónde aplicar**: `chartAggregation.ts` y cualquier módulo futuro con la semántica ausente≠cero. El patrón "extrae dentro del filtro para que el tipo no admita null" aplica a todo el repo.
+
+### [2026-07-13] [coder] — Task 5: el `ChartModal` viejo lo importan DOS páginas, y el marco del modal se llevaba puesta la altura del chart
+
+**Contexto**: `frontend/src/components/charts/{ChartModal,CustomView}.tsx` — contenedor con pestañas + democión del constructor genérico a la pestaña "Personalizado".
+
+**Gotcha 1 — el borrado de Task 10 rompe el build si sólo mira ExplorerView**: `components/ChartModal.tsx` lo importan **`ExplorerView.tsx:18` Y `ChatView.tsx:4`** (call site `:1203`). El plan asume un único consumidor. Además ChatView no tiene `rows: DataRow[]` — pasa `data`/`xKey`/`yKeys` ya agregados — así que el contenedor nuevo (que exige `rows`) no le encaja: o consume `charts/CustomView` dentro de su propio marco, o se queda con una copia. `grep -rn "ChartModal" frontend/src` antes de borrar nada.
+
+**Gotcha 2 — `<ResponsiveContainer height="100%">` muere al salir del modal**: en el modal viejo su padre era `flex-1` dentro de un panel `h-[78vh]`, o sea altura resuelta. Dentro de una pestaña, `flex-1` no resuelve a nada y el chart colapsa a 0px sin error ni warning. Al mover un chart de un contenedor con altura fija a uno de flujo normal hay que **darle altura explícita al padre** (`h-[420px]`, la misma que usan las otras 4 vistas).
+
+**Gotcha 3 — quitar un prop puede llevarse un comportamiento colateral**: `title` no sólo pintaba la cabecera, también nombraba el PNG descargado (`${title}_chart.png`). Al subir el título al contenedor, la descarga se queda con nombre fijo. Un prop "de presentación" puede tener un segundo uso enterrado 100 líneas más abajo: `grep` el prop entero antes de borrarlo, no sólo el sitio obvio.
+
+**Por qué importa**: los tres son fallos silenciosos — build roto en el peor momento (Gotcha 1), chart invisible sin error en consola (Gotcha 2), regresión de UX que nadie nota hasta que un usuario se queja de sus descargas (Gotcha 3).
+
+**Dónde aplicar**: Task 10 (obligatorio leer Gotcha 1 antes de borrar). Gotchas 2 y 3, todo el repo.
