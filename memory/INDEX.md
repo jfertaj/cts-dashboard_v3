@@ -16,3 +16,4 @@
 - [2026-04-28] [coder] → code-notes.md — Moby planner age-vs-threshold (fix ND<18 filtro espurio + agregación short-circuit)
 - [2026-05-04] [coder] → code-notes.md — POC resolver semántico de campos (Cohere Embed v3 + Rerank 3.5 vía Bedrock, gated por MOBY_SEMANTIC_FIELD_RESOLVER)
 - [2026-05-04] [coder] → code-notes.md — Semantic resolver: dedupe post-rerank por canonical key (strip "sf.")
+- [2026-07-13] [coder] → code-notes.md — Vitest en el frontend + `readDataCell` extraído a `lib/rowAccess` (empty-string = ausente; el build NO hace typecheck)

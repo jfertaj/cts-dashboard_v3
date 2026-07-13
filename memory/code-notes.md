@@ -1,3 +1,18 @@
+### [2026-07-13] [coder] — Vitest en el frontend + `readDataCell` extraído a `lib/rowAccess`
+
+**Contexto**: Task 1 del rediseño del chart modal. `frontend/` no tenía runner de tests unitarios (sólo Playwright E2E), y `readDataCell` vivía como función de módulo NO exportada en `ExplorerView.tsx:912`.
+
+**Gotcha/Patrón**:
+1. **Ni `npm test` ni `npm run build` hacen typecheck en este frontend.** `vitest run` transpila con esbuild (tira los tipos) y `vite build` no invoca `tsc`. Un error de tipos **no rompe ningún gate**. Para saber si has metido una regresión de tipos hay que correr `npx tsc --noEmit` a mano y compararlo contra el baseline — que **hoy tiene 12 errores pre-existentes** (6 en `ExplorerView.tsx`, 2 en `ChatView.tsx`, 1 en Header/MapView/MemberMapView/SalesforceLinker). Truco: `git stash` → contar → `git stash pop` → contar → comparar.
+2. **`readDataCell` trata la cadena vacía como AUSENTE, no como valor.** Cada rama hace `!== undefined && !== null && String(v).trim() !== ""` y, si falla, **sigue buscando** en el siguiente fallback (clave exacta → sin prefijo `sf.` → variantes con `_` → campos planos `account_name`/`account_id`/`country`/`city`) y acaba en `undefined`. Ese `undefined` final es deliberado: TanStack Table lo necesita para aplicar `sortUndefined: 'last'`.
+3. Vitest configurado con `include: ["src/**/*.test.ts"]` + `environment: "node"` — **no coge `.test.tsx`**. Para testear componentes habrá que ampliar el glob y pasar a `jsdom`.
+
+**Por qué importa**: si alguien "limpia" `readDataCell` y convierte el empty-string en un valor válido (o devuelve `null`/`0` en vez de `undefined`), rompe a la vez el ordenado de la tabla, el filtrado y los charts del Explorer — y **ningún test ni el build lo van a pescar**. La regla global del rediseño ("un valor ausente es `null`, jamás `0`") se apoya justo en este comportamiento.
+
+**Dónde aplicar**: `frontend/src/lib/rowAccess.ts` (la función), todo el frontend (el punto 1 sobre los gates de tipos).
+
+---
+
 ### [2026-05-04] [coder] — Tightening Opción A: top_n=4 + score gate + embed cache
 
 A/B test contra prod (6 queries reales) reveló: 1/6 win, regresiones por hint ruidoso en queries triviales (Q1 EN: top-K con `_how_many_beds`), supresión de un clarify legítimo (Q2), y +37% latencia. Tres ajustes:
