@@ -130,4 +130,45 @@ test.describe("Explorer — modal de gráficos", () => {
     // Y es el constructor de ejes: su selector de tipo de gráfico sigue ahí.
     await expect(modal.getByText("Type", { exact: true })).toBeVisible();
   });
+
+  test("CHART-5: Personalizado avisa de que rellena con ceros", async ({ page }) => {
+    const modal = await openChartModal(page);
+
+    // El constructor NO excluye al que no reporta: lo pinta como barra de cero.
+    // Al vivir en el mismo contenedor que las cuatro vistas honestas, el aviso es
+    // lo único que impide leer sus ceros como "reclutó a nadie".
+    await modal.locator(S.CHART_TAB_CUSTOM).click();
+    const warning = modal.locator(S.CHART_CUSTOM_WARNING);
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText("cero");
+
+    // Y es exclusivo de esta pestaña: en las otras la exclusión sí ocurre.
+    await modal.locator(S.CHART_TAB_COUNTRIES).click();
+    await expect(modal.locator(S.CHART_CUSTOM_WARNING)).toHaveCount(0);
+  });
+
+  test("CHART-6: el modal se pinta por encima del botón flotante de Nearby", async ({ page }) => {
+    await openChartModal(page);
+
+    // El pill "Nearby panel" es fixed con z-[9050]; si el modal se queda por
+    // debajo, el pill flota sobre él y su drawer lo deja inutilizable.
+    const z = await page.locator(S.CHART_OVERLAY).evaluate(
+      (el) => window.getComputedStyle(el).zIndex
+    );
+    expect(Number(z)).toBeGreaterThan(9050);
+  });
+
+  test("CHART-7: Legend max sobrevive al cambio de pestaña", async ({ page }) => {
+    const modal = await openChartModal(page);
+
+    // CustomView se desmonta al cambiar de pestaña: si su estado vive dentro,
+    // la elección del usuario se pierde en silencio en cada ida y vuelta.
+    await modal.locator(S.CHART_TAB_CUSTOM).click();
+    await modal.locator(S.CHART_LEGEND_MAX).selectOption("20");
+    await expect(modal.locator(S.CHART_LEGEND_MAX)).toHaveValue("20");
+
+    await modal.locator(S.CHART_TAB_COUNTRIES).click();
+    await modal.locator(S.CHART_TAB_CUSTOM).click();
+    await expect(modal.locator(S.CHART_LEGEND_MAX)).toHaveValue("20");
+  });
 });
