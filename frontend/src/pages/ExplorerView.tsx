@@ -16,7 +16,7 @@ import { filterGroupToFlat, removeRuleFromExpr, defaultExpr } from "../lib/filte
 import MapView from "../components/MapView";
 import ColumnPicker from "../components/ColumnPicker";
 import ChartModal from "../components/charts/ChartModal";
-import CustomView, { type ChartType } from "../components/charts/CustomView";
+import CustomView, { DEFAULT_LEGEND_MAX, type ChartType } from "../components/charts/CustomView";
 import { displayCountry } from "../lib/countryUtils";
 import SiteDetailsModal from "../components/SiteDetailsModal";
 
@@ -2367,9 +2367,10 @@ export default function ExplorerView() {
   const [chartTitle, setChartTitle] = useState<string>("Chart");
   const [chartXKey, setChartXKey] = useState<string>("sf.Account.Name");
   const [chartYKeys, setChartYKeys] = useState<string[]>([]);
-  // Stacked vive aquí, no en CustomView: la pestaña Personalizado se desmonta al
-  // cambiar de pestaña y el modo elegido se perdería en cada ida y vuelta.
+  // Stacked y legend max viven aquí, no en CustomView: la pestaña Personalizado
+  // se desmonta al cambiar de pestaña y lo elegido se perdería en cada ida y vuelta.
   const [chartStacked, setChartStacked] = useState<boolean>(true);
+  const [chartLegendMax, setChartLegendMax] = useState<number>(DEFAULT_LEGEND_MAX);
   const [chartYCandidates, setChartYCandidates] = useState<string[]>([]);
   const [chartXCandidates, setChartXCandidates] = useState<string[]>([]);
 
@@ -3439,6 +3440,8 @@ showPresets={false}
             yCandidates={chartYCandidates}
             labelByKey={labelByKey}
             stacked={chartStacked}
+            legendMax={chartLegendMax}
+            onChangeLegendMax={(n) => setChartLegendMax(n)}
             onChangeType={(t) => setChartType(t)}
             onChangeXKey={(x) => setChartXKey(x)}
             onChangeStacked={(v) => setChartStacked(v)}

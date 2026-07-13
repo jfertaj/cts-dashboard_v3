@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef } from "react";
 import {
   BarChart, Bar,
   LineChart, Line,
@@ -8,6 +8,9 @@ import {
 import html2canvas from "html2canvas";
 
 export type ChartType = "bar" | "line" | "pie";
+
+/** Entradas de leyenda por defecto. Lo fija el dueño del estado, no esta vista. */
+export const DEFAULT_LEGEND_MAX = 8;
 
 export default function CustomView({
   title,
@@ -23,7 +26,7 @@ export default function CustomView({
   onChangeXKey,
   onToggleYKey,
   onChangeStacked,
-  legendMax = 8,
+  legendMax,
   onChangeLegendMax,
 }: {
   /** Título del modal: da nombre al PNG exportado (`<título>_chart.png`). */
@@ -42,12 +45,12 @@ export default function CustomView({
   onChangeXKey?: (v: string) => void;
   onToggleYKey?: (v: string) => void;
   onChangeStacked?: (v: boolean) => void;
-  legendMax?: number; // Máximo de entradas en la leyenda (por defecto 8)
-  onChangeLegendMax?: (n: number) => void;
+  /** Máximo de entradas en la leyenda. Controlado por el dueño por lo mismo que
+   *  `stacked`: esta vista se desmonta al cambiar de pestaña. */
+  legendMax: number;
+  onChangeLegendMax: (n: number) => void;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const [legendMaxUI, setLegendMaxUI] = useState<number>(legendMax ?? 8);
-  useEffect(() => { setLegendMaxUI(legendMax ?? 8); }, [legendMax]);
 
   const Empty = data.length === 0 || yKeys.length === 0;
   const label = (k: string) => {
@@ -106,7 +109,7 @@ export default function CustomView({
 
   // Legend payload builders (limit to legendMax)
   const legendPayloadForSeries = () =>
-    (yKeys || []).slice(0, Math.max(0, legendMaxUI)).map((k, idx) => ({
+    (yKeys || []).slice(0, Math.max(0, legendMax)).map((k, idx) => ({
       id: k,
       value: label(k),
       color: COLORS[idx % COLORS.length],
@@ -114,7 +117,7 @@ export default function CustomView({
     }));
 
   const legendPayloadForPie = () =>
-    (plotData || []).slice(0, Math.max(0, legendMaxUI)).map((r: any, idx: number) => ({
+    (plotData || []).slice(0, Math.max(0, legendMax)).map((r: any, idx: number) => ({
       id: String(r?.[xKey] ?? idx),
       value: String(r?.[xKey] ?? ''),
       color: r?._color || COLORS[idx % COLORS.length],
@@ -213,13 +216,10 @@ export default function CustomView({
           <div className="flex items-center gap-2">
             <Label>Legend max</Label>
             <select
+              data-testid="chart-legend-max"
               className="border rounded-md text-sm px-2 py-1"
-              value={legendMaxUI}
-              onChange={(e) => {
-                const n = parseInt(e.target.value, 10) || 8;
-                setLegendMaxUI(n);
-                onChangeLegendMax?.(n);
-              }}
+              value={legendMax}
+              onChange={(e) => onChangeLegendMax(parseInt(e.target.value, 10) || 8)}
             >
               {[4,6,8,10,12,16,20].map((n) => (
                 <option key={n} value={n}>{n}</option>

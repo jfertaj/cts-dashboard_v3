@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { askAI, askAIStream, ChatResponse, getFieldsIndex } from "../lib/ai";
 import BuilderModal from "../components/charts/BuilderModal";
-import CustomView, { type ChartType } from "../components/charts/CustomView";
+import CustomView, { DEFAULT_LEGEND_MAX, type ChartType } from "../components/charts/CustomView";
 import Moby from "../assets/Moby.png";
 import AIResultTable from "../components/AIResultTable";
 import SiteDetailsModal from "../components/SiteDetailsModal";
@@ -82,7 +82,9 @@ export default function ChatView() {
   const [chartYKeys, setChartYKeys] = useState<string[]>([]);
   const [chartData, setChartData] = useState<Array<Record<string, any>>>([]);
   // Igual que hacía el modal antiguo: cada apertura vuelve a Stacked.
+  // Ambos viven aquí, no en CustomView, que se desmonta al cerrarse el modal.
   const [chartStacked, setChartStacked] = useState<boolean>(true);
+  const [chartLegendMax, setChartLegendMax] = useState<number>(DEFAULT_LEGEND_MAX);
   useEffect(() => { if (chartOpen) setChartStacked(true); }, [chartOpen]);
   const labelByKey = useMemo(() => new Map<string, string>(), []);
 
@@ -1220,6 +1222,8 @@ export default function ChatView() {
           yCandidates={[]}
           labelByKey={labelByKey}
           stacked={chartStacked}
+          legendMax={chartLegendMax}
+          onChangeLegendMax={(n) => setChartLegendMax(n)}
           onChangeType={(t) => setChartType(t)}
           onChangeStacked={(v) => setChartStacked(v)}
           onChangeXKey={() => {}}
