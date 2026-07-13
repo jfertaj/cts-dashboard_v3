@@ -1,3 +1,34 @@
+### [2026-07-13] [coder] — Tasks 6-9: las 4 vistas del chart modal cierran los agujeros que `MetricPicker` deja abiertos (metricKey ∈ options, coverage del mismo metricKey)
+
+**Contexto**: Tasks 6-9 del rediseño del chart modal — `CountriesView` (a12b1bb), `RankingView` (908177e), `DistributionView` (aedd0dd), `FunnelView` (f36b8a3) en `frontend/src/components/charts/`.
+
+**Gotcha/Patrón**:
+1. **El invariante que ninguna type ata: `metricKey` ∈ `options` y `coverage = coverageFor(rows, metricKey)` con ESE metricKey.** El patrón que lo garantiza en las 3 vistas con selector: `useState(SCREENED)` + `useMemo(() => coverageFor(rows, metricKey), [rows, metricKey])` declarados juntos, y el metricKey sólo cambia por el `onChange` del `<select>` (cuyas opciones SON `options`). Si alguien mete otra vía de cambio de metricKey (deep-link, prop del contenedor, "recordar última métrica" en localStorage), tiene que validar contra `options` o `MetricPicker` empezará a enseñar `sf.C_Number_of_..._c` como etiqueta y una cobertura falsa. `SCREENED` es seguro como estado inicial en las cuatro porque está tanto en `METRIC_OPTIONS` como en `SITE_METRIC_OPTIONS`.
+2. **`COUNT_METRIC` sólo en CountriesView.** Ranking y Distribución importan `SITE_METRIC_OPTIONS`. Rankear centros por "nº de centros" es una lista de unos; su Pareto es una recta.
+3. **El brief de Task 6 traía `item: any` en el `formatter` del Tooltip de Recharts.** Se sustituye por `item.payload as CountryBucket` importando el tipo — el `payload` de Recharts es `any` en sus typings, así que el cast es el punto donde se recupera el tipo. Y ojo con el texto: `CountryBucket.sites` NO es "centros del país", son los que reportan la métrica; el tooltip dice "centros que la reportan" para que no se lea como el total.
+4. **FunnelView no lleva `MetricPicker`** (resuelve la duda que dejó abierta la nota de Task 4): el embudo son siempre las 3 etapas, no hay metricKey, y la línea de cobertura se construye a mano desde `sitesIncluded`/`sitesExcluded`. Al no haber metricKey, es la única vista que no puede desincronizarse.
+
+**Por qué importa**: la mayoría de los 215 centros no reportan estas métricas. Estas vistas son la capa donde la exclusión se hace VISIBLE (línea de cobertura + empty states que explican el porqué). Un metricKey fuera de `options` o un `coverage` calculado con otra métrica producen una pantalla que se pinta perfecta y miente — y Vitest aquí no corre `.tsx`, así que ningún test lo pesca.
+
+**Dónde aplicar**: `frontend/src/components/charts/*` y el contenedor con tabs que las monte (Task 10).
+
+---
+
+### [2026-07-13] [coder] — Task 4 `MetricPicker`: el prop contract no ata `coverage` a `metricKey`, y `funnel()` no tiene hueco para un selector
+
+**Contexto**: Task 4 del rediseño del chart modal — `frontend/src/components/charts/MetricPicker.tsx` (commit 5e2138e), componente compartido que consumirán las 4 vistas de Tasks 6-9.
+
+**Gotcha/Patrón**:
+1. **Nada dentro de `MetricPicker` garantiza que `coverage` fue calculado para el mismo `metricKey` que se le pasa.** El componente confía ciegamente en el caller: si alguna vista pasa `coverage = coverageFor(rows, SCREENED)` junto con `metricKey = STAGE1`, la frase sale con seguridad absoluta y totalmente falsa ("87 de 215 centros reportan Stage 1..." cuando en realidad esos 87 reportan cribados). Cuando se conecten las vistas reales (Ranking/Distribución/Funnel), quien las escriba debe recalcular `coverage` en el mismo `useMemo`/render que decide `metricKey`, no guardarlos por separado.
+2. **`funnel()` no tiene un `metricKey` seleccionable** (agrega SCREENED+STAGE1+STAGE2 fijos), así que no está claro que la vista Funnel vaya a usar `MetricPicker` tal cual — puede que solo necesite construir un `Coverage` a mano desde `Funnel.sitesIncluded`/`sitesExcluded` sin dropdown. Decisión pendiente para esa task.
+3. **`SITE_METRIC_OPTIONS` excluye `COUNT_METRIC`** (filtro sobre `METRIC_OPTIONS`) porque rankear/pareto por "número de centros" no significa nada — ver nota de Task 3 sobre `distribution(rows, COUNT_METRIC)`. Es el mismo invariante, ahora reflejado en la capa de UI.
+
+**Por qué importa**: el patrón "ausente≠cero" de Tasks 2-3 solo protege el cálculo; la capa de UI puede seguir mintiendo si el caller desincroniza `metricKey` y `coverage`. Ningún test de este componente pesca ese caso (Vitest no corre `.tsx`, ver nota de Task 1) — la única red es disciplina en las vistas que lo consuman.
+
+**Dónde aplicar**: `frontend/src/components/charts/MetricPicker.tsx` y las 4 vistas de Tasks 6-9 que lo monten.
+
+---
+
 ### [2026-07-13] [coder] — Task 3 `chartAggregation`: el `?? 0` del `funnel` es la puerta trasera del bug ausente≠cero, y `distribution(rows, COUNT_METRIC)` no significa nada
 
 **Contexto**: Task 3 del rediseño del chart modal — `topN` / `bottomN` / `distribution` / `funnel` en `frontend/src/lib/chartAggregation.ts` (commit 381eb8c).
