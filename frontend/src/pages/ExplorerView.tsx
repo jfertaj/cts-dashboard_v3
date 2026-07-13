@@ -36,6 +36,7 @@ import { EXPLORER_BOOT_KEY } from "../lib/cacheKeys";
 import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
+import { readDataCell } from "../lib/rowAccess";
 import Moby from "../assets/Moby.png";
 
 const OP_LABELS: Record<string, string> = {
@@ -907,39 +908,6 @@ function TypeBadge({ type }: { type?: string | null }) {
       {label}
     </span>
   );
-}
-
-function readDataCell(row: any, key: string) {
-  const d = row?.data ?? {};
-
-  // 1) clave exacta tal cual viene del backend (p.ej. "sf.C_Number_of_T1D_Patients_currently_U_18__c")
-  if (d[key] !== undefined && d[key] !== null && String(d[key]).trim() !== "") return d[key];
-
-  // 2) misma clave sin el prefijo "sf."
-  const base = key.replace(/^sf\./, "");
-  if (d[base] !== undefined && d[base] !== null && String(d[base]).trim() !== "") return d[base];
-
-  // 3) variantes con underscores (por si acaso)
-  const k2 = key.replace(/\./g, "_");
-  if (d[k2] !== undefined && d[k2] !== null && String(d[k2]).trim() !== "") return d[k2];
-
-  const k3 = base.replace(/\./g, "_");
-  if (d[k3] !== undefined && d[k3] !== null && String(d[k3]).trim() !== "") return d[k3];
-
-  // 4) fallbacks a propiedades de fila "planas" (el backend ya las trae así)
-  //    - sf.Account.Name / Account.Name  -> row.account_name
-  //    - sf.Account.Id   / Account.Id    -> row.account_id
-  //    - country, city (o sus variantes SF) -> row.country / row.city
-  const kb = base.toLowerCase();
-  if (kb === 'account.name') return row?.account_name ?? undefined;
-  if (kb === 'account.id') return row?.account_id ?? undefined;
-  if (key === 'sf.Account.Name') return row?.account_name ?? undefined;
-  if (key === 'sf.Account.Id')   return row?.account_id ?? undefined;
-  if (kb === 'country' || kb === 'account.shippingcountry') return row?.country ?? undefined;
-  if (kb === 'city'    || kb === 'account.shippingcity')    return row?.city ?? undefined;
-
-  // ⚠️ Importante: devolver undefined para que TanStack Table pueda aplicar sortUndefined: 'last'
-  return undefined;
 }
 
 function shallowEqual(a: any, b: any) {
