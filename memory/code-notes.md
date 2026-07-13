@@ -1,3 +1,19 @@
+### [2026-07-13] [coder] — `readDataCell`: dos líneas muertas, `0` es valor, y la capa 2 sólo se distingue con bases con punto
+
+**Contexto**: `frontend/src/lib/rowAccess.ts`, al ampliar `rowAccess.test.ts` para cubrir las ramas de fallback (hallazgo Important de la review de Task 1).
+
+**Gotcha/Patrón**:
+1. **Las líneas 40-41 son inalcanzables.** `if (key === 'sf.Account.Name')` / `'sf.Account.Id'` nunca se ejecutan: si `key` es `sf.Account.Name`, entonces `base` es `Account.Name` y `kb` es `account.name`, así que la L38 ya ha hecho `return`. Verificado por mutación: borrarlas deja los 21 tests en verde. Borrarlas es seguro; no lo hice porque la task prohibía tocar el fichero.
+2. **El `0` numérico SÍ se devuelve como valor.** La guarda es `String(v).trim() !== ""`, y `String(0)` es `"0"`. Sólo `undefined`/`null`/`""`/whitespace cuentan como ausentes y siguen bajando por la cadena.
+3. **La capa 2 (strip de `sf.`) es indistinguible de `k3` salvo con bases que conserven puntos.** Con `sf.Foo__c`, `base` y `k3` son la misma cadena (`Foo__c`), así que `k3` rescata la lectura si borras la capa 2. Sólo `sf.Account.Name` (base `Account.Name` ≠ k3 `Account_Name`) aísla la capa 2.
+4. **Patrón: en tests de caracterización, cobertura de línea ≠ cobertura de rama.** La forma de probar que un test pin-ea una rama es borrar la rama y ver el test en rojo (`sed` + `npm test` + `git checkout --`). La primera pasada dejó 2 supervivientes con los tests "obvios" ya escritos.
+
+**Por qué importa**: sin el mutation check, dos ramas de fallback quedaban borrables en silencio por un refactor futuro — que es justo lo que este módulo existe para evitar (el orden de fallbacks es de lo que depende el Explorer en vivo).
+
+**Dónde aplicar**: `frontend/src/lib/rowAccess.ts` (1-3); el punto 4 vale para cualquier test de caracterización del repo.
+
+---
+
 ### [2026-07-13] [coder] — Vitest en el frontend + `readDataCell` extraído a `lib/rowAccess`
 
 **Contexto**: Task 1 del rediseño del chart modal. `frontend/` no tenía runner de tests unitarios (sólo Playwright E2E), y `readDataCell` vivía como función de módulo NO exportada en `ExplorerView.tsx:912`.
