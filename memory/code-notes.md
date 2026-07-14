@@ -1,3 +1,18 @@
+### [2026-07-14] [coder] — `row.data` sólo trae lo que alguien PIDIÓ: la búsqueda en bloque devuelve las métricas a `null` y el fill perezoso es su única fuente
+
+**Contexto**: bug encontrado conduciendo la app contra el backend de PRODUCCIÓN — ningún test lo pescó. `frontend/src/pages/ExplorerView.tsx` (efecto AUTO-FILL), nueva `lib/fillColumns.ts`, nueva `tests/e2e/charts-fill.spec.ts` (commits 3648584, 056e6ec).
+
+**Gotcha/Patrón**:
+1. **`row.data` NO contiene los valores de todas las columnas: contiene las que el usuario tiene VISIBLES.** El pipeline real tiene dos etapas y sólo la segunda trae datos pesados. (a) `explorerSearch` (`lib/api.ts:341-348`) manda las ~360 claves pero **strippea el prefijo `sf.`** antes del POST; el backend devuelve esas `sf.*` a `null` en las 215 filas. (b) Los valores llegan DESPUÉS, perezosamente, por el efecto AUTO-FILL → `explorerFillColumns` → `POST /api/explorer/columns/fill`, que **sí** manda las columnas con su prefijo intacto (`lib/api.ts:554`). Y ese fill construía `reqCols` **sólo desde `visibleColumns`**. Consecuencia: una métrica que no sea columna de la tabla es `null` en todas las filas, PARA SIEMPRE. Las 4 vistas nuevas del ChartModal agregan desde `row.data` → con las columnas por defecto anunciaban **"0 de 215 centros reportan individuals screened"** cuando la verdad son **81**. Regla: **cualquier feature que lea `row.data` para una clave que no sea columna visible tiene que meter esa clave en el fill** (`lib/fillColumns.ts` → `buildFillColumns`), o leerá `null` y creerá que el dato no existe.
+2. **Un fixture que regala los datos convierte el test en teatro.** Los 63 unitarios, los 118 E2E y tres revisores dieron verde sobre este bug porque TODOS los fixtures sirven filas que ya traen los valores en `row.data` (`charts.spec.ts` L22-33). Ninguno reproducía la forma del backend real. El fixture correcto (`charts-fill.spec.ts`) es un contrato: la búsqueda en bloque devuelve las claves a `null`, y el mock del fill **sólo entrega las columnas que se le piden explícitamente** — así un valor sólo puede aparecer en pantalla si el código lo pidió. Con el fixture viejo, un frontend que jamás habla con el servidor pasa igual. **Al escribir un fixture, la pregunta no es "¿tiene los datos que la vista necesita?" sino "¿puede este fixture distinguir el código correcto del roto?"**.
+3. **`extra.AssignmentsCount` viene con `0` por defecto del backend** (`salesforce_extras.py:372`, dict de defaults). No es un hueco: es un recuento de registros relacionados, siempre conocible. Su cobertura será siempre "215 de 215" — correcto, pero no lo leas como que la métrica está mejor reportada que las otras.
+
+**Por qué importa**: es el fallo más grave posible en este rediseño — la línea de cobertura existe precisamente para no mentir, y estaba mintiendo *con un número*, que es peor que el bug original (un gráfico vago). Y era invisible: sin error, sin warning, y con toda la suite en verde. El único modo de haberlo visto era conducir la app contra prod o tener un fixture con la forma del backend de verdad.
+
+**Dónde aplicar**: 1 → `pages/ExplorerView.tsx` y toda vista/feature que lea `row.data` (charts, export, "Ask Moby", agregados). 2 → **todo** fixture de `tests/e2e/` de este repo. 3 → las vistas que ofrezcan `ASSIGNMENTS` como métrica.
+
+---
+
 ### [2026-07-14] [coder] — Dos parsers de métrica que divergen A PROPÓSITO, y el E2E corre contra un `dist` PRECOMPILADO (el mutation check miente sin `npm run build`)
 
 **Contexto**: fix de negativos en el constructor genérico — `frontend/src/lib/chartDataset.ts` (`toDatasetValue`, `toPieSlices`), `chartAggregation.ts` (solo JSDoc), `components/charts/CustomView.tsx`, `tests/e2e/charts.spec.ts` (commits 7e19ee4, 9800057, d250657).
