@@ -8,10 +8,16 @@ import { SCREENED, STAGE1, STAGE2 } from "../../src/lib/chartAggregation";
  * El punto del rediseño: la mayoría de los centros NO reportan las métricas de
  * reclutamiento. Las vistas EXCLUYEN al que no reporta en vez de contarlo como
  * cero, y la línea de cobertura es lo único que impide leer mal el gráfico. Por
- * eso el fixture es deliberadamente desigual: 3 de 5 centros reportan cribados,
+ * eso el fixture es deliberadamente desigual: 4 de 6 centros reportan cribados,
  * 2 reportan Stage 1 y solo 1 reporta Stage 2. Si alguien "arregla" la
  * agregación rellenando los huecos con ceros, la cobertura deja de moverse al
  * cambiar de métrica y CHART-2 se pone rojo.
+ *
+ * Y hay DOS clases de centro que un parser descuidado confunde: Lisboa reporta
+ * un CERO de verdad (cribó a nadie y lo dijo) y Roma/Paris no reportan nada. La
+ * regla entera del rediseño es que no son lo mismo, así que el cero legítimo
+ * tiene que estar en el fixture: sin él, una sobre-corrección que tirase los
+ * ceros reales pasaría CHART-5 en verde.
  */
 const ROWS = [
   { account_id: "a1", account_name: "Centro Madrid",    country: "ES", city: "Madrid",
@@ -22,6 +28,9 @@ const ROWS = [
     data: { [SCREENED]: 40 } },
   { account_id: "a4", account_name: "Centro Roma",      country: "IT", city: "Roma",   data: {} },
   { account_id: "a5", account_name: "Centro Paris",     country: "FR", city: "Paris",  data: {} },
+  // Cribó a CERO personas y lo reportó: es un dato, no un hueco.
+  { account_id: "a6", account_name: "Centro Lisboa",    country: "PT", city: "Lisboa",
+    data: { [SCREENED]: 0 } },
 ];
 
 const COUNT_METRIC_LABEL = "Número de centros";
@@ -94,21 +103,21 @@ test.describe("Explorer — modal de gráficos", () => {
     const modal = await openChartModal(page);
     const coverage = modal.locator(S.CHART_COVERAGE);
 
-    // 3 de los 5 centros del fixture reportan cribados; los otros 2 quedan
-    // excluidos, no contados como cero.
-    await expect(coverage).toContainText("3 de 5 centros reportan");
+    // 4 de los 6 centros del fixture reportan cribados — Lisboa reporta un 0, que
+    // es reportar. Los otros 2 quedan excluidos, no contados como cero.
+    await expect(coverage).toContainText("4 de 6 centros reportan");
     await expect(coverage).toContainText("2 sin dato, excluidos");
     const screenedText = await coverage.innerText();
 
     // Stage 2 solo lo reporta 1 centro: la cobertura tiene que reflejarlo.
     await modal.locator(S.CHART_METRIC_SELECT).selectOption(STAGE2);
-    await expect(coverage).toContainText("1 de 5 centros reportan");
-    await expect(coverage).toContainText("4 sin dato, excluidos");
+    await expect(coverage).toContainText("1 de 6 centros reportan");
+    await expect(coverage).toContainText("5 sin dato, excluidos");
 
     // Y Stage 1, 2 centros. La línea se mueve con la métrica: si se quedara
-    // clavada, el usuario leería el gráfico creyendo que cubre los 5 centros.
+    // clavada, el usuario leería el gráfico creyendo que cubre los 6 centros.
     await modal.locator(S.CHART_METRIC_SELECT).selectOption(STAGE1);
-    await expect(coverage).toContainText("2 de 5 centros reportan");
+    await expect(coverage).toContainText("2 de 6 centros reportan");
     expect(await coverage.innerText()).not.toBe(screenedText);
   });
 
@@ -152,12 +161,22 @@ test.describe("Explorer — modal de gráficos", () => {
     // El pie es donde el dato ausente se ve: una porción de tamaño cero es
     // invisible pero cuenta como dato (leyenda, total, %). Si el builder volviera
     // a parsear a mano — Number(String(undefined ?? "")) === 0 — o si el pie
-    // volviera a normalizar null -> 0, aquí habría 5 porciones y 5 entradas de
-    // leyenda en vez de 3. Verificado mutando el código: con el parseo viejo esta
-    // aserción da 5.
+    // volviera a normalizar null -> 0, aquí habría 6 porciones y 6 entradas de
+    // leyenda en vez de 4. Verificado mutando el código: con el parseo viejo esta
+    // aserción da 6.
+    //
+    // Y son 4, no 3: Lisboa reporta un CERO legítimo y ES una porción (aunque su
+    // ángulo sea nulo, existe en el DOM y en la leyenda). Los dos que no reportan
+    // nada — Roma y Paris — no están. Esa es la distinción que el fixture pinea:
+    // tirar los ceros reales junto con los huecos daría 3 aquí.
     await modal.getByRole("button", { name: "Pie", exact: true }).click();
-    await expect(modal.locator(S.CHART_PIE_SECTORS)).toHaveCount(3);
-    await expect(modal.locator(S.CHART_LEGEND_ITEMS)).toHaveCount(3);
+    await expect(modal.locator(S.CHART_PIE_SECTORS)).toHaveCount(4);
+    await expect(modal.locator(S.CHART_LEGEND_ITEMS)).toHaveCount(4);
+
+    const legend = await modal.locator(S.CHART_LEGEND_ITEMS).allInnerTexts();
+    expect(legend).toContain("Centro Lisboa");   // reportó 0 → se pinta
+    expect(legend).not.toContain("Centro Roma"); // no reportó → hueco, no porción
+    expect(legend).not.toContain("Centro Paris");
 
     // Y la nota dice justo eso: hueco, no cero. (El aviso viejo prometía ceros;
     // dejarlo puesto sería mentir en la otra dirección.)
