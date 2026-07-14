@@ -257,4 +257,115 @@ test.describe("Explorer — modal de gráficos", () => {
     const legend = await modal.locator(S.CHART_LEGEND_ITEMS).allInnerTexts();
     expect(legend).toEqual(["Centro Milano"]);
   });
+
+  /**
+   * CHART-10 — el gráfico de cada pestaña PINTA, no solo existe.
+   *
+   * La trampa que dejó pasar el bug de las pestañas en blanco: los `<g
+   * class="recharts-bar-rectangle">` SIEMPRE están en el DOM (uno por dato),
+   * estén pintados o no. Contarlos da verde mientras el usuario mira un panel
+   * vacío. La barra la pinta un `<path>` HIJO de ese grupo, y Recharts NO lo
+   * renderiza cuando su alto (o ancho) es 0 — que es justo el estado en el que
+   * se queda una animación de entrada congelada en t=0.
+   *
+   * Por eso esto mide GEOMETRÍA (getBBox del hijo), no presencia. Y por eso
+   * `positiveMarks` es el número de barras con valor > 0 del fixture, no el
+   * número de grupos: el CERO legítimo de Lisboa no dibuja barra ni con la
+   * animación sana. Confundir ambos números convertiría el test en teatro en la
+   * otra dirección.
+   */
+  type BarGeometry = { groups: number; painted: number; heights: number[]; widths: number[] };
+
+  async function readBarGeometry(page: Page): Promise<BarGeometry> {
+    return page.evaluate(() => {
+      const groups = Array.from(document.querySelectorAll(".recharts-bar-rectangle"));
+      const boxes = groups
+        .map((g) => g.querySelector<SVGGraphicsElement>("path, rect"))
+        .filter((shape): shape is SVGGraphicsElement => shape !== null)
+        .map((shape) => shape.getBBox())
+        .filter((box) => box.width > 0 && box.height > 0);
+      return {
+        groups: groups.length,
+        painted: boxes.length,
+        heights: boxes.map((b) => b.height),
+        widths: boxes.map((b) => b.width),
+      };
+    });
+  }
+
+  /** Cada pestaña, con las barras de valor > 0 que su fixture debe pintar. */
+  const PAINTED_BARS: Array<{ tab: string; label: string; positiveMarks: number }> = [
+    // ES=160, IT=40 y PT=0 (el cero de Lisboa no dibuja barra).
+    { tab: S.CHART_TAB_COUNTRIES, label: "Países", positiveMarks: 2 },
+    // Madrid 100, Barcelona 60, Milano 40 (Lisboa 0).
+    { tab: S.CHART_TAB_RANKING, label: "Ranking", positiveMarks: 3 },
+    { tab: S.CHART_TAB_DISTRIBUTION, label: "Distribución", positiveMarks: 3 },
+    // Solo Madrid reporta las tres etapas: 100 → 50 → 20.
+    { tab: S.CHART_TAB_FUNNEL, label: "Embudo", positiveMarks: 3 },
+    // Constructor fila-a-fila: una barra por centro que reporta cribados.
+    { tab: S.CHART_TAB_CUSTOM, label: "Personalizado", positiveMarks: 3 },
+  ];
+
+  test("CHART-10: las barras de las cinco pestañas se pintan con geometría real", async ({ page }) => {
+    const modal = await openChartModal(page);
+
+    for (const { tab, label, positiveMarks } of PAINTED_BARS) {
+      await modal.locator(tab).click();
+      await expect(modal.locator(tab)).toHaveAttribute("aria-selected", "true");
+
+      // `poll` y no una lectura seca: una animación de entrada SANA tarda ~1.5 s
+      // en llegar a su tamaño final. Si esto falla es porque las barras nunca
+      // aparecen, no porque el test corriese demasiado pronto.
+      await expect
+        .poll(async () => (await readBarGeometry(page)).painted, {
+          message: `pestaña ${label}: barras con geometría real`,
+          timeout: 10_000,
+        })
+        .toBe(positiveMarks);
+    }
+  });
+
+  test("CHART-10b: volver a Países repinta sus barras, y a escala", async ({ page }) => {
+    const modal = await openChartModal(page);
+
+    // La ida y vuelta es el gesto que destapó el bug: Países se pintaba al abrir
+    // y se quedaba en blanco al volver de otra pestaña.
+    await modal.locator(S.CHART_TAB_DISTRIBUTION).click();
+    await modal.locator(S.CHART_TAB_COUNTRIES).click();
+    await expect(modal.locator(S.CHART_TAB_COUNTRIES)).toHaveAttribute("aria-selected", "true");
+
+    await expect
+      .poll(async () => (await readBarGeometry(page)).painted, { timeout: 10_000 })
+      .toBe(2);
+
+    // No basta con que haya barras: tienen que medir lo que el dato dice. ES vale
+    // 160 y IT 40, así que la barra de ES mide 4x la de IT. Un montaje con el
+    // contenedor a 0x0 podría devolver marcas no vacías pero a una escala que no
+    // es la del dato — esta razón lo pilla.
+    const { heights, widths } = await readBarGeometry(page);
+    const [tallest, shortest] = [...heights].sort((a, b) => b - a);
+    expect(tallest / shortest).toBeGreaterThan(3.6);
+    expect(tallest / shortest).toBeLessThan(4.4);
+    // Y el gráfico ocupa el ancho del modal, no un contenedor colapsado.
+    expect(Math.min(...widths)).toBeGreaterThan(10);
+  });
+
+  test("CHART-10c: la línea acumulada del Pareto se dibuja entera", async ({ page }) => {
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_DISTRIBUTION).click();
+
+    // El síntoma exacto del bug en la línea: el `<path>` existe, con su `d` bien
+    // calculado, pero `stroke-dasharray: 0px, <largo>` — cero píxeles dibujados.
+    // Aseverar que el path existe habría dado verde con la línea invisible.
+    // Verde = "none" (sin animación) o un primer tramo con largo real.
+    const isDrawn = async (): Promise<boolean> => {
+      const dashArray = await modal
+        .locator(".recharts-line-curve")
+        .first()
+        .evaluate((el) => window.getComputedStyle(el).strokeDasharray);
+      return dashArray === "none" || Number.parseFloat(dashArray) > 0;
+    };
+
+    await expect.poll(isDrawn, { timeout: 10_000 }).toBe(true);
+  });
 });
