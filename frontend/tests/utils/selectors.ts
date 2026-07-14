@@ -54,6 +54,7 @@ export const S = {
   // Explorer toolbar buttons
   EXPLORER_BTN_EXPORT_TSV:  '[data-testid="explorer-btn-export-tsv"]',
   EXPLORER_BTN_CHART:       '[data-testid="explorer-btn-chart"]',
+  EXPLORER_BTN_ASK_MOBY:    '[data-testid="explorer-btn-ask-moby"]',
 
   // Explorer filter chips
   EXPLORER_FILTER_CHIP:     '[data-testid="explorer-filter-chip"]',

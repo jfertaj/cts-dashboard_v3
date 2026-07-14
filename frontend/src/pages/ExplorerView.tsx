@@ -3085,21 +3085,26 @@ showPresets={false}
           </button>
           {/* Ask Moby button */}
           <button
+            data-testid="explorer-btn-ask-moby"
             className="rounded-md border px-2.5 py-1.5 hover:bg-indigo-50 flex items-center gap-1.5"
             onClick={() => {
-              const activeRows = nearbyActive ? fullNearbyRows : fullRows;
+              // `chartRows` = table.getFilteredRowModel() → lo mismo que ya ven el
+              // contador de resultados, el export TSV y el modal de gráficos. Antes
+              // esto usaba `fullRows`/`fullNearbyRows` (el array de respaldo SIN los
+              // filtros de cliente): Moby razonaba sobre centros que el usuario
+              // acababa de filtrar fuera y no podía ver.
               const labelMap: Record<string, string> = {};
               (fieldDefs as any[]).forEach((f: any) => { if (f?.key) labelMap[f.key] = f.label || f.key; });
               const contextTable = {
                 columns: visibleColumns.map(k => ({ key: k, label: labelMap[k] || k })),
-                rows: activeRows.slice(0, 500),
+                rows: chartRows.slice(0, 500),
               };
               try {
                 sessionStorage.setItem("moby_last_table_v1", JSON.stringify(contextTable));
                 sessionStorage.setItem("moby_last_filters_v1", JSON.stringify(filters));
               } catch {}
               window.dispatchEvent(new CustomEvent("cts:explorer:ask-ai", {
-                detail: { table: contextTable, filters, rowCount: activeRows.length },
+                detail: { table: contextTable, filters, rowCount: chartRows.length },
               }));
               window.history.pushState({}, "", `${window.location.origin}/chat`);
               window.dispatchEvent(new Event("popstate"));
