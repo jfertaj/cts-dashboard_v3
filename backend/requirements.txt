@@ -1,17 +1,31 @@
+# Intención: QUÉ usa el backend. Las versiones exactas viven en requirements.lock,
+# que es de donde instala el Dockerfile — este fichero NO se instala en la imagen.
+#
+# Para añadir o subir una dependencia: tócala aquí y regenera el lock
+# (ver la cabecera de requirements.lock).
+
+# --- Web ---
 fastapi
 uvicorn[standard]
+python-multipart
+itsdangerous
+
+# --- Base de datos ---
 sqlalchemy>=2.0
 psycopg[binary]
+alembic
+
+# --- Datos ---
 pydantic>=2
 pandas
 openpyxl
-python-multipart
-alembic
 pycountry
-requests
+
+# --- Integraciones ---
 simple-salesforce
+requests
 httpx
-itsdangerous
+
+# --- LLM (Moby) ---
 openai>=1.35.0
 anthropic>=0.40.0
-# typing  <-- sobra, quítalo (es parte de la stdlib en Python 3.11)

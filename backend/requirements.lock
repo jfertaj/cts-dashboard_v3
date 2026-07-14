@@ -1,0 +1,83 @@
+# Versiones EXACTAS del backend — no editar a mano.
+#
+# Foto de `pip freeze` de la imagen cts-dashboard-backend:20260714-135031, que es
+# la que corre en producción y está verificada contra Salesforce (búsqueda 200,
+# relleno 200, 81/215 centros con cribados).
+#
+# Por qué existe este fichero: requirements.txt no fijaba ninguna versión, así que
+# cada `docker build` se traía lo último de ese día. El 2026-07-14 eso trajo una
+# FastAPI más nueva que la de junio, el backend dejó de arrancar (_IncludedRouter
+# sin .path) y ECS revirtió el deploy entero. La misma commit construida en dos
+# días distintos daba imágenes distintas.
+#
+# Cómo subir una dependencia (a propósito, no por accidente):
+#   1. Cambia su versión aquí.
+#   2. docker buildx build --platform linux/amd64 -f backend/Dockerfile.backend ./backend
+#   3. Prueba el arranque y despliega. Si algo se rompe, sabes exactamente qué cambió.
+#
+# Para regenerar el lock entero desde una imagen que ya funciona:
+#   docker run --rm --entrypoint sh <imagen> -c "pip freeze" \
+#     | grep -viE "^(pip|setuptools|wheel)==" | sort
+#
+alembic==1.18.5
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anthropic==0.116.0
+anyio==4.14.2
+attrs==26.1.0
+certifi==2026.6.17
+cffi==2.1.0
+charset-normalizer==3.4.9
+click==8.4.2
+cryptography==49.0.0
+distro==1.9.0
+docstring_parser==0.18.0
+et_xmlfile==2.0.0
+fastapi==0.139.0
+greenlet==3.5.3
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.18
+isodate==0.7.2
+itsdangerous==2.2.0
+jiter==0.16.0
+lxml==6.1.1
+Mako==1.3.12
+MarkupSafe==3.0.3
+more-itertools==11.1.0
+numpy==2.4.6
+openai==2.45.0
+openpyxl==3.1.5
+packaging==26.2
+pandas==3.0.3
+platformdirs==4.10.0
+psycopg-binary==3.3.4
+psycopg==3.3.4
+pycountry==26.2.16
+pycparser==3.0
+pydantic_core==2.46.4
+pydantic==2.13.4
+PyJWT==2.13.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+python-multipart==0.0.32
+PyYAML==6.0.3
+requests-file==3.0.1
+requests-toolbelt==1.0.0
+requests==2.34.2
+simple-salesforce==1.12.10
+six==1.17.0
+sniffio==1.3.1
+SQLAlchemy==2.0.51
+starlette==1.3.1
+tqdm==4.68.4
+typing_extensions==4.16.0
+typing-inspection==0.4.2
+urllib3==2.7.0
+uvicorn==0.51.0
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==16.1
+zeep==4.3.3

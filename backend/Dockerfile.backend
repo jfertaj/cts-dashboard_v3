@@ -10,10 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Dependencias de Python
-COPY requirements.txt .
+# Dependencias de Python — SIEMPRE desde el lock, nunca desde requirements.txt.
+# requirements.txt declara la intención (qué usamos); requirements.lock declara la
+# realidad (con qué versiones exactas se construye). Instalar del .txt hacía que la
+# misma commit diera imágenes distintas según el día — y el 2026-07-14 eso tumbó un
+# deploy entero: llegó una FastAPI nueva y el backend dejó de arrancar.
+COPY requirements.lock .
 RUN python -m pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.lock
 
 # Código de la app
 COPY ./app ./app
