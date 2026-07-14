@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import html2canvas from "html2canvas";
 import { toPieSlices, PIE_TOTAL_KEY } from "../../lib/chartDataset";
+import { rowCount } from "../../lib/chartText";
 import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 export type ChartType = "bar" | "line" | "pie";
@@ -100,7 +101,9 @@ export default function CustomView({
   // sobra: `pieEmptyMessage` ya lo dice y repetirlo es ruido.
   const negativeNote =
     type === "pie" && negativeExcluded > 0 && plotData.length > 0
-      ? `${negativeExcluded} row(s) with a negative value are left out of the pie: a negative slice has no geometry. Switch to Bar or Line to see them.`
+      ? `${rowCount(negativeExcluded)} with a negative value ${
+          negativeExcluded === 1 ? "is" : "are"
+        } left out of the pie: a negative slice has no geometry. Switch to Bar or Line to see them.`
       : null;
 
   const Label = ({ children }: { children: React.ReactNode }) => (

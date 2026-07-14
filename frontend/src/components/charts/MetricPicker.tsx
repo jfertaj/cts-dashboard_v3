@@ -3,6 +3,7 @@ import {
   COUNT_METRIC, SCREENED, STAGE1, STAGE2, ASSIGNMENTS,
   type Coverage,
 } from "../../lib/chartAggregation";
+import { siteCount } from "../../lib/chartText";
 
 export type MetricOption = { key: string; label: string };
 
@@ -53,7 +54,7 @@ export default function MetricPicker({
           // Contar centros no es una métrica que un centro "reporte": la cobertura
           // siempre sería 100% y decir "215 of 215 sites report number of sites"
           // es cierto y absurdo. Aquí el dato útil es simplemente cuántos hay.
-          ? `${coverage.total} sites`
+          ? siteCount(coverage.total)
           : `${coverage.withData} of ${coverage.total} sites report ${label.toLowerCase()}${
               partial ? ` · ${coverage.missing} with no data, excluded` : ""
             }`}

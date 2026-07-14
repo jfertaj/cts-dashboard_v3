@@ -2416,10 +2416,11 @@ export default function ExplorerView() {
   // Abre el modal con defaults razonables
   const openChartWizard = useCallback(() => {
     const currentRows = chartRows;
-    if (!currentRows?.length) {
-      alert("No hay datos para graficar.");
-      return;
-    }
+    // El único caller es el botón "📊 Chart", que ya va disabled con 0 filas: este
+    // guard es inalcanzable HOY y por eso no avisa a nadie (el alert que había aquí
+    // era español en una UI inglesa y no podía renderizarse jamás). Se queda como
+    // red de seguridad por si mañana entra otro caller sin el disabled.
+    if (!currentRows?.length) return;
 
     // X por defecto: Account Name si existe, si no country/city
     const defaultX =
