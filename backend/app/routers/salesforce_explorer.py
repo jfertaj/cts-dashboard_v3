@@ -879,6 +879,34 @@ def _exists_on_opportunity(field_name: str) -> bool:
 def _exists_on_account(field_name: str) -> bool:
     return field_name in (_ACC_FIELD_SET or set())
 
+# Namespaces que sirve su propia rama del row builder (acc_map, qual JSONB, extras
+# batch, site DB): no son campos de Opportunity y jamás deben llegar al SELECT.
+_NON_OPP_COL_PREFIXES = ("Account.", "qual.", "extra.", "site.")
+
+def _column_key_to_sf_field(key: str) -> Optional[str]:
+    """Resuelve una columna pedida al campo SF que hay que meter en el SELECT.
+
+    Acepta las DOS formas con las que llegan las columnas de Opportunity:
+      - prefijada: "sf.C_Foo__c"  → la que manda POST /api/explorer/columns/fill
+      - pelada:    "C_Foo__c"     → la que manda POST /api/explorer/search, porque
+                                    el frontend quita el "sf." antes del POST
+                                    (frontend/src/lib/api.ts). Sin esto ningún campo
+                                    sf.* entraba en el SOQL y la búsqueda en bloque
+                                    devolvía las ~360 claves a null.
+
+    La forma pelada se valida contra ALLOWED_FIELDS (el catálogo curado que alimenta
+    /api/explorer/fields — justo lo que el frontend puede pedir). No basta con
+    _exists_on_opportunity(): en modo permisivo dice True a todo, y una columna virtual
+    del frontend ("MemberName") acabaría en el SELECT reventando el SOQL con INVALID_FIELD.
+
+    Devuelve None si la clave no es un campo de Opportunity/Account seleccionable.
+    """
+    if key.startswith("sf."):
+        return key[3:]
+    if key.startswith(_NON_OPP_COL_PREFIXES):
+        return None
+    return key if key in ALLOWED_FIELDS else None
+
 # ======================= WHERE BUILDER (SOQL) =======================
 # _OP_SYNONYM, _OP_MAP, _flatten_filter_rules, _filter_group_to_expr,
 # _is_logic_expr, _eval_logic_expr_be, _norm_label_to_key — moved to filter_engine.py
@@ -2649,9 +2677,9 @@ async def explorer_search(
             opp_fields.add(r.field)
 
     for k in requested_cols:
-        if not k.startswith("sf."):
+        fld = _column_key_to_sf_field(k)
+        if fld is None:
             continue
-        fld = k[3:]
         if _exists_on_opportunity(fld):
             opp_fields.add(fld)
         elif _exists_on_account(fld):
@@ -3212,20 +3240,20 @@ async def explorer_search(
                 data[k] = _qual_get(qual_data, k[5:])
                 continue
 
-            # sf.*
-            if k.startswith("sf."):
-                fld = k[3:]
+            # extra.*
+            if k.startswith("extra."):
+                data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
+                continue
+
+            # sf.* (prefijada) o campo de Opportunity pelado (el frontend quita el "sf.")
+            fld = _column_key_to_sf_field(k)
+            if fld is not None:
                 if _exists_on_opportunity(fld):
                     data[k] = o.get(fld)
                 elif _exists_on_account(fld):
                     data[k] = (o.get("Account") or {}).get(fld)
                 else:
                     data[k] = None
-                continue
-
-            # extra.*
-            if k.startswith("extra."):
-                data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                 continue
 
             data[k] = o.get(k)
@@ -3254,7 +3282,9 @@ async def explorer_search(
     # 8) Oportunidad “proxy” por Account para filas de Assignment
     # ===========================================================
     requested_sf_fields: Set[str] = {
-        k[3:] for k in requested_cols if k.startswith("sf.") and _exists_on_opportunity(k[3:])
+        fld
+        for fld in (_column_key_to_sf_field(k) for k in requested_cols)
+        if fld is not None and _exists_on_opportunity(fld)
     }
     sf_proxy_by_acc: Dict[str, Dict[str, Any]] = {}
     if requested_sf_fields and assignments_by_opp:
@@ -3337,8 +3367,8 @@ async def explorer_search(
                     if k.startswith("extra."):
                         data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                         continue
-                    if k.startswith("sf."):
-                        fld = k[3:]
+                    fld = _column_key_to_sf_field(k)
+                    if fld is not None:
                         # Mostrar el nombre de la Activity cuando se pide [sf] Opportunity Name
                         if fld == "Name":
                             data[k] = a.get("opportunity_name")
@@ -3406,8 +3436,8 @@ async def explorer_search(
                     if k.startswith("extra."):
                         data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                         continue
-                    if k.startswith("sf."):
-                        fld = k[3:]
+                    fld = _column_key_to_sf_field(k)
+                    if fld is not None:
                         if fld == "Name":
                             # usa el primer activity name como nombre de Opp
                             data[k] = (activities_names_by_acc.get(str(aid)) or [None])[0]

@@ -434,3 +434,71 @@ class TestSafeFieldAccountValidation:
         sfx._ACC_FIELD_SET = set()
         sfx._DESCRIBE_PERMISSIVE = True
         assert sfx._safe_field("Account.Whatever__c") == "Account.Whatever__c"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _column_key_to_sf_field — SELECT builder de /api/explorer/search (bug 2026-07-14)
+#
+# El frontend QUITA el prefijo "sf." antes del POST /search (lib/api.ts:347), pero
+# el constructor del SELECT sólo aceptaba claves con "sf.". Resultado: ningún campo
+# sf.* de Opportunity entraba en el SOQL y las ~360 claves volvían a null.
+# El resolvedor debe aceptar AMBAS formas y seguir dejando que Account./qual./
+# extra./site.* los sirva su propia rama del row builder.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_SCREENED = "C_Number_of_Individuals_screened_intotal__c"
+
+
+class TestColumnKeyToSfField:
+    def setup_method(self):
+        self._orig_opp = sfx._OPP_FIELD_SET
+        self._orig_acc = sfx._ACC_FIELD_SET
+        self._orig_perm = sfx._DESCRIBE_PERMISSIVE
+        sfx._OPP_FIELD_SET = {"Id", "Name", "AccountId", _SCREENED}
+        sfx._ACC_FIELD_SET = {"Id", "Name", "ShippingCountry"}
+        sfx._DESCRIBE_PERMISSIVE = False
+
+    def teardown_method(self):
+        sfx._OPP_FIELD_SET = self._orig_opp
+        sfx._ACC_FIELD_SET = self._orig_acc
+        sfx._DESCRIBE_PERMISSIVE = self._orig_perm
+
+    # -- forma prefijada (la que manda /columns/fill) --
+    def test_prefixed_key_resolves_to_bare_field(self):
+        assert sfx._column_key_to_sf_field(f"sf.{_SCREENED}") == _SCREENED
+
+    # -- forma pelada (la que manda /search) --
+    def test_bare_key_on_opportunity_resolves(self):
+        assert sfx._column_key_to_sf_field(_SCREENED) == _SCREENED
+
+    def test_bare_key_not_in_catalog_is_ignored(self):
+        # "MemberName" es una columna virtual del frontend (sf.MemberName), no un
+        # campo de Opportunity: si entra en el SELECT, el SOQL revienta con INVALID_FIELD.
+        assert sfx._column_key_to_sf_field("MemberName") is None
+
+    def test_bare_unknown_key_is_ignored_and_does_not_raise(self):
+        assert sfx._column_key_to_sf_field("Totally_Made_Up__c") is None
+
+    def test_bare_key_rejected_even_in_permissive_mode(self):
+        # En modo permisivo _exists_on_opportunity() dice True a todo; el gate del
+        # catálogo curado es lo único que impide que una clave basura llegue al SOQL.
+        sfx._DESCRIBE_PERMISSIVE = True
+        assert sfx._column_key_to_sf_field("MemberName") is None
+
+    # -- las otras familias las sirve su propia rama: nunca van al SELECT --
+    def test_account_key_is_not_an_opportunity_field(self):
+        # Es lo que produce el strip de "sf.Account.Name" → lo sirve acc_map.
+        assert sfx._column_key_to_sf_field("Account.Name") is None
+
+    def test_qual_key_is_not_an_opportunity_field(self):
+        assert sfx._column_key_to_sf_field("qual.2_2__personal_conversation") is None
+
+    def test_extra_key_is_not_an_opportunity_field(self):
+        assert sfx._column_key_to_sf_field("extra.AssignmentsNames") is None
+
+    def test_site_key_is_not_an_opportunity_field(self):
+        assert sfx._column_key_to_sf_field("site.country") is None
+
+    # -- el prefijo "sf." sigue mandando sobre el resto (comportamiento de hoy) --
+    def test_prefixed_account_key_keeps_its_relationship_form(self):
+        assert sfx._column_key_to_sf_field("sf.Account.Name") == "Account.Name"
