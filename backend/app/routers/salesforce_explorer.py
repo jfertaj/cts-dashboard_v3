@@ -890,32 +890,40 @@ def _column_key_to_sf_field(key: str) -> Optional[str]:
                                     sf.* entraba en el SOQL y la búsqueda en bloque
                                     devolvía las ~360 claves a null.
 
-    La forma pelada tiene que pasar DOS filtros, y hacen falta los dos:
+    Sea cual sea la puerta por la que entre, el NOMBRE RESUELTO tiene que pasar el
+    filtro del punto: un campo con "." es un path de relación (Account.Name,
+    Assignment.Name, ...) que sirve otra rama del row builder (la SOQL aparte contra
+    Account, el proxy de Assignments, el JSONB, la site DB), NUNCA un campo plano de
+    Opportunity. La regla se aplica DESPUÉS de quitar el prefijo justamente porque
+    "sf.Assignment.Name" y "Assignment.Name" son el mismo path por dos puertas: cuando
+    el filtro vivía sólo en la rama pelada, la prefijada devolvía key[3:] a pelo y salía
+    antes de llegar a él (y /columns/fill manda las claves CON prefijo, así que la puerta
+    de atrás era la que usaba el frontend).
 
-      1. Sin puntos. Una clave pelada con "." es un path de relación (Account.Name,
-         Assignment.Name, qual.x, extra.x, site.x) que sirve otra rama del row builder
-         (acc_map, el proxy de Assignments, el JSONB, la site DB), NUNCA un campo plano
-         de Opportunity.
-      2. En ALLOWED_FIELDS, el catálogo curado que alimenta /api/explorer/fields.
+    Además, la clave pelada tiene que estar en ALLOWED_FIELDS, el catálogo curado que
+    alimenta /api/explorer/fields.
 
-    El filtro 1 NO es redundante con el 2: ALLOWED_FIELDS es un catálogo de COLUMNAS,
-    no de campos de Opportunity — contiene 24 "Account.*" y 9 "Assignment.*". Y el filtro
-    2 no puede apoyarse en _exists_on_opportunity(), que en modo permisivo (describe caído
-    al arrancar, y es STICKY para toda la vida del proceso) dice True a todo. Sin el
-    filtro 1, "Assignment.Name" pasaba el catálogo + el permisivo y aterrizaba en
+    El filtro del punto NO es redundante con el del catálogo: ALLOWED_FIELDS es un
+    catálogo de COLUMNAS, no de campos de Opportunity — contiene 24 "Account.*" y 9
+    "Assignment.*". Y no puede apoyarse en _exists_on_opportunity(), que en modo permisivo
+    (describe caído al arrancar, y es STICKY para toda la vida del proceso) dice True a
+    todo. Sin él, "Assignment.Name" pasaba el catálogo + el permisivo y aterrizaba en
     "SELECT ..., Assignment.Name, ... FROM Opportunity" → INVALID_FIELD → 500 en TODAS
     las búsquedas del Explorer.
 
     Las 80 claves peladas de ALLOWED_FIELDS son campos reales de Opportunity y ninguna
-    lleva punto, así que el filtro 1 no descarta nada legítimo (lo pinea un test).
+    lleva punto, así que el filtro no descarta nada legítimo (lo pinean dos tests, uno
+    por puerta).
 
     Devuelve None si la clave no es un campo de Opportunity seleccionable.
     """
     if key.startswith("sf."):
-        return key[3:]
-    if "." in key:
+        field = key[3:]
+    elif key in ALLOWED_FIELDS:
+        field = key
+    else:
         return None
-    return key if key in ALLOWED_FIELDS else None
+    return None if "." in field else field
 
 # ======================= WHERE BUILDER (SOQL) =======================
 # _OP_SYNONYM, _OP_MAP, _flatten_filter_rules, _filter_group_to_expr,
@@ -3842,7 +3850,12 @@ async def explorer_fill_columns(
     for k in requested_cols:
         if not k.startswith("sf."):
             continue
-        fld = k[3:]
+        # Vía _column_key_to_sf_field, no k[3:] a pelo: este endpoint es EL que recibe
+        # las claves con prefijo (explorerFillColumns las manda verbatim), así que un
+        # "sf.Assignment.Name" entraba aquí como "Assignment.Name" → SELECT → INVALID_FIELD.
+        fld = _column_key_to_sf_field(k)
+        if fld is None:
+            continue
         if _exists_on_opportunity(fld):
             opp_fields.add(fld)
         elif _exists_on_account(fld):
@@ -3850,7 +3863,7 @@ async def explorer_fill_columns(
     if acc_fields:
         acc_fields.update({"Id","Name"})  # mínimos de relación
 
-    opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f) or f.startswith("Account.")}
+    opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     select_parts = sorted(opp_fields_valid) + [f"Account.{f}" for f in sorted(acc_fields)]
     select_fields = ", ".join(select_parts)
 
@@ -4716,18 +4729,14 @@ async def explorer_search_within_drive_km(
         if _exists_on_opportunity(r.field):
             opp_fields.add(r.field)
 
-    # Columnas pedidas: Opportunity vs Account
+    # Columnas pedidas: sólo campos planos de Opportunity. La familia Account.* NO se
+    # selecciona aquí — la sirve una SOQL aparte contra Account (_build_account_map /
+    # _fetch_account_extras). Antes esto hacía k[3:] a pelo y se saltaba el filtro del
+    # punto, así que "sf.Assignment.Name" entraba en el SELECT en modo permisivo.
     for k in requested_cols:
-        if not k.startswith("sf."):
-            continue
-        raw = k[3:]
-        if raw.startswith("Account."):
-            inner = raw.split(".", 1)[1]
-            if _exists_on_account(inner):
-                opp_fields.add(f"Account.{inner}")
-        else:
-            if _exists_on_opportunity(raw):
-                opp_fields.add(raw)
+        fld = _column_key_to_sf_field(k) if k.startswith("sf.") else None
+        if fld is not None and _exists_on_opportunity(fld):
+            opp_fields.add(fld)
 
     opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     if (set(opp_fields) - opp_fields_valid):
@@ -5430,14 +5439,11 @@ async def explorer_search_nearby_multi(
     for r in sf_rules:
         if r.field.startswith("Account."): continue
         if _exists_on_opportunity(r.field): opp_fields.add(r.field)
+    # Igual que en /search/within-drive-km: sólo campos planos de Opportunity, vía el
+    # helper. Account.* lo sirve _build_account_map/_fetch_account_extras, no este SELECT.
     for k in requested_cols:
-        if not k.startswith("sf."): continue
-        raw = k[3:]
-        if raw.startswith("Account."):
-            inner = raw.split(".", 1)[1]
-            if _exists_on_account(inner): opp_fields.add(f"Account.{inner}")
-        else:
-            if _exists_on_opportunity(raw): opp_fields.add(raw)
+        fld = _column_key_to_sf_field(k) if k.startswith("sf.") else None
+        if fld is not None and _exists_on_opportunity(fld): opp_fields.add(fld)
 
     opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     select_fields = ", ".join(sorted(opp_fields_valid))

@@ -531,9 +531,64 @@ class TestColumnKeyToSfField:
     def test_extra_key_is_not_an_opportunity_field(self):
         assert sfx._column_key_to_sf_field("extra.AssignmentsNames") is None
 
+    # -- LA SEGUNDA PUERTA: la misma clave, pero PREFIJADA ---------------------
+    #
+    # La regla del punto vivía sólo en la rama de la clave pelada. La rama "sf."
+    # devolvía key[3:] a pelo y salía de la función ANTES de llegar a ella, así que
+    # "sf.Assignment.Name" se resolvía a "Assignment.Name" sin pasar por ningún filtro.
+    #
+    # Y es alcanzable: explorerFillColumns (frontend/src/lib/api.ts:554) manda las
+    # claves VERBATIM, con el prefijo puesto — al revés que explorerSearch, que lo quita.
+    # Un usuario que añade una columna Assignment.* a la tabla mete un path de relación
+    # prefijado directamente en el request de fill.
+    def test_prefixed_assignment_key_rejected_in_permissive_mode(self):
+        sfx._DESCRIBE_PERMISSIVE = True
+        assert sfx._exists_on_opportunity("Assignment.Name") is True  # permisivo: True a todo
+        assert sfx._column_key_to_sf_field("sf.Assignment.Name") is None
+
+    def test_every_dotted_allowed_field_is_rejected_as_prefixed_key(self):
+        # Mismo barrido que la clave pelada, por la otra puerta. Sale del catálogo,
+        # no de una lista escrita a mano: si mañana entra un "Contact.X" en
+        # ALLOWED_FIELDS, este test lo cubre solo.
+        sfx._DESCRIBE_PERMISSIVE = True
+        dotted = sorted(k for k in sfx.ALLOWED_FIELDS if "." in k)
+        assert len(dotted) == 33, f"cambió el catálogo: {len(dotted)} claves con punto"
+        leaked = [k for k in dotted if sfx._column_key_to_sf_field(f"sf.{k}") is not None]
+        assert leaked == [], f"claves prefijadas que se cuelan en el SELECT: {leaked}"
+
+    def test_no_legitimate_prefixed_opportunity_field_is_rejected(self):
+        # La otra cara, por la puerta prefijada: "sf.C_Foo__c" → "C_Foo__c" SIEMPRE.
+        sfx._DESCRIBE_PERMISSIVE = True
+        bare = sorted(k for k in sfx.ALLOWED_FIELDS if "." not in k)
+        assert len(bare) == 80
+        dropped = [k for k in bare if sfx._column_key_to_sf_field(f"sf.{k}") != k]
+        assert dropped == [], f"campos legítimos que dejaron de entrar en el SELECT: {dropped}"
+
+    def test_prefixed_account_key_is_not_an_opportunity_field(self):
+        # "sf.Account.Name" NO se selecciona sobre Opportunity: la familia Account.*
+        # la sirve una SOQL aparte contra Account (_build_account_map /
+        # _fetch_account_extras), nunca el Account anidado del registro de Opportunity.
+        sfx._DESCRIBE_PERMISSIVE = True
+        assert sfx._column_key_to_sf_field("sf.Account.Name") is None
+
     def test_site_key_is_not_an_opportunity_field(self):
         assert sfx._column_key_to_sf_field("site.country") is None
 
-    # -- el prefijo "sf." sigue mandando sobre el resto (comportamiento de hoy) --
-    def test_prefixed_account_key_keeps_its_relationship_form(self):
-        assert sfx._column_key_to_sf_field("sf.Account.Name") == "Account.Name"
+    # ~~test_prefixed_account_key_keeps_its_relationship_form~~ — OBSOLETO (2026-07-14).
+    # Pineaba "sf.Account.Name" → "Account.Name" como "comportamiento de hoy". Ese
+    # comportamiento ERA el agujero: la rama prefijada salía antes del filtro del punto.
+    # Lo sustituye test_prefixed_account_key_is_not_an_opportunity_field (arriba), y la
+    # equivalencia de la ANTIGUA salida con None la pinea el test de aquí abajo.
+
+    def test_account_relationship_path_reaches_no_opportunity_select_anyway(self):
+        # POR QUÉ rechazar "sf.Account.Name" no cambia nada: la salida vieja
+        # ("Account.Name") ya no pasaba NINGUNO de los dos gates de los constructores del
+        # SELECT en modo normal — _OPP_FIELD_SET y _ACC_FIELD_SET vienen del describe() y
+        # guardan nombres PELADOS ("Name"), nunca el path ("Account.Name"). Así que se caía
+        # igual, sólo que más tarde. Rechazarlo antes es el mismo resultado, byte a byte.
+        # (En modo permisivo sí se colaba en el SELECT — y ahí es donde hacía daño.)
+        sfx._DESCRIBE_PERMISSIVE = False
+        sfx._OPP_FIELD_SET = {"Id", "Name", "AccountId", _SCREENED}
+        sfx._ACC_FIELD_SET = {"Id", "Name", "ShippingCountry"}
+        assert sfx._exists_on_opportunity("Account.Name") is False
+        assert sfx._exists_on_account("Account.Name") is False
