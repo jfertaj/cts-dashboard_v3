@@ -395,3 +395,29 @@ Y lo importante: **arreglar el dato rompió el filtro que dependía del bug**. M
 **Por qué importa**: (1) "ausente" y "cero" son cosas distintas aguas abajo (`readDataCell` → `toMetricValue` → `coverageFor`: el null se EXCLUYE y se anuncia como "no reportó"), pero hay código que se aprovechó de la confusión para significar "no tiene ninguno". Antes de convertir un ausente en 0, **grepea quién filtra por `is_empty` sobre esa clave**. (2) El defaulting sólo puede aplicarse a las cuentas que se PREGUNTARON (`for aid in account_ids`): rellenar un 0 en una cuenta que nunca se consultó sería inventarse un dato. (3) Un `ImportError` en el test bloquea la colección entera y te deja sin el rojo de la aserción que te importa — saca el rojo del acoplamiento con una llamada directa al evaluador viejo.
 
 **Dónde aplicar**: cualquier clave `extra.*` que sea un COUNT() de registros relacionados. Si le pones 0 por defecto en `salesforce_extras_batch.py`, mételo en `filter_engine._COUNT_EXTRA_FIELDS` en el mismo commit (hay un comentario en cada punta apuntando a la otra).
+
+### [2026-07-14] [coder] — La misma regla, dos puertas: un guard que vive en UNA rama del `if` no es un guard, y `/columns/fill` era la puerta de atrás
+
+**Contexto**: `backend/app/routers/salesforce_explorer.py#_column_key_to_sf_field` (~:914). P1 del review de Codex en GitHub sobre el PR #12, justo encima del fix de la clave pelada con punto (a1bfeb2).
+
+**Gotcha/Patrón**: el fix anterior puso la regla del punto **dentro de la rama de la clave pelada**. La rama prefijada salía antes:
+
+```python
+if key.startswith("sf."):
+    return key[3:]          # ← sale ANTES de llegar al filtro del punto
+if "." in key:
+    return None             # ← la regla, inalcanzable desde la otra puerta
+return key if key in ALLOWED_FIELDS else None
+```
+
+Así que `sf.Assignment.Name` → `Assignment.Name` sin pasar por ningún filtro → modo permisivo dice `True` a todo → `SELECT ..., Assignment.Name, ... FROM Opportunity` → `INVALID_FIELD` → **el mismo 500 que el guard existía para evitar, en el mismo modo degradado**. Y era la puerta que USA el frontend: `explorerFillColumns` (`lib/api.ts:554`) manda las claves **verbatim, con prefijo**, al revés que `explorerSearch`, que lo quita (`api.ts:347`). El agujero **pre-existía** al fix anterior; ese fix simplemente no lo tapó.
+
+Arreglo: resolver primero, filtrar después — **la regla se aplica al nombre RESUELTO**, así que hay una sola regla y da igual la puerta.
+
+Y al barrer aparecieron **tres constructores de SELECT más** que ni siquiera llamaban al helper: hacían `raw = k[3:]` a mano (`/columns/fill` :3842, `within-drive-km` :4720, `nearby-multi` :5433). El helper estaba cableado sólo dentro de `/search`. Los tres, ahora, vía helper.
+
+**Por qué importa**: (1) un `return` temprano en una rama **es una puerta que se salta todo lo que venga después** — si escribes un guard, escríbelo sobre el valor CANÓNICO (post-normalización), no sobre una de las formas de entrada; si no, necesitas un guard por forma y siempre se te olvida una. (2) Cuando cierres un agujero, **grepea las otras rutas hacia el mismo sumidero** (`opp_fields.add`) antes de dar por cerrado el bug: aquí el helper era el gate en 1 de 4 endpoints. (3) Un test de caracterización (`test_prefixed_account_key_keeps_its_relationship_form`, "comportamiento de hoy") **pinea el bug tan bien como pinea la feature** — cuando falle, pregúntate si documentaba una decisión o sólo fotografiaba lo que había.
+
+**Equivalencia de `sf.Account.*`, probada y no asumida** (era el riesgo de regresión): rechazarlo es idéntico byte a byte. `_OPP_FIELD_SET`/`_ACC_FIELD_SET` salen de `describe()` y guardan nombres **pelados** (`"Name"`), nunca el path (`"Account.Name"`) → en modo normal la salida vieja ya fallaba **los dos** gates (`_exists_on_opportunity` y `_exists_on_account`) y se caía igual, sólo que más tarde. En permisivo sí se colaba en el SELECT, pero **nadie leía ese valor**: la familia `Account.*` la sirve una SOQL aparte contra Account (`_build_account_map` / `_fetch_account_extras`), nunca el `Account` anidado del registro de Opportunity. Lo pinea `test_account_relationship_path_reaches_no_opportunity_select_anyway`.
+
+**Dónde aplicar**: todo `salesforce_explorer.py`. Los 4 constructores de SELECT que consumen claves de columna pasan ya por `_column_key_to_sf_field`; los `k[3:]` que quedan (:3974, :4962, :5580) son **row builders** (leen del registro ya traído, `data[k] = o.get(...)`) y no pueden meter nada en un SOQL. Las reglas de filtro (`opp_fields.add(r.field)`) son otra puerta, cerrada por otro mecanismo: el clasificador intercepta `Assignment.*` en :2470 y lo desvía a `extra_rules` o revienta con un 400.
