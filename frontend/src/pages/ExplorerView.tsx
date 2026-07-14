@@ -38,6 +38,7 @@ import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
 import { readDataCell } from "../lib/rowAccess";
+import { buildFillColumns } from "../lib/fillColumns";
 import { buildChartDataset } from "../lib/chartDataset";
 import Moby from "../assets/Moby.png";
 
@@ -1461,8 +1462,11 @@ export default function ExplorerView() {
 
     const currentRows = nearbyActive ? fullNearbyRows : fullRows;
 
-    // Columnas rellenables (excluye UNFILLABLE_COLUMNS)
-    const reqCols = Array.from(new Set((visibleColumns || []).filter(c => !UNFILLABLE_COLUMNS.has(c))));
+    // Columnas rellenables (excluye UNFILLABLE_COLUMNS).
+    // Las métricas del ChartModal van SIEMPRE, sean o no columnas visibles: la
+    // búsqueda en bloque las devuelve a null y el fill es su única fuente. Ver
+    // lib/fillColumns.
+    const reqCols = buildFillColumns(visibleColumns || [], UNFILLABLE_COLUMNS);
     if (!reqCols.length || !needsFill(currentRows, reqCols)) {
       dbg("fill skipped: no missing visible cells");
       return;
