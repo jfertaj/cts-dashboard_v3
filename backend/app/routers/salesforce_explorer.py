@@ -27,7 +27,7 @@ from app.routers.filter_engine import (
     _OP_SYNONYM, _OP_MAP,
     _DATE_FMTS, _NUM_RE,
     _parse_date_any, _coerce_scalar, _cmp, _normalize_list,
-    _eval_qual_rule, _qual_get,
+    _eval_qual_rule, _eval_extra_rule, _qual_get,
     _flatten_filter_rules, _filter_group_to_expr,
     _is_logic_expr, _eval_logic_expr_be,
     _norm_label_to_key,
@@ -3127,7 +3127,7 @@ async def explorer_search(
         res = []
         for er in extra_rules:
             actual = vals.get(er.field)
-            res.append(_eval_qual_rule(actual, er.operator, er.value))
+            res.append(_eval_extra_rule(er.field, actual, er.operator, er.value))
         logic_str = filters.get("logic") or "AND"
         if _is_logic_expr(logic_str):
             expr_results = {extra_rule_indices[i]: res[i] for i in range(len(extra_rules))}
@@ -4900,7 +4900,7 @@ async def explorer_search_within_drive_km(
         res = []
         for er in extra_rules:
             actual = vals.get(er.field)  # keys 'extra.*'
-            res.append(_eval_qual_rule(actual, er.operator, er.value))
+            res.append(_eval_extra_rule(er.field, actual, er.operator, er.value))
         return all(res) if glue_and else any(res)
 
     # Helper: applies all Python-side checks respecting root AND/OR logic.
@@ -5532,7 +5532,7 @@ async def explorer_search_nearby_multi(
         if not extra_rules: return True
         vals_d = extras_map.get(str(aid), {}) if extras_map else {}
         glue_and = (filters.get("logic") or "AND") == "AND"
-        res = [_eval_qual_rule(vals_d.get(er.field), er.operator, er.value) for er in extra_rules]
+        res = [_eval_extra_rule(er.field, vals_d.get(er.field), er.operator, er.value) for er in extra_rules]
         return all(res) if glue_and else any(res)
 
     _root_and = (filters.get("logic") or "AND") == "AND"

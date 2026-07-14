@@ -177,6 +177,29 @@ def _eval_qual_rule(value: Any, op: str, raw: Any) -> bool:
     return True
 
 
+# Claves extra.* que son un COUNT() de registros relacionados. Para ellas, 0 y ausente
+# significan lo mismo ("la cuenta no tiene ninguno"), así que is_empty/is_not_empty deben
+# mirar el conteo y no la ausencia de la clave: desde que batch_fetch_account_extras()
+# rellena el 0 explícito, un is_empty literal dejaría fuera justo a los sites sin
+# assignments — que son los que Moby pide con "sites not in any assignment".
+_COUNT_EXTRA_FIELDS = frozenset({"extra.AssignmentsCount"})
+
+_EMPTY_OPS = ("is_empty", "is_null", "isnull")
+_NOT_EMPTY_OPS = ("is_not_empty", "is_not_null", "notnull")
+
+
+def _eval_extra_rule(field: str, value: Any, op: str, raw: Any) -> bool:
+    """Evalúa una regla sobre una clave extra.*, sabiendo que un conteo a 0 es 'no tiene ninguno'."""
+    op_l = (op or "").lower()
+    if field in _COUNT_EXTRA_FIELDS:
+        count, _ = _coerce_scalar(value)
+        if op_l in _EMPTY_OPS:
+            return count is None or count == 0
+        if op_l in _NOT_EMPTY_OPS:
+            return count is not None and count != 0
+    return _eval_qual_rule(value, op, raw)
+
+
 def _qual_get(qual_data: Dict[str, Any], key: str) -> Any:
     """
     Lookup de una clave qual en el JSONB con 5 fallbacks, para manejar
