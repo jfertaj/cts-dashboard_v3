@@ -51,8 +51,17 @@ bloque explícito de centros silenciosos.
 
 ## Diseño
 
-Todas las vistas operan sobre **las filas actualmente filtradas** en el Explorer — el
-comportamiento de hoy, el que refleja el badge `Chart 215`.
+Todas las vistas operan sobre **las filas actualmente filtradas** en el Explorer — las mismas
+que el badge `Chart 215` anuncia y que el contador `N results` cuenta.
+
+**"Filtradas" quiere decir DOS capas, no una.** Esto es exactamente lo que se pasó por alto al
+implementar: cuentan el `FilterGroup` que se manda al servidor **y** los filtros de CLIENTE que
+la tabla aplica encima sin volver a pedir nada — la búsqueda global y los `filter…` por
+columna. La fuente de verdad es `table.getFilteredRowModel()`, la misma de la que ya salían el
+contador de resultados y el export TSV; **no** el array de respaldo (`fullRows` /
+`fullNearbyRows`), que sólo lleva la primera capa. Alimentar las vistas del array de respaldo
+es lo que hacía que el usuario estrechase la tabla a 12 filas, abriese el gráfico y la
+cobertura le anunciara "87 de 215 centros reportan": una población que no puede ver.
 
 ### Las cinco pestañas
 

@@ -1,3 +1,33 @@
+### [2026-07-14] [coder] — Dos parsers de métrica que divergen A PROPÓSITO, y el E2E corre contra un `dist` PRECOMPILADO (el mutation check miente sin `npm run build`)
+
+**Contexto**: fix de negativos en el constructor genérico — `frontend/src/lib/chartDataset.ts` (`toDatasetValue`, `toPieSlices`), `chartAggregation.ts` (solo JSDoc), `components/charts/CustomView.tsx`, `tests/e2e/charts.spec.ts` (commits 7e19ee4, 9800057, d250657).
+
+**Gotcha/Patrón**:
+1. **`toMetricValue` (chartAggregation) y `toDatasetValue` (chartDataset) NO se pueden unificar.** Comparten "ausente/vacío/no-numérico → null", pero difieren en el negativo: `toMetricValue` lo anula (sus 4 vistas miran recuentos de pacientes — "cribados = -3" es dato corrupto) y `toDatasetValue` lo conserva (el constructor genérico pinta columnas ARBITRARIAS — la tabla de Moby trae deltas, y un `-12` es un valor). Reutilizar el primero en el segundo hacía DESAPARECER la fila del gráfico sin mensaje. Ambas definiciones llevan ahora un ⚠️ explicando por qué divergen: quien las "unifique helpfully" romperá una de las dos semánticas en silencio.
+2. **El negativo en un pie: excluir + CONTAR, nunca excluir a secas.** Un sector de ángulo negativo no es geometría, y colarlo en el denominador da porcentajes > 100%. Pero "no pintable" ≠ "no existe": `toPieSlices` devuelve `{slices, negativeExcluded}`, y el contador es lo que OBLIGA a la UI a explicar la exclusión. Trampa asociada, encontrada revisando mi propio diff: con TODAS las filas negativas el pie queda vacío y el empty state decía "ningún centro reporta esta métrica" — falso, sí reportan. **Cada vez que una vista descarta filas, el mensaje de vacío tiene que distinguir POR QUÉ está vacía** (sin dato ≠ dato no dibujable), o la misma mentira vuelve por otra puerta.
+3. **⚠️ El E2E de este repo corre contra un `dist` PRECOMPILADO, no contra un dev server.** `playwright.config.ts` apunta a `http://localhost:8080` y **no tiene bloque `webServer`**: se engancha a un server ya levantado que sirve `/assets/index-<hash>.js`. Consecuencia brutal para los mutation checks: **si mutas la fuente y NO corres `npm run build`, el mutante nunca llega al navegador y el test pasa**. Me pasó: leí "7 passed" y estuve a punto de concluir que la aserción no tenía dientes, cuando lo que no tenía efecto era el mutante. Todo mutation check sobre E2E aquí es: mutar → `npm run build` → `playwright test` → restaurar → `npm run build`. Comprobación de que el bundle servido es el tuyo: `grep -l "<string nuevo>" dist/assets/*.js`. (Corolario: **tras cambiar código fuente hay que rebuildear antes de correr el E2E**, o estás testeando el build anterior.)
+
+**Por qué importa**: (1) y (2) son fallos que pintan un gráfico perfecto y mienten — sin error, sin warning, solo una fila menos. (3) invalida en silencio cualquier experimento de mutación sobre el E2E: te hace creer que un test es débil (o fuerte) sin base, que es peor que no medirlo.
+
+**Dónde aplicar**: 1-2 → `lib/chartDataset.ts`, `lib/chartAggregation.ts` y toda vista de `components/charts/`. 3 → **todo** mutation check y toda corrida de `tests/e2e/` de este repo.
+
+---
+
+### [2026-07-13] [coder] — Fixes finales de rama: el z-index de un modal es un contrato con los overlays vecinos, y el estado local de una vista que se desmonta es una fuga silenciosa
+
+**Contexto**: los 4 hallazgos de la revisión final de `feat/explorer-table-scroll-resize` (commits 9119403, 838056e, 9f04c1d, c56dc41) — `ModalFrame.tsx`, `ChartModal.tsx`, `CustomView.tsx`, `ExplorerView.tsx`, `ChatView.tsx`.
+
+**Gotcha/Patrón**:
+1. **El `z-50` de Tailwind NO es un default seguro en esta app.** El Explorer tiene una escala propia sin documentar: overlay del drawer Nearby `z-[9000]` (con `pointer-events-auto`), drawer `z-[9010]`, pill flotante "Nearby panel" `z-[9050]`. Un modal por debajo de 9050 no se rompe al abrirlo — se rompe solo si antes hubo una búsqueda Nearby y el panel está cerrado, que es cuando el pill existe. Al extraer un modal a un componente compartido, el z-index viaja con él: `ModalFrame` heredó `z-50` en vez del `z-[11000]` del modal viejo. **Cualquier `fixed` nuevo en ExplorerView se compara contra esa escala, no contra `z-50`.**
+2. **Estado local en una vista que el padre desmonta condicionalmente = pérdida silenciosa.** `CustomView` vive en `{tab === "custom" && ...}`: cada ida y vuelta de pestaña la remonta. `stacked` ya se había subido al dueño por eso, pero `legendMax` se quedó con `useState` local + `useEffect` de sincronía — el patrón que *parece* controlado y no lo es (el prop solo empuja hacia dentro; la elección del usuario no sale). Regla: si un componente se monta condicionalmente, sus props de configuración son **obligatorias y controladas**, sin default ni espejo interno. Quitarle el `= 8` a `legendMax` es lo que fuerza a los dos dueños a declararlo.
+3. **Mock de `/api/explorer/fields` en E2E: tiene que ser `{fields: [...]}`, no un array pelado.** `getExplorerFields` (`lib/api.ts:317`) hace `pick(raw, "fields", [])`; con un array pelado el catálogo sale vacío, `visibleColumns` se filtra contra él y la tabla se queda **sin columnas dinámicas** — incluida Account Name. `charts.spec.ts` mockea un array pelado y pasa igual (el chart no depende de `fieldDefs`), así que el mock roto es invisible hasta que un test mira la tabla. Ojo al copiar ese `beforeEach`.
+
+**Por qué importa**: los tres son fallos que no se ven en la pantalla feliz. El z-index solo se manifiesta tras un flujo previo (Nearby); el `legendMax` solo al volver de otra pestaña; el mock roto pasa los tests que no miran la tabla. Ninguno lo pesca Vitest — no corre `.tsx` — así que la red es el E2E, y solo si el fixture es correcto.
+
+**Dónde aplicar**: 1 → todo `fixed` nuevo en `pages/ExplorerView.tsx` y `components/charts/`. 2 → cualquier vista montada condicionalmente (las 5 pestañas del ChartModal). 3 → todo `beforeEach` de E2E que llegue a la tabla del Explorer.
+
+---
+
 ### [2026-07-13] [coder] — Tasks 6-9: las 4 vistas del chart modal cierran los agujeros que `MetricPicker` deja abiertos (metricKey ∈ options, coverage del mismo metricKey)
 
 **Contexto**: Tasks 6-9 del rediseño del chart modal — `CountriesView` (a12b1bb), `RankingView` (908177e), `DistributionView` (aedd0dd), `FunnelView` (f36b8a3) en `frontend/src/components/charts/`.
@@ -224,3 +254,27 @@ El POC original enganchaba `_semantic_top_matches` a `_top_matches` en `ai_chat.
 **Por qué importa**: los tres son fallos silenciosos — build roto en el peor momento (Gotcha 1), chart invisible sin error en consola (Gotcha 2), regresión de UX que nadie nota hasta que un usuario se queja de sus descargas (Gotcha 3).
 
 **Dónde aplicar**: Task 10 (obligatorio leer Gotcha 1 antes de borrar). Gotchas 2 y 3, todo el repo.
+
+### [2026-07-13] [coder] — Task 5 fix de revisión: sacar `overflow-y-auto` del panel y ponerlo solo en el contenido, no en todo el `flex-col`
+
+**Contexto**: `frontend/src/components/charts/ChartModal.tsx`, fix del CRITICAL de revisión (commit 58bd022) — panel del modal sin `max-h` atrapaba al usuario (Ranking con N=30 empuja el chart a 960px y el botón Close se va del viewport, sin scroll ni Escape para salir).
+
+**Gotcha/Patrón**: la tentación obvia es poner `max-h-[90vh] overflow-y-auto` en el panel entero. Eso scrollea header + pestañas + contenido juntos — el botón Close se sigue yendo fuera de vista según cuánto haya scrolleado el usuario, exactamente el bug que se quiere arreglar. El fix correcto: el panel es `flex flex-col max-h-[90vh]` (sin overflow), header y barra de pestañas llevan `shrink-0` (nunca se comprimen, nunca scrollean), y el `overflow-y-auto` va solo en el div de contenido interior. Con flexbox, un hijo con `overflow: auto` recibe automáticamente `min-height: 0` (min-size automático de flex items), así que no hace falta `min-h-0` explícito para que el `max-h` del padre se respete — verificado con codex, no es necesario añadirlo a mano en navegadores modernos.
+
+**Segundo gotcha, más chico**: al perder la altura fija del wrapper (`h-[420px]` → `p-4` a secas, para que `<ResponsiveContainer height={420}>` tome el numérico como los siblings), el placeholder de "Select at least one Y series" que usaba `h-full` colapsa a 0px porque ya no hay una altura de padre de la que heredar. Hay que darle una altura explícita propia (`h-[420px]`) en vez de depender del padre.
+
+**Por qué importa**: un fix de "modal atrapa al usuario" que solo mueve el overflow al panel entero deja el mismo bug con otra forma — el botón Close sigue sin ser alcanzable de forma predecible. La combinación shrink-0 (chrome fijo) + overflow solo en el contenido es la que realmente garantiza que Close esté siempre en pantalla.
+
+**Dónde aplicar**: cualquier modal/panel de este repo con altura variable por contenido (charts, tablas). El patrón "chrome fijo con shrink-0 + scroll solo en el contenido" es preferible a "todo el panel scrollea".
+
+### [2026-07-14] [coder] — El array de respaldo (`fullRows`) NO es lo que la tabla enseña: TanStack filtra en cliente encima
+
+**Contexto**: `frontend/src/pages/ExplorerView.tsx`, fix del hallazgo del review de Codex en el PR #12 — el `ChartModal` recibía `rows={nearbyActive ? fullNearbyRows : fullRows}` y las 4 vistas nuevas agregaban filas que el usuario acababa de filtrar fuera y no podía ver.
+
+**Gotcha/Patrón**: en el Explorer conviven DOS capas de filtrado y es fácil olvidar la segunda. (1) El `FilterGroup` que va al servidor y produce `fullRows` / `fullNearbyRows`. (2) Los filtros de CLIENTE de TanStack — búsqueda global + `filter…` por columna — que estrechan la tabla **sin volver a pedir nada al servidor**. El contador `N results`, el `Export filtered (TSV)` y la paginación ya salían de `table.getFilteredRowModel()`; el badge `Chart NNN`, el `ChartModal` y `buildChartDataset` salían del array de respaldo. Resultado: buscas "IT", la tabla enseña 2 centros, el badge dice 6 y la cobertura anuncia "4 de 6 centros reportan". La fuente de verdad para cualquier cosa que hable de "las filas actuales" es `table.getFilteredRowModel().rows.map(r => r.original)`.
+
+**Y el `.original` no pierde columnas**: `fullRows` existe porque lleva TODAS las columnas (no solo las visibles), y la primera reacción es pensar que el row model de la tabla solo lleva las visibles. No: el row model se construye sobre `viewRows` (que ES `fullRows`), y `row.original` son **los mismos objetos `ExplorerRow`** — la visibilidad de columna solo afecta al render, no al `original`. Así que `readDataCell(row, key)` sigue encontrando cualquier `sf.*` / `qual.*` aunque su columna esté oculta. La rama `nearbyActive` sale gratis: `viewRows` ya conmuta con ella.
+
+**Por qué importa**: un gráfico que agrega una población distinta de la que la tabla enseña no es un bug cosmético — la línea de cobertura ("87 de 215 centros reportan…") es una afirmación cuantitativa sobre un conjunto que el usuario no puede auditar. Y el fallo es silencioso: no hay error, solo números que no cuadran con la tabla de al lado.
+
+**Dónde aplicar**: todo `ExplorerView.tsx`. Cualquier feature nueva que diga "las filas actuales" (exportar, mandar a Moby, graficar, contar) tiene que salir de `getFilteredRowModel()`, no de `fullRows`. OJO: el botón "Ask Moby" (`activeRows = nearbyActive ? fullNearbyRows : fullRows`) sigue mandando el array de respaldo — fuera del alcance de este fix, pero es el mismo bug esperando.
