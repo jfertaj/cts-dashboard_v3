@@ -1,3 +1,18 @@
+### [2026-07-14] [coder] — Un embudo puede ser ilegible o puede mentir: la retención cambia lo primero por lo segundo, y el `<Text>` de Recharts parte la etiqueta al ancho de SU barra
+
+**Contexto**: `frontend/src/components/charts/FunnelView.tsx` — rechazo del encoding de retención (revisión de Juan sobre la pestaña Embudo). Datos reales: 22.000 → 512 → 380 sobre 73 de 215 centros.
+
+**Gotcha/Patrón**:
+1. **Codificar la RETENCIÓN en la longitud de la barra rompe el contrato visual del embudo, y el resultado no es "menos legible": es FALSO.** Con los números de producción dibujaba 100 % → 2,3 % → 74 %: barra llena, sliver, barra casi llena. De un vistazo se lee "muchos → nada → muchos" y se concluye que hay MÁS gente en Stage 2 que en Stage 1. Un embudo promete que las barras encogen; si se rompe esa promesa para ganar legibilidad, se cambia un gráfico ilegible por uno que engaña — y el engaño es peor, porque el ilegible se nota y el falso no. **El sliver no es un fallo del gráfico: es el hallazgo.** La geometría codifica el absoluto; la relación que la geometría no puede contar (el 74 % de Stage 1 → Stage 2) la cuenta el TEXTO, en tarjetas fijas, no en un tooltip.
+2. **`<LabelList>` de Recharts renderiza un `<Text>` que hace word-wrap al ancho de la barra a la que está pegado, partiéndolo en `<tspan>`s.** Se destapó porque el E2E leyó `"20 · 40 % de laanterior"` — `allTextContents()` concatena los `<tspan>` SIN espacio, así que el wrap se delata como una palabra pegada. Consecuencia: cualquier etiqueta con espacios sobre una barra corta se despedaza en una columna de palabras sueltas, y con los slivers de producción le pasaría a TODAS menos a la primera. Por eso la etiqueta de barra lleva sólo el absoluto (un único token, nunca se parte) y las frases viven en las tarjetas, cuyo ancho no depende del dato.
+3. **Un dominio `[0, 0]` (todas las etapas a cero) es degenerado para Recharts**: `funnelAxisMax` tiene suelo de 1. Es sólo para el eje — las barras siguen midiendo 0, que es la verdad.
+
+**Por qué importa**: (1) es la razón de ser del rediseño entero de los gráficos — eliminar los que engañan de un vistazo. Un gráfico que miente pasa la revisión con más facilidad que uno que no se ve, y eso lo hace más peligroso. (2) invalida cualquier diseño que meta prosa en una etiqueta de barra de Recharts cuando el dato pueda ser pequeño.
+
+**Dónde aplicar**: 1 → todo gráfico de embudo/cascada del repo, y como criterio general: si una re-escala hace que la geometría contradiga la magnitud, no es una mejora de legibilidad. 2-3 → todas las vistas de `components/charts/` que usen `LabelList`.
+
+---
+
 ### [2026-07-14] [coder] — La causa raíz del `row.data` a null: el SELECT del backend exigía el prefijo `sf.` que el frontend acababa de quitar
 
 **Contexto**: fix de backend de la nota anterior (el fill perezoso era el síntoma, no la causa). `backend/app/routers/salesforce_explorer.py` — nuevo `_column_key_to_sf_field()`, aplicado al constructor del SELECT de `explorer_search`, al SOQL proxy de Assignments y a los dos row builders sintéticos (commit fd40b3d).

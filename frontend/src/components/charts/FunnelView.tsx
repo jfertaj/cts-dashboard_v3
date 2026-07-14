@@ -12,41 +12,53 @@ import { NO_ENTRY_ANIMATION } from "./chartDefaults";
  *
  * `retentionPct === null` = no hay base sobre la que dividir (la etapa anterior
  * suma 0). No es un 0 %: es una división imposible. Distinguirlos importa —
- * 0/0 daría NaN y 3/0 daría Infinity, y las dos cosas pintan basura en el eje.
+ * 0/0 daría NaN y 3/0 daría Infinity, y las dos cosas pintan basura.
  */
 export type FunnelStep = {
   stage: string;
   value: number;
   retentionPct: number | null;
   ofFirstPct: number | null;
-  /** Longitud de la barra, en la escala de retención. Sin base = 0: no hay barra que pintar. */
-  barPct: number;
 };
 
 const pctOf = (part: number, whole: number): number | null =>
   whole > 0 ? (part / whole) * 100 : null;
 
 /**
- * Escala de RETENCIÓN, no de absolutos: la barra de cada etapa mide el % que
- * sobrevive de la anterior. Con los datos de producción (22.000 → 512 → 380) el
- * eje absoluto compartido deja las etapas 2 y 3 como slivers de un píxel, y la
- * relación Stage 1 → Stage 2 — la pregunta que esta pestaña existe para
- * responder — es literalmente ilegible. En la escala de retención esa misma
- * relación es una barra del 74 %. La magnitud absoluta no se pierde: va en la
- * etiqueta de cada barra y en la tira de conversión de arriba.
+ * La barra mide el ABSOLUTO. Es la única geometría honesta que tiene un embudo:
+ * las barras encogen porque la cohorte encoge.
+ *
+ * Hubo una versión que codificaba la RETENCIÓN de la etapa anterior para ganar
+ * legibilidad. Con los datos de producción (22.000 → 512 → 380) dibujaba
+ * 100 % → 2,3 % → 74 %: barra llena, sliver, barra casi llena. Un lector de un
+ * vistazo concluía que hay MÁS gente en Stage 2 que en Stage 1 — exactamente lo
+ * contrario de la verdad. Un embudo tiene un contrato visual (las barras
+ * encogen) y romperlo cambia un gráfico ilegible por uno que MIENTE.
+ *
+ * El sliver de Stage 1 no es un fallo del gráfico: es el hallazgo. La caída es
+ * así de brutal y la geometría debe decirlo. Lo que la barra no puede contar
+ * — el 74 % que Stage 2 retiene de Stage 1 — lo cuenta el TEXTO de las tarjetas,
+ * que va arriba, grande y sin hover.
  */
 export function toFunnelSteps(stages: FunnelStage[]): FunnelStep[] {
   const first = stages[0]?.value ?? 0;
-  return stages.map((stage, i) => {
-    const retentionPct = i === 0 ? pctOf(first, first) : pctOf(stage.value, stages[i - 1].value);
-    return {
-      stage: stage.stage,
-      value: stage.value,
-      retentionPct,
-      ofFirstPct: pctOf(stage.value, first),
-      barPct: retentionPct ?? 0,
-    };
-  });
+  return stages.map((stage, i) => ({
+    stage: stage.stage,
+    value: stage.value,
+    retentionPct: i === 0 ? pctOf(first, first) : pctOf(stage.value, stages[i - 1].value),
+    ofFirstPct: pctOf(stage.value, first),
+  }));
+}
+
+/**
+ * Tope del eje: la etapa mayor. Eje compartido y absoluto = las tres barras son
+ * comparables entre sí, que es lo que hace visible el desplome.
+ *
+ * El suelo de 1 es sólo para que Recharts no reciba el dominio degenerado [0, 0]
+ * cuando todas las etapas suman 0. Las barras siguen midiendo 0: eso es la verdad.
+ */
+export function funnelAxisMax(steps: FunnelStep[]): number {
+  return Math.max(1, ...steps.map((step) => step.value));
 }
 
 export function formatCount(value: number): string {
@@ -72,7 +84,12 @@ export function conversionText(step: FunnelStep, isFirst: boolean): string {
   return `${retention} · ${formatPct(step.ofFirstPct)} de los cribados`;
 }
 
-/** La caída se lee aquí aunque la barra sea un sliver: es texto, no geometría. */
+/**
+ * La tarjeta es la mitad legible del embudo, no un adorno del gráfico: cuando la
+ * barra de Stage 1 es un sliver de un píxel, esto es lo ÚNICO que responde "¿y
+ * de los que llegaron a Stage 1, cuántos siguieron?". Por eso el porcentaje de
+ * retención va en grande y no en un tooltip que hay que descubrir con el ratón.
+ */
 function StepCard({ step, isFirst }: { step: FunnelStep; isFirst: boolean }) {
   return (
     <li
@@ -84,7 +101,7 @@ function StepCard({ step, isFirst }: { step: FunnelStep; isFirst: boolean }) {
       <p data-testid="chart-funnel-count" className="text-2xl font-semibold text-gray-900">
         {formatCount(step.value)}
       </p>
-      <p data-testid="chart-funnel-conversion" className="text-sm text-gray-600">
+      <p data-testid="chart-funnel-conversion" className="text-sm font-medium text-gray-700">
         {conversionText(step, isFirst)}
       </p>
     </li>
@@ -98,23 +115,7 @@ export default function FunnelView({ rows }: { rows: DataRow[] }) {
   const result = useMemo(() => funnel(rows), [rows]);
   const steps = useMemo(() => toFunnelSteps(result.stages), [result]);
 
-  // El dato de la barra lleva su etiqueta ya formateada: "512 (2,3 %)". Se pinta
-  // aunque la barra mida 0 — un cero legítimo tiene que verse como un 0, que es
-  // la razón entera de este rediseño.
-  const chartData = useMemo(
-    () => steps.map((step) => ({
-      ...step,
-      barLabel: `${formatCount(step.value)} (${formatPct(step.retentionPct)})`,
-    })),
-    [steps]
-  );
-
-  // El eje llega al 100 % salvo que un dato lo desborde (una etapa que reporta
-  // MÁS que la anterior). Recortarlo a 100 escondería justo ese dato corrupto.
-  const axisMax = useMemo(
-    () => Math.max(100, ...steps.map((step) => Math.ceil(step.barPct))),
-    [steps]
-  );
+  const axisMax = useMemo(() => funnelAxisMax(steps), [steps]);
 
   if (result.sitesIncluded === 0) {
     return (
@@ -140,30 +141,36 @@ export default function FunnelView({ rows }: { rows: DataRow[] }) {
         ))}
       </ul>
 
-      {/* Barras horizontales sobre el eje de retención. Sin Tooltip: lo que diría
-          (absoluto + conversión) ya está pintado en la etiqueta de cada barra y en
-          la tira de arriba, siempre visible y sin hover. */}
+      {/* Barras horizontales sobre el eje ABSOLUTO compartido: encogen con el dato.
+          Sin Tooltip: las conversiones ya están en las tarjetas de arriba, siempre
+          visibles y sin hover.
+
+          La etiqueta de la barra lleva SOLO el absoluto, y no por pereza: el <Text>
+          de Recharts parte la etiqueta en <tspan>s para que quepa en el ANCHO DE SU
+          PROPIA BARRA. Con los slivers de producción, un "380 · 74,2 % de la
+          anterior" se rompería en una columna de palabras sueltas. El absoluto es un
+          único token y nunca se parte. */}
       <ResponsiveContainer width="100%" height={260}>
         <BarChart
           layout="vertical"
-          data={chartData}
-          margin={{ top: 8, right: 110, bottom: 24, left: 8 }}
+          data={steps}
+          margin={{ top: 8, right: 90, bottom: 24, left: 8 }}
         >
           <CartesianGrid strokeDasharray="3 3" horizontal={false} />
           <XAxis
             type="number"
             domain={[0, axisMax]}
-            unit="%"
             label={{
-              value: "% que sobrevive de la etapa anterior",
+              value: "personas (escala absoluta y compartida)",
               position: "insideBottom",
               offset: -12,
             }}
           />
           <YAxis type="category" dataKey="stage" width={130} />
-          <Bar dataKey="barPct" fill="#7c3aed" {...NO_ENTRY_ANIMATION}>
+          <Bar dataKey="value" fill="#7c3aed" {...NO_ENTRY_ANIMATION}>
             <LabelList
-              dataKey="barLabel"
+              dataKey="value"
+              formatter={(value: number) => formatCount(value)}
               position="right"
               fill="#374151"
               fontSize={12}

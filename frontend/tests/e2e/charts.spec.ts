@@ -353,10 +353,18 @@ test.describe("Explorer — modal de gráficos", () => {
   /**
    * CHART-11/12 — el Embudo.
    *
-   * En el fixture solo Madrid reporta las tres etapas: 100 → 50 → 20. Con el eje
-   * ABSOLUTO viejo esas tres barras medían 100 : 50 : 20 y, con los números de
-   * producción (22.000 → 512 → 380), las dos últimas eran slivers de un píxel.
-   * Ahora la barra mide la RETENCIÓN de la etapa anterior: 100 % : 50 % : 40 %.
+   * En el fixture solo Madrid reporta las tres etapas: 100 → 50 → 20.
+   *
+   * La barra mide el ABSOLUTO. Hubo una versión que la puso en escala de
+   * RETENCIÓN (cada barra = % que sobrevive de la anterior) para que las etapas
+   * pequeñas se vieran; con los datos de producción (22.000 → 512 → 380) eso
+   * dibujaba 100 % → 2,3 % → 74 %: barra llena, sliver, barra casi llena. Es
+   * decir, un embudo que APARENTA CRECER en su última etapa. Un embudo tiene un
+   * contrato visual — las barras encogen — y romperlo cambia un gráfico ilegible
+   * por uno que miente. El sliver es el hallazgo, no el bug.
+   *
+   * La legibilidad del salto Stage 1 → Stage 2 la da el TEXTO (CHART-11), no la
+   * geometría (CHART-12).
    */
   test("CHART-11: el embudo dice la conversión entre etapas en texto, no solo en barras", async ({ page }) => {
     const modal = await openChartModal(page);
@@ -380,7 +388,7 @@ test.describe("Explorer — modal de gráficos", () => {
     await expect(coverage).toContainText("5 centros excluidos");
   });
 
-  test("CHART-12: las barras del embudo van en escala de retención, no de absolutos", async ({ page }) => {
+  test("CHART-12: la barra del embudo mide el absoluto y encoge con el dato", async ({ page }) => {
     const modal = await openChartModal(page);
     await modal.locator(S.CHART_TAB_FUNNEL).click();
 
@@ -389,18 +397,70 @@ test.describe("Explorer — modal de gráficos", () => {
     const { widths } = await readBarGeometry(page);
     const [first, second, third] = widths;
 
-    // Retención: 100 % → 50 % (50/100) → 40 % (20/50). En la escala ABSOLUTA
-    // vieja la tercera barra medía 20/100 = un quinto de la primera y la relación
-    // Stage 1 → Stage 2 no se veía. Aquí mide 40/100: esta razón es lo que
-    // distingue los dos diseños, y con el eje viejo este test se pone rojo.
+    // La geometría es proporcional al VALOR: 100 → 50 → 20 se dibuja 1 : 0,5 : 0,2.
+    // Con la escala de retención vieja la tercera barra medía 40/100 = 0,4 de la
+    // primera y 0,8 de la segunda: este par de aserciones la pone roja.
     expect(second / first).toBeCloseTo(0.5, 1);
-    expect(third / first).toBeCloseTo(0.4, 1);
-    // La tercera barra es 4/5 de la segunda: la caída Stage 1 → Stage 2 es LEGIBLE.
-    expect(third / second).toBeGreaterThan(0.7);
+    expect(third / first).toBeCloseTo(0.2, 1);
 
-    // Cada barra lleva pegado su absoluto y su conversión, por si el ojo falla.
+    // Y el contrato del embudo: monótonamente decreciente. Ésta es la aserción
+    // que la retención rompía — pintaba la tercera barra 30x MÁS LARGA que la
+    // segunda con los números de producción, sugiriendo que Stage 2 tiene más
+    // gente que Stage 1.
+    expect(second).toBeLessThan(first);
+    expect(third).toBeLessThan(second);
+
+    // La barra corta no se queda muda: lleva su absoluto pegado. Sólo el absoluto,
+    // porque el <Text> de Recharts parte la etiqueta en <tspan>s para que quepa en
+    // el ancho de SU PROPIA BARRA: cualquier frase se despedazaría sobre un sliver.
+    // Las conversiones viven en las tarjetas (CHART-11), que no dependen del ancho.
     const labels = await modal.locator(".recharts-label-list text").allTextContents(); // SVG: innerText no existe
-    expect(labels).toEqual(["100 (100 %)", "50 (50 %)", "20 (40 %)"]);
+    expect(labels).toEqual(["100", "50", "20"]);
+  });
+
+  /**
+   * CHART-12b — la prueba con los números REALES, que es donde la retención
+   * mentía. 22.000 → 512 → 380: las dos últimas barras son slivers, y aun así la
+   * geometría tiene que decir la verdad (512 > 380) y el texto tiene que hacer
+   * legible el 74 % que la barra no puede enseñar.
+   */
+  test("CHART-12b: con los números de producción el embudo sigue encogiendo y el texto salva al sliver", async ({ page }) => {
+    await page.route("**/api/explorer/search", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          points: [],
+          rows: [{
+            account_id: "p1", account_name: "Centro Prod", country: "ES", city: "Madrid",
+            data: { [SCREENED]: 22000, [STAGE1]: 512, [STAGE2]: 380 },
+          }],
+          total: 1,
+        }),
+      })
+    );
+    await page.reload();
+    await expect(page.locator(S.EXPLORER_BTN_CHART)).toBeEnabled();
+
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_FUNNEL).click();
+    await expect.poll(async () => (await readBarGeometry(page)).painted, { timeout: 10_000 }).toBe(3);
+
+    const { widths } = await readBarGeometry(page);
+    const [first, second, third] = widths;
+    // 512/22.000 = 2,3 % del ancho: un sliver. Y ESO es el hallazgo.
+    expect(second / first).toBeLessThan(0.05);
+    // Pero la barra de Stage 2 sigue siendo MÁS CORTA que la de Stage 1, aunque
+    // ambas sean minúsculas. La retención las pintaba al revés (2,3 % vs 74 %).
+    expect(third).toBeLessThan(second);
+
+    // Lo que el ojo no puede medir en el sliver, lo lee en la tarjeta: de los 512
+    // que llegaron a Stage 1, el 74,2 % siguió a Stage 2.
+    const conversions = await modal.locator(S.CHART_FUNNEL_CONVERSION).allInnerTexts();
+    expect(conversions[2]).toContain("74,2 % de la etapa anterior");
+    expect(conversions[2]).toContain("1,7 % de los cribados");
+    const counts = await modal.locator(S.CHART_FUNNEL_COUNT).allInnerTexts();
+    expect(counts).toEqual(["22.000", "512", "380"]);
   });
 
   test("CHART-10c: la línea acumulada del Pareto se dibuja entera", async ({ page }) => {
@@ -481,7 +541,7 @@ test.describe("Explorer — el embudo y el cero legítimo", () => {
 
     // Etiqueta pegada a la barra de longitud cero: existe aunque la barra no.
     const labels = await modal.locator(".recharts-label-list text").allTextContents(); // SVG: innerText no existe
-    expect(labels).toEqual(["50 (100 %)", "0 (0 %)", "0 (sin base)"]);
+    expect(labels).toEqual(["50", "0", "0"]);
 
     // Berlín no reporta: queda FUERA del embudo y la cobertura lo declara. Es la
     // otra mitad de la distinción — el hueco no se cuenta como un cero.
