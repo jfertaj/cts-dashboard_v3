@@ -196,6 +196,11 @@ Legend:
 - `geo.py` admin endpoints to re-geocode sites in local DB
 - `startup_geo.py` (optional import) for initial geocoding on startup
 
+### `extra.AssignmentsCount` — cero explícito, no clave ausente (2026-07-14)
+- `batch_fetch_account_extras()` (`salesforce_extras_batch.py` — el módulo que de verdad alimenta `/api/explorer/search` y `/api/explorer/fill-columns`, importado en `salesforce_explorer.py:21`) sólo escribía la clave para las cuentas CON assignments. Una cuenta con cero assignments se quedaba SIN la clave, y aguas abajo "no tiene ninguno" (0) se confundía con "no lo reportó" (null): los gráficos EXCLUÍAN esos sites de la métrica *Assignments (count)* y la tabla los pintaba en blanco.
+- Ahora rellena `extra.AssignmentsCount = 0` para toda cuenta que se le PREGUNTÓ y no tiene registros (alineado con los `defaults` del módulo NO batch, `salesforce_extras.py:364`). Una cuenta que no se preguntó sigue ausente: eso sí es un desconocido de verdad.
+- **Acoplamiento**: Moby traduce "sites not in any assignment" a `extra.AssignmentsCount is_empty` (`moby/prompt.py`). Como `is_empty` sólo casaba con `None`/`""`, el 0 lo habría roto en silencio. Por eso `filter_engine._eval_extra_rule()` trata las claves de `_COUNT_EXTRA_FIELDS` como "vacías" cuando el conteo es 0 o ausente. Si añades el 0 por defecto a otra clave de conteo, métela también en ese set.
+
 ---
 
 ## What Is Partially Implemented
