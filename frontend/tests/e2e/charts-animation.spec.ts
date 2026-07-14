@@ -126,17 +126,31 @@ test.describe("Explorer — el gráfico pinta sin depender de la animación", ()
       await modal.locator(tab).click();
       await expect(modal.locator(tab)).toHaveAttribute("aria-selected", "true");
 
-      const geometry = await readBarGeometry(page);
-      // Sin el fix: `groups` sigue en pie y `painted` es 0. El grupo hueco es justo
-      // lo que un test de presencia cuenta como verde mientras el panel está vacío.
-      expect(geometry.painted, `pestaña ${label}: barras con caja real`).toBe(positiveMarks);
-      expect(geometry.groups, `pestaña ${label}: grupos de barra`).toBeGreaterThanOrEqual(positiveMarks);
+      // `poll` NO es una concesión a la animación — está apagada. Es que
+      // `ResponsiveContainer` no pinta nada hasta que su ResizeObserver le dice
+      // cuánto mide, y ese primer render vacío es un estado legítimo de un par de
+      // ticks. Lo que el poll NO puede rescatar es una animación congelada: sin
+      // frames se queda en t=0 para siempre, y con el bug esto sigue en 0 tras el
+      // timeout entero (verificado revirtiendo el fix).
+      await expect
+        .poll(async () => (await readBarGeometry(page)).painted, {
+          message: `pestaña ${label}: barras con caja real`,
+          timeout: 5_000,
+        })
+        .toBe(positiveMarks);
+
+      // Y el grupo hueco es justo lo que un test de presencia cuenta como verde
+      // mientras el usuario mira un panel vacío: por eso lo de arriba mide cajas.
+      const { groups } = await readBarGeometry(page);
+      expect(groups, `pestaña ${label}: grupos de barra`).toBeGreaterThanOrEqual(positiveMarks);
     }
 
     // Y la vuelta a Países — el gesto que destapó el bug: la primera pestaña se
     // pintaba al abrir y se quedaba en blanco al volver de otra.
     await modal.locator(S.CHART_TAB_COUNTRIES).click();
-    expect((await readBarGeometry(page)).painted).toBe(2);
+    await expect
+      .poll(async () => (await readBarGeometry(page)).painted, { timeout: 5_000 })
+      .toBe(2);
   });
 
   test("CHART-12: la línea acumulada del Pareto se dibuja entera sin frames", async ({ page }) => {

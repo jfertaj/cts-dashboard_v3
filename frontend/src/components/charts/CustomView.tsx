@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import html2canvas from "html2canvas";
 import { toPieSlices, PIE_TOTAL_KEY } from "../../lib/chartDataset";
+import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 export type ChartType = "bar" | "line" | "pie";
 
@@ -294,7 +295,7 @@ export default function CustomView({
                   const stackId = isMulti && stacked ? "stack" : undefined;
                   const radius: [number,number,number,number] = isMulti && stacked ? [0,0,0,0] : [3,3,0,0];
                   return (
-                    <Bar key={k} dataKey={k} fill={COLORS[idx % COLORS.length]} radius={radius} stackId={stackId}>
+                    <Bar key={k} dataKey={k} fill={COLORS[idx % COLORS.length]} radius={radius} stackId={stackId} {...NO_ENTRY_ANIMATION}>
                       {!isMulti && Array.isArray(data) && data.length > 0 && (
                         data.map((entry, i) => (
                           <Cell key={`cell-${k}-${i}`} fill={entry?._color || COLORS[idx % COLORS.length]} />
@@ -337,7 +338,7 @@ export default function CustomView({
                   />
                 )}
                 {yKeys.map((k, idx) => (
-                  <Line key={k} type="monotone" dataKey={k} stroke={COLORS[idx % COLORS.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line key={k} type="monotone" dataKey={k} stroke={COLORS[idx % COLORS.length]} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} {...NO_ENTRY_ANIMATION} />
                 ))}
               </LineChart>
             ) : (() => {
@@ -364,6 +365,7 @@ export default function CustomView({
                     outerRadius={pieR}
                     label={pieLabel}
                     labelLine={hasLabels ? { stroke: "#999", strokeWidth: 1 } : false}
+                    {...NO_ENTRY_ANIMATION}
                   >
                     {plotData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry?._color || COLORS[index % COLORS.length]} />

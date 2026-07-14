@@ -5,6 +5,7 @@ import {
 import type { DataRow } from "../../lib/rowAccess";
 import { bottomN, coverageFor, topN, SCREENED } from "../../lib/chartAggregation";
 import MetricPicker, { SITE_METRIC_OPTIONS } from "./MetricPicker";
+import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 export default function RankingView({ rows }: { rows: DataRow[] }) {
   // SCREENED está en SITE_METRIC_OPTIONS (que excluye COUNT_METRIC: rankear
@@ -64,7 +65,7 @@ export default function RankingView({ rows }: { rows: DataRow[] }) {
             <XAxis type="number" />
             <YAxis type="category" dataKey="name" width={240} tick={{ fontSize: 12 }} />
             <Tooltip />
-            <Bar dataKey="value" fill="#7c3aed" />
+            <Bar dataKey="value" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
           </BarChart>
         </ResponsiveContainer>
       )}

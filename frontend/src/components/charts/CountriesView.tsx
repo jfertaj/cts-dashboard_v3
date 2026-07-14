@@ -7,6 +7,7 @@ import {
   coverageFor, groupByCountry, SCREENED, type CountryBucket,
 } from "../../lib/chartAggregation";
 import MetricPicker, { METRIC_OPTIONS } from "./MetricPicker";
+import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 export default function CountriesView({ rows }: { rows: DataRow[] }) {
   // `metricKey` arranca en SCREENED, que SÍ está en METRIC_OPTIONS, y `coverage`
@@ -43,7 +44,7 @@ export default function CountriesView({ rows }: { rows: DataRow[] }) {
                 return [`${value} (${bucket.sites} centros que la reportan)`, "Total"];
               }}
             />
-            <Bar dataKey="value" fill="#7c3aed" />
+            <Bar dataKey="value" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
           </BarChart>
         </ResponsiveContainer>
       )}

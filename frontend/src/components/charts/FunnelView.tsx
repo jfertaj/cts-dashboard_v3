@@ -4,6 +4,7 @@ import {
 } from "recharts";
 import type { DataRow } from "../../lib/rowAccess";
 import { funnel } from "../../lib/chartAggregation";
+import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 // Sin MetricPicker: el embudo son siempre las tres etapas (cribados → Stage 1 →
 // Stage 2), así que no hay metricKey que elegir ni que desincronizar. La línea
@@ -34,7 +35,7 @@ export default function FunnelView({ rows }: { rows: DataRow[] }) {
           <XAxis dataKey="stage" />
           <YAxis />
           <Tooltip />
-          <Bar dataKey="value" fill="#7c3aed" />
+          <Bar dataKey="value" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
         </BarChart>
       </ResponsiveContainer>
     </div>

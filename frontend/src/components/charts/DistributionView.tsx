@@ -5,6 +5,7 @@ import {
 import type { DataRow } from "../../lib/rowAccess";
 import { coverageFor, distribution, SCREENED } from "../../lib/chartAggregation";
 import MetricPicker, { SITE_METRIC_OPTIONS } from "./MetricPicker";
+import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 export default function DistributionView({ rows }: { rows: DataRow[] }) {
   // SCREENED está en SITE_METRIC_OPTIONS (que excluye COUNT_METRIC: un Pareto
@@ -43,7 +44,7 @@ export default function DistributionView({ rows }: { rows: DataRow[] }) {
               <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} />
               <Tooltip />
               <Legend />
-              <Bar yAxisId="left" dataKey="value" name="Valor" fill="#7c3aed" />
+              <Bar yAxisId="left" dataKey="value" name="Valor" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
               <Line
                 yAxisId="right"
                 type="monotone"
@@ -51,6 +52,7 @@ export default function DistributionView({ rows }: { rows: DataRow[] }) {
                 name="% acumulado"
                 stroke="#f59e0b"
                 dot={false}
+                {...NO_ENTRY_ANIMATION}
               />
             </ComposedChart>
           </ResponsiveContainer>
