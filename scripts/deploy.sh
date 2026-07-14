@@ -96,6 +96,24 @@ roll_service() {
   aws ecs wait services-stable \
     --cluster "$CLUSTER" --services "$service" \
     --region "$AWS_REGION" --profile "$AWS_PROFILE"
+
+  # "stable" NO significa "desplegado". Si la task nueva no arranca, ECS revierte
+  # sola a la anterior y el servicio vuelve a estar estable — con el código VIEJO.
+  # `wait services-stable` devuelve éxito igual, así que sin esta comprobación el
+  # script cantaba "✅ Deploy complete" sobre un deploy fallido (pasó el 2026-07-14).
+  local LIVE_ARN
+  LIVE_ARN=$(aws ecs describe-services \
+    --cluster "$CLUSTER" --services "$service" \
+    --query "services[0].deployments[?status=='PRIMARY'].taskDefinition | [0]" \
+    --output text --region "$AWS_REGION" --profile "$AWS_PROFILE")
+
+  if [ "$LIVE_ARN" != "$NEW_ARN" ]; then
+    echo "❌  $service NO se desplegó: ECS revirtió a ${LIVE_ARN##*/} (esperada ${NEW_ARN##*/})." >&2
+    echo "    La task nueva no arrancó. Logs:" >&2
+    echo "    aws logs tail /ecs/$service --since 15m --profile $AWS_PROFILE --region $AWS_REGION" >&2
+    exit 1
+  fi
+
   ok "$service stable → $NEW_ARN"
   echo "$NEW_ARN"  # return value
 }

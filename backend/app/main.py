@@ -145,8 +145,15 @@ async def on_startup():
     except Exception:
         logger.exception("Could not launch background tasks")
 
+    # No todo lo que hay en app.routes es una ruta con path: en FastAPI moderno
+    # un router incluido aparece como _IncludedRouter, sin `.path`. Darlo por
+    # hecho reventaba el arranque con AttributeError y ECS hacía rollback del
+    # deploy entero — mientras deploy.sh cantaba "✅ Deploy complete".
     for route in app.routes:
-        logger.info("➡️ %s (%s)", route.path, route.name)
+        path = getattr(route, "path", None)
+        if path is None:
+            continue
+        logger.info("➡️ %s (%s)", path, getattr(route, "name", "?"))
 
 
 # --- Static Files (optional if bundling front) ---
