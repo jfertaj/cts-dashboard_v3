@@ -214,4 +214,47 @@ test.describe("Explorer — modal de gráficos", () => {
     await modal.locator(S.CHART_TAB_CUSTOM).click();
     await expect(modal.locator(S.CHART_LEGEND_MAX)).toHaveValue("20");
   });
+
+  test("CHART-8: los gráficos agregan las filas que la tabla filtra, no el resultado entero", async ({ page }) => {
+    // El Explorer filtra en CLIENTE encima del resultado del servidor: la caja de
+    // búsqueda global y los filtros por columna estrechan la tabla sin volver a
+    // pedir nada. Si el modal recibe el array de respaldo completo, agrega centros
+    // que el usuario acaba de filtrar FUERA y no puede ver, y la cobertura anuncia
+    // una población que no es la de la tabla.
+    //
+    // "IT" solo aparece en la columna country (ES/IT/FR/PT) — ningún nombre ni
+    // ciudad del fixture contiene "it". Deja Milano (reporta 40 cribados) y Roma
+    // (no reporta): 2 filas, cobertura 1 de 2.
+    await page.locator(S.EXPLORER_GLOBAL_SEARCH).fill("IT");
+    await expect(page.locator(S.EXPLORER_RESULTS_COUNT)).toContainText("2 results");
+
+    // El badge del botón anuncia la población que el modal va a graficar: si
+    // dijera 6 estaría prometiendo el resultado entero.
+    await expect(page.locator(S.EXPLORER_BTN_CHART)).toContainText("2");
+
+    const modal = await openChartModal(page);
+    const coverage = modal.locator(S.CHART_COVERAGE);
+
+    // Con el bug: "4 de 6 centros reportan" — los 6 del resultado del servidor.
+    await expect(coverage).toContainText("1 de 2 centros reportan");
+    await expect(coverage).toContainText("1 sin dato, excluidos");
+    await expect(coverage).not.toContainText("de 6 centros");
+  });
+
+  test("CHART-9: el constructor Personalizado también grafica solo las filas filtradas", async ({ page }) => {
+    // Misma regla para la quinta pestaña: buildChartDataset se alimenta del mismo
+    // conjunto. Con el bug pintaba una barra por cada centro del resultado entero.
+    await page.locator(S.EXPLORER_GLOBAL_SEARCH).fill("IT");
+    await expect(page.locator(S.EXPLORER_RESULTS_COUNT)).toContainText("2 results");
+
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_CUSTOM).click();
+    await modal.getByRole("button", { name: "Pie", exact: true }).click();
+
+    // De los 2 centros filtrados solo Milano reporta cribados → 1 porción.
+    // Con el bug: 4 (Madrid, Barcelona, Milano y el cero legítimo de Lisboa).
+    await expect(modal.locator(S.CHART_PIE_SECTORS)).toHaveCount(1);
+    const legend = await modal.locator(S.CHART_LEGEND_ITEMS).allInnerTexts();
+    expect(legend).toEqual(["Centro Milano"]);
+  });
 });

@@ -2362,6 +2362,19 @@ export default function ExplorerView() {
     getPaginationRowModel: getPaginationRowModel(),
   });
 
+  // 🔑 LO QUE SE GRAFICA ES LO QUE SE VE. `viewRows` es sólo el resultado del
+  // servidor; encima de él la tabla filtra en CLIENTE (búsqueda global + filtros
+  // por columna), y de ahí salen el contador de resultados y el export TSV. Los
+  // gráficos salen del mismo sitio, o agregarían centros que el usuario acaba de
+  // filtrar fuera y la cobertura anunciaría una población que no es la de la tabla.
+  // `.original` son los mismos objetos ExplorerRow de `viewRows`: pasar por el row
+  // model no pierde ninguna columna.
+  const filteredRowModel = table.getFilteredRowModel();
+  const chartRows = useMemo<ExplorerRow[]>(
+    () => filteredRowModel.rows.map((r) => r.original),
+    [filteredRowModel]
+  );
+
   // ==== Chart State (mover hooks DENTRO del componente) ====
   const [chartOpen, setChartOpen] = useState(false);
   const [chartType, setChartType] = useState<ChartType>("bar");
@@ -2392,14 +2405,13 @@ export default function ExplorerView() {
   // El builder vive en lib/chartDataset: es una función pura y así queda testeable.
   const chartData = useMemo(() => {
     if (!chartOpen || !chartYKeys.length) return [];
-    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
-    if (!currentRows?.length) return [];
-    return buildChartDataset(currentRows, chartXKey, chartYKeys);
-  }, [chartOpen, nearbyActive, fullNearbyRows, fullRows, chartXKey, chartYKeys]);
+    if (!chartRows.length) return [];
+    return buildChartDataset(chartRows, chartXKey, chartYKeys);
+  }, [chartOpen, chartRows, chartXKey, chartYKeys]);
 
   // Abre el modal con defaults razonables
   const openChartWizard = useCallback(() => {
-    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
+    const currentRows = chartRows;
     if (!currentRows?.length) {
       alert("No hay datos para graficar.");
       return;
@@ -2435,7 +2447,7 @@ export default function ExplorerView() {
     setChartStacked(true);
     setChartTitle("Explorer Chart");
     setChartOpen(true); // chartData recomputes automatically via useMemo
-  }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn]);
+  }, [chartRows, visibleColumns, table, isNumericColumn]);
 
   // ====== Export TSV (toda la tabla filtrada) ======
   const sanitizeTSV = (val: any): string => {
@@ -3057,13 +3069,13 @@ showPresets={false}
             data-testid="explorer-btn-chart"
             className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-40 inline-flex items-center gap-1"
             onClick={openChartWizard}
-            disabled={(nearbyActive ? fullNearbyRows : fullRows).length === 0}
+            disabled={chartRows.length === 0}
             title="Visualize current filtered rows as chart — updates automatically when filters change"
           >
             📊 Chart
-            {(nearbyActive ? fullNearbyRows : fullRows).length > 0 && (
+            {chartRows.length > 0 && (
               <span className="rounded-full bg-blue-200 px-1.5 py-0.5 text-xs font-medium">
-                {(nearbyActive ? fullNearbyRows : fullRows).length}
+                {chartRows.length}
               </span>
             )}
           </button>
@@ -3392,7 +3404,7 @@ showPresets={false}
         onClose={() => setChartOpen(false)}
         title={chartTitle}
         onChangeTitle={(t) => setChartTitle(t)}
-        rows={nearbyActive ? fullNearbyRows : fullRows}
+        rows={chartRows}
         custom={
           <CustomView
             title={chartTitle}
