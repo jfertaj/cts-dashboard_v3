@@ -120,4 +120,15 @@ def batch_fetch_account_extras(sf, account_ids: List[str]) -> Dict[str, Dict[str
         entry["extra.AssignmentsNames"] = "; ".join(names)
         entry.setdefault("extra.AssignmentsCount", len(names))
 
+    # counts_by_acc sólo trae las cuentas CON assignments: sin esto, una cuenta con cero
+    # assignments se queda SIN la clave, y "no tiene ninguno" (0, un valor conocido) se
+    # confunde aguas abajo con "no lo reportó" (null, que los gráficos EXCLUYEN).
+    # Sólo rellenamos lo que hemos preguntado: las queries de arriba cubren account_ids
+    # entero, así que de cualquier otra cuenta seguimos sin saber nada y no la tocamos.
+    # OJO: si añades aquí el 0 por defecto de OTRA clave de conteo (p.ej. ActivitiesCount),
+    # métela también en filter_engine._COUNT_EXTRA_FIELDS, o su filtro `is_empty` dejará de
+    # casar con las cuentas que no tienen ninguno — que son justo las que se buscaban.
+    for aid in account_ids:
+        out.setdefault(aid, {}).setdefault("extra.AssignmentsCount", 0)
+
     return out

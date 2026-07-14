@@ -54,6 +54,7 @@ export const S = {
   // Explorer toolbar buttons
   EXPLORER_BTN_EXPORT_TSV:  '[data-testid="explorer-btn-export-tsv"]',
   EXPLORER_BTN_CHART:       '[data-testid="explorer-btn-chart"]',
+  EXPLORER_BTN_ASK_MOBY:    '[data-testid="explorer-btn-ask-moby"]',
 
   // Explorer filter chips
   EXPLORER_FILTER_CHIP:     '[data-testid="explorer-filter-chip"]',
@@ -71,6 +72,34 @@ export const S = {
   FILTER_LOGIC_VALID:       '[data-testid="filter-logic-valid"]',
   FILTER_LOGIC_APPLY_BTN:   '[data-testid="filter-logic-apply-btn"]',
   FILTER_PANEL_COLLAPSE_BTN:'[data-testid="filter-panel-collapse-btn"]',
+
+  // ── Chart modal (ExplorerView → components/charts) ─────────────────────
+  CHART_MODAL:              '[data-testid="chart-modal"]',
+  CHART_BUILDER_MODAL:      '[data-testid="chart-builder-modal"]',   // el del chat (sin pestañas)
+  CHART_TAB_COUNTRIES:      '[data-testid="chart-tab-countries"]',
+  CHART_TAB_RANKING:        '[data-testid="chart-tab-ranking"]',
+  CHART_TAB_DISTRIBUTION:   '[data-testid="chart-tab-distribution"]',
+  CHART_TAB_FUNNEL:         '[data-testid="chart-tab-funnel"]',
+  CHART_TAB_CUSTOM:         '[data-testid="chart-tab-custom"]',
+  CHART_COVERAGE:           '[data-testid="chart-coverage"]',        // "N de M centros reportan …"
+  CHART_METRIC_SELECT:      '[data-testid="chart-metric-select"]',
+  CHART_CUSTOM_BUILDER:     '[data-testid="chart-custom-builder"]',  // el constructor de ejes de siempre
+  CHART_EMPTY:              '[data-testid="chart-empty"]',
+  CHART_NO_ROWS:            '[data-testid="chart-no-rows"]',
+  CHART_SILENT_SITES:       '[data-testid="chart-silent-sites"]',
+  CHART_CUSTOM_NOTE:        '[data-testid="chart-custom-note"]',      // "el que no reporta aparece como hueco, no como cero"
+  // Embudo: la conversión entre etapas va en TEXTO (la barra puede ser un sliver).
+  CHART_FUNNEL_STEPS:       '[data-testid="chart-funnel-steps"]',
+  CHART_FUNNEL_STEP:        '[data-testid="chart-funnel-step"]',
+  CHART_FUNNEL_COUNT:       '[data-testid="chart-funnel-count"]',      // el absoluto de la etapa
+  CHART_FUNNEL_CONVERSION:  '[data-testid="chart-funnel-conversion"]', // "74,2 % de la etapa anterior · …"
+  // Recharts pinta un <g class="recharts-bar-rectangle"> también para los null,
+  // así que las barras NO distinguen ausente de cero: el pie sí (una porción de
+  // tamaño cero existe en el DOM y en la leyenda).
+  CHART_PIE_SECTORS:        '.recharts-pie-sector',                   // una por porción = un centro que SÍ reporta
+  CHART_LEGEND_ITEMS:       '.recharts-legend-item',
+  CHART_LEGEND_MAX:         '[data-testid="chart-legend-max"]',       // selector "Legend max" del constructor
+  CHART_OVERLAY:            '[data-testid="chart-modal-overlay"]',    // capa fixed del modal (z-index)
 
   // ── Site Details Modal ─────────────────────────────────────────────────
   SITE_DETAILS_MODAL:       '[data-testid="site-details-modal"]',

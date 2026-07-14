@@ -27,7 +27,7 @@ from app.routers.filter_engine import (
     _OP_SYNONYM, _OP_MAP,
     _DATE_FMTS, _NUM_RE,
     _parse_date_any, _coerce_scalar, _cmp, _normalize_list,
-    _eval_qual_rule, _qual_get,
+    _eval_qual_rule, _eval_extra_rule, _qual_get,
     _flatten_filter_rules, _filter_group_to_expr,
     _is_logic_expr, _eval_logic_expr_be,
     _norm_label_to_key,
@@ -878,6 +878,52 @@ def _exists_on_opportunity(field_name: str) -> bool:
 
 def _exists_on_account(field_name: str) -> bool:
     return field_name in (_ACC_FIELD_SET or set())
+
+def _column_key_to_sf_field(key: str) -> Optional[str]:
+    """Resuelve una columna pedida al campo SF que hay que meter en el SELECT.
+
+    Acepta las DOS formas con las que llegan las columnas de Opportunity:
+      - prefijada: "sf.C_Foo__c"  → la que manda POST /api/explorer/columns/fill
+      - pelada:    "C_Foo__c"     → la que manda POST /api/explorer/search, porque
+                                    el frontend quita el "sf." antes del POST
+                                    (frontend/src/lib/api.ts). Sin esto ningún campo
+                                    sf.* entraba en el SOQL y la búsqueda en bloque
+                                    devolvía las ~360 claves a null.
+
+    Sea cual sea la puerta por la que entre, el NOMBRE RESUELTO tiene que pasar el
+    filtro del punto: un campo con "." es un path de relación (Account.Name,
+    Assignment.Name, ...) que sirve otra rama del row builder (la SOQL aparte contra
+    Account, el proxy de Assignments, el JSONB, la site DB), NUNCA un campo plano de
+    Opportunity. La regla se aplica DESPUÉS de quitar el prefijo justamente porque
+    "sf.Assignment.Name" y "Assignment.Name" son el mismo path por dos puertas: cuando
+    el filtro vivía sólo en la rama pelada, la prefijada devolvía key[3:] a pelo y salía
+    antes de llegar a él (y /columns/fill manda las claves CON prefijo, así que la puerta
+    de atrás era la que usaba el frontend).
+
+    Además, la clave pelada tiene que estar en ALLOWED_FIELDS, el catálogo curado que
+    alimenta /api/explorer/fields.
+
+    El filtro del punto NO es redundante con el del catálogo: ALLOWED_FIELDS es un
+    catálogo de COLUMNAS, no de campos de Opportunity — contiene 24 "Account.*" y 9
+    "Assignment.*". Y no puede apoyarse en _exists_on_opportunity(), que en modo permisivo
+    (describe caído al arrancar, y es STICKY para toda la vida del proceso) dice True a
+    todo. Sin él, "Assignment.Name" pasaba el catálogo + el permisivo y aterrizaba en
+    "SELECT ..., Assignment.Name, ... FROM Opportunity" → INVALID_FIELD → 500 en TODAS
+    las búsquedas del Explorer.
+
+    Las 80 claves peladas de ALLOWED_FIELDS son campos reales de Opportunity y ninguna
+    lleva punto, así que el filtro no descarta nada legítimo (lo pinean dos tests, uno
+    por puerta).
+
+    Devuelve None si la clave no es un campo de Opportunity seleccionable.
+    """
+    if key.startswith("sf."):
+        field = key[3:]
+    elif key in ALLOWED_FIELDS:
+        field = key
+    else:
+        return None
+    return None if "." in field else field
 
 # ======================= WHERE BUILDER (SOQL) =======================
 # _OP_SYNONYM, _OP_MAP, _flatten_filter_rules, _filter_group_to_expr,
@@ -2649,9 +2695,9 @@ async def explorer_search(
             opp_fields.add(r.field)
 
     for k in requested_cols:
-        if not k.startswith("sf."):
+        fld = _column_key_to_sf_field(k)
+        if fld is None:
             continue
-        fld = k[3:]
         if _exists_on_opportunity(fld):
             opp_fields.add(fld)
         elif _exists_on_account(fld):
@@ -3089,7 +3135,7 @@ async def explorer_search(
         res = []
         for er in extra_rules:
             actual = vals.get(er.field)
-            res.append(_eval_qual_rule(actual, er.operator, er.value))
+            res.append(_eval_extra_rule(er.field, actual, er.operator, er.value))
         logic_str = filters.get("logic") or "AND"
         if _is_logic_expr(logic_str):
             expr_results = {extra_rule_indices[i]: res[i] for i in range(len(extra_rules))}
@@ -3212,20 +3258,20 @@ async def explorer_search(
                 data[k] = _qual_get(qual_data, k[5:])
                 continue
 
-            # sf.*
-            if k.startswith("sf."):
-                fld = k[3:]
+            # extra.*
+            if k.startswith("extra."):
+                data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
+                continue
+
+            # sf.* (prefijada) o campo de Opportunity pelado (el frontend quita el "sf.")
+            fld = _column_key_to_sf_field(k)
+            if fld is not None:
                 if _exists_on_opportunity(fld):
                     data[k] = o.get(fld)
                 elif _exists_on_account(fld):
                     data[k] = (o.get("Account") or {}).get(fld)
                 else:
                     data[k] = None
-                continue
-
-            # extra.*
-            if k.startswith("extra."):
-                data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                 continue
 
             data[k] = o.get(k)
@@ -3254,7 +3300,9 @@ async def explorer_search(
     # 8) Oportunidad “proxy” por Account para filas de Assignment
     # ===========================================================
     requested_sf_fields: Set[str] = {
-        k[3:] for k in requested_cols if k.startswith("sf.") and _exists_on_opportunity(k[3:])
+        fld
+        for fld in (_column_key_to_sf_field(k) for k in requested_cols)
+        if fld is not None and _exists_on_opportunity(fld)
     }
     sf_proxy_by_acc: Dict[str, Dict[str, Any]] = {}
     if requested_sf_fields and assignments_by_opp:
@@ -3337,8 +3385,8 @@ async def explorer_search(
                     if k.startswith("extra."):
                         data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                         continue
-                    if k.startswith("sf."):
-                        fld = k[3:]
+                    fld = _column_key_to_sf_field(k)
+                    if fld is not None:
                         # Mostrar el nombre de la Activity cuando se pide [sf] Opportunity Name
                         if fld == "Name":
                             data[k] = a.get("opportunity_name")
@@ -3406,8 +3454,8 @@ async def explorer_search(
                     if k.startswith("extra."):
                         data[k] = (extras_map.get(str(aid), {}) or {}).get(k)
                         continue
-                    if k.startswith("sf."):
-                        fld = k[3:]
+                    fld = _column_key_to_sf_field(k)
+                    if fld is not None:
                         if fld == "Name":
                             # usa el primer activity name como nombre de Opp
                             data[k] = (activities_names_by_acc.get(str(aid)) or [None])[0]
@@ -3802,7 +3850,12 @@ async def explorer_fill_columns(
     for k in requested_cols:
         if not k.startswith("sf."):
             continue
-        fld = k[3:]
+        # Vía _column_key_to_sf_field, no k[3:] a pelo: este endpoint es EL que recibe
+        # las claves con prefijo (explorerFillColumns las manda verbatim), así que un
+        # "sf.Assignment.Name" entraba aquí como "Assignment.Name" → SELECT → INVALID_FIELD.
+        fld = _column_key_to_sf_field(k)
+        if fld is None:
+            continue
         if _exists_on_opportunity(fld):
             opp_fields.add(fld)
         elif _exists_on_account(fld):
@@ -3810,7 +3863,7 @@ async def explorer_fill_columns(
     if acc_fields:
         acc_fields.update({"Id","Name"})  # mínimos de relación
 
-    opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f) or f.startswith("Account.")}
+    opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     select_parts = sorted(opp_fields_valid) + [f"Account.{f}" for f in sorted(acc_fields)]
     select_fields = ", ".join(select_parts)
 
@@ -4676,18 +4729,14 @@ async def explorer_search_within_drive_km(
         if _exists_on_opportunity(r.field):
             opp_fields.add(r.field)
 
-    # Columnas pedidas: Opportunity vs Account
+    # Columnas pedidas: sólo campos planos de Opportunity. La familia Account.* NO se
+    # selecciona aquí — la sirve una SOQL aparte contra Account (_build_account_map /
+    # _fetch_account_extras). Antes esto hacía k[3:] a pelo y se saltaba el filtro del
+    # punto, así que "sf.Assignment.Name" entraba en el SELECT en modo permisivo.
     for k in requested_cols:
-        if not k.startswith("sf."):
-            continue
-        raw = k[3:]
-        if raw.startswith("Account."):
-            inner = raw.split(".", 1)[1]
-            if _exists_on_account(inner):
-                opp_fields.add(f"Account.{inner}")
-        else:
-            if _exists_on_opportunity(raw):
-                opp_fields.add(raw)
+        fld = _column_key_to_sf_field(k) if k.startswith("sf.") else None
+        if fld is not None and _exists_on_opportunity(fld):
+            opp_fields.add(fld)
 
     opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     if (set(opp_fields) - opp_fields_valid):
@@ -4860,7 +4909,7 @@ async def explorer_search_within_drive_km(
         res = []
         for er in extra_rules:
             actual = vals.get(er.field)  # keys 'extra.*'
-            res.append(_eval_qual_rule(actual, er.operator, er.value))
+            res.append(_eval_extra_rule(er.field, actual, er.operator, er.value))
         return all(res) if glue_and else any(res)
 
     # Helper: applies all Python-side checks respecting root AND/OR logic.
@@ -5390,14 +5439,11 @@ async def explorer_search_nearby_multi(
     for r in sf_rules:
         if r.field.startswith("Account."): continue
         if _exists_on_opportunity(r.field): opp_fields.add(r.field)
+    # Igual que en /search/within-drive-km: sólo campos planos de Opportunity, vía el
+    # helper. Account.* lo sirve _build_account_map/_fetch_account_extras, no este SELECT.
     for k in requested_cols:
-        if not k.startswith("sf."): continue
-        raw = k[3:]
-        if raw.startswith("Account."):
-            inner = raw.split(".", 1)[1]
-            if _exists_on_account(inner): opp_fields.add(f"Account.{inner}")
-        else:
-            if _exists_on_opportunity(raw): opp_fields.add(raw)
+        fld = _column_key_to_sf_field(k) if k.startswith("sf.") else None
+        if fld is not None and _exists_on_opportunity(fld): opp_fields.add(fld)
 
     opp_fields_valid = {f for f in opp_fields if _exists_on_opportunity(f)}
     select_fields = ", ".join(sorted(opp_fields_valid))
@@ -5492,7 +5538,7 @@ async def explorer_search_nearby_multi(
         if not extra_rules: return True
         vals_d = extras_map.get(str(aid), {}) if extras_map else {}
         glue_and = (filters.get("logic") or "AND") == "AND"
-        res = [_eval_qual_rule(vals_d.get(er.field), er.operator, er.value) for er in extra_rules]
+        res = [_eval_extra_rule(er.field, vals_d.get(er.field), er.operator, er.value) for er in extra_rules]
         return all(res) if glue_and else any(res)
 
     _root_and = (filters.get("logic") or "AND") == "AND"

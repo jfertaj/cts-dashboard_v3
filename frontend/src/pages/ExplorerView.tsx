@@ -15,7 +15,8 @@ import FilterBuilder from "../components/FilterBuilder";
 import { filterGroupToFlat, removeRuleFromExpr, defaultExpr } from "../lib/filterLogic";
 import MapView from "../components/MapView";
 import ColumnPicker from "../components/ColumnPicker";
-import ChartModal from "../components/ChartModal";
+import ChartModal from "../components/charts/ChartModal";
+import CustomView, { DEFAULT_LEGEND_MAX, type ChartType } from "../components/charts/CustomView";
 import { displayCountry } from "../lib/countryUtils";
 import SiteDetailsModal from "../components/SiteDetailsModal";
 
@@ -36,6 +37,9 @@ import { EXPLORER_BOOT_KEY } from "../lib/cacheKeys";
 import { listenExplorerChange } from "../lib/events";
 import { sfLoginRedirect } from "../lib/salesforce";
 import { askAI, ChatResponse } from "../lib/ai";
+import { readDataCell } from "../lib/rowAccess";
+import { buildFillColumns } from "../lib/fillColumns";
+import { buildChartDataset } from "../lib/chartDataset";
 import Moby from "../assets/Moby.png";
 
 const OP_LABELS: Record<string, string> = {
@@ -81,6 +85,11 @@ const FRIENDLY_LABEL_OVERRIDES = new Map<string, string>([
   ["sf.Account.ShippingCity", "City"],
   ["Account.ShippingCity", "City"],
 ]);
+
+// Contiene el nombre de la cuenta + los botones Nearby / Details, así que por
+// defecto no se trunca: la tabla scrollea en horizontal en su lugar. Si el
+// usuario le fija un ancho arrastrando la cabecera, ese ancho manda y recorta.
+const ACCOUNT_NAME_COL_ID = "sf.Account.Name";
 
 // Build a normalized lookup for resilient matching
 function __normKeyForDict(k?: string): string {
@@ -354,9 +363,26 @@ const LS_KEYS = {
   globalFilter: `${STORAGE_NS}:globalFilter`,
   pageSize: `${STORAGE_NS}:pageSize`,
   columnOrder: `${STORAGE_NS}:columnOrder`,
+  columnWidths: `${STORAGE_NS}:columnWidths`,
   nearbyLayout: `${STORAGE_NS}:nearbyLayout`,
   nearbySideWidth: `${STORAGE_NS}:nearbySideWidth`,
 };
+
+// Límites al arrastrar el borde de una columna.
+const MIN_COLUMN_WIDTH = 80;
+const MAX_COLUMN_WIDTH = 1200;
+
+// localStorage es editable por el usuario y puede venir de una versión anterior:
+// nunca dejamos que un valor basura acabe en un style width.
+function sanitizeColumnWidths(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    out[key] = Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, Math.round(value)));
+  }
+  return out;
+}
 
 // Debug flag (puedes apagarlo luego)
 const DEBUG = true; // o lee de localStorage si prefieres
@@ -887,39 +913,6 @@ function TypeBadge({ type }: { type?: string | null }) {
   );
 }
 
-function readDataCell(row: any, key: string) {
-  const d = row?.data ?? {};
-
-  // 1) clave exacta tal cual viene del backend (p.ej. "sf.C_Number_of_T1D_Patients_currently_U_18__c")
-  if (d[key] !== undefined && d[key] !== null && String(d[key]).trim() !== "") return d[key];
-
-  // 2) misma clave sin el prefijo "sf."
-  const base = key.replace(/^sf\./, "");
-  if (d[base] !== undefined && d[base] !== null && String(d[base]).trim() !== "") return d[base];
-
-  // 3) variantes con underscores (por si acaso)
-  const k2 = key.replace(/\./g, "_");
-  if (d[k2] !== undefined && d[k2] !== null && String(d[k2]).trim() !== "") return d[k2];
-
-  const k3 = base.replace(/\./g, "_");
-  if (d[k3] !== undefined && d[k3] !== null && String(d[k3]).trim() !== "") return d[k3];
-
-  // 4) fallbacks a propiedades de fila "planas" (el backend ya las trae así)
-  //    - sf.Account.Name / Account.Name  -> row.account_name
-  //    - sf.Account.Id   / Account.Id    -> row.account_id
-  //    - country, city (o sus variantes SF) -> row.country / row.city
-  const kb = base.toLowerCase();
-  if (kb === 'account.name') return row?.account_name ?? undefined;
-  if (kb === 'account.id') return row?.account_id ?? undefined;
-  if (key === 'sf.Account.Name') return row?.account_name ?? undefined;
-  if (key === 'sf.Account.Id')   return row?.account_id ?? undefined;
-  if (kb === 'country' || kb === 'account.shippingcountry') return row?.country ?? undefined;
-  if (kb === 'city'    || kb === 'account.shippingcity')    return row?.city ?? undefined;
-
-  // ⚠️ Importante: devolver undefined para que TanStack Table pueda aplicar sortUndefined: 'last'
-  return undefined;
-}
-
 function shallowEqual(a: any, b: any) {
   // Para strings/números/bools/null/undefined vale con ===
   if (a === b) return true;
@@ -1246,6 +1239,11 @@ export default function ExplorerView() {
   const [columnOrder, setColumnOrder] = useState<string[]>(
     safeParse<string[]>(localStorage.getItem(LS_KEYS.columnOrder), [])
   );
+  // Anchos que el usuario ha fijado arrastrando el borde de la cabecera.
+  // Una columna ausente de este mapa se auto-dimensiona según su contenido.
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(
+    () => sanitizeColumnWidths(safeParse<unknown>(localStorage.getItem(LS_KEYS.columnWidths), {}))
+  );
 
   const [points, setPoints] = useState<ExplorerPoint[]>([]);
   const [rows, setRows] = useState<ExplorerRow[]>([]);
@@ -1308,8 +1306,66 @@ export default function ExplorerView() {
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.globalFilter, JSON.stringify(globalFilter)); }, [globalFilter]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.pageSize, JSON.stringify(pageSize)); }, [pageSize]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnOrder, JSON.stringify(columnOrder)); }, [columnOrder]);
+  useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.columnWidths, JSON.stringify(columnWidths)); }, [columnWidths]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbyLayout, JSON.stringify(nearbyLayout)); }, [nearbyLayout]);
   useDebouncedEffect(() => { localStorage.setItem(LS_KEYS.nearbySideWidth, JSON.stringify(nearbySideWidth)); }, [nearbySideWidth]);
+
+  // --- Redimensionado de columnas (arrastrar el borde derecho de la cabecera) ---
+  // Guarda el "cierre" del drag en curso para poder abortarlo si desmontamos.
+  const endColumnResizeRef = useRef<(() => void) | null>(null);
+  // Mientras se arrastra el tirador, el <th> no debe iniciar su drag-to-reorder.
+  const isResizingRef = useRef(false);
+  useEffect(() => () => { endColumnResizeRef.current?.(); }, []);
+
+  const startColumnResize = useCallback((columnId: string, e: React.MouseEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = e.currentTarget.closest("th");
+    if (!th) return;
+
+    // Si un arrastre anterior se quedó vivo (mouseup perdido), ciérralo antes de
+    // registrar otro: si no, sus listeners quedarían huérfanos y seguirían escribiendo.
+    endColumnResizeRef.current?.();
+
+    // Arrancamos del ancho REAL renderizado, no de un tamaño por defecto,
+    // para que la columna no pegue un salto en el primer píxel de arrastre.
+    const startX = e.clientX;
+    const startWidth = th.getBoundingClientRect().width;
+
+    const onMove = (ev: MouseEvent) => {
+      // Si soltaste el botón fuera de la ventana no llega el mouseup: el drag
+      // se quedaría pegado. ev.buttons === 0 significa "ya no hay botón pulsado".
+      if (ev.buttons === 0) { onEnd(); return; }
+      const raw = Math.round(startWidth + ev.clientX - startX);
+      const next = Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, raw));
+      setColumnWidths((prev) => (prev[columnId] === next ? prev : { ...prev, [columnId]: next }));
+    };
+    const onEnd = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      isResizingRef.current = false;
+      // Solo suéltate del ref si sigues siendo el drag activo.
+      if (endColumnResizeRef.current === onEnd) endColumnResizeRef.current = null;
+    };
+
+    isResizingRef.current = true;
+    endColumnResizeRef.current = onEnd;
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onEnd);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  // Doble clic en el tirador: la columna vuelve a auto-dimensionarse al contenido.
+  const resetColumnWidth = useCallback((columnId: string) => {
+    setColumnWidths((prev) => {
+      if (!(columnId in prev)) return prev;
+      const { [columnId]: _dropped, ...rest } = prev;
+      return rest;
+    });
+  }, []);
 
   // Auto-search when all filter rules are removed so the map restores full results
   const prevFiltersRulesLenRef = useRef(0);
@@ -1406,8 +1462,11 @@ export default function ExplorerView() {
 
     const currentRows = nearbyActive ? fullNearbyRows : fullRows;
 
-    // Columnas rellenables (excluye UNFILLABLE_COLUMNS)
-    const reqCols = Array.from(new Set((visibleColumns || []).filter(c => !UNFILLABLE_COLUMNS.has(c))));
+    // Columnas rellenables (excluye UNFILLABLE_COLUMNS).
+    // Las métricas del ChartModal van SIEMPRE, sean o no columnas visibles: la
+    // búsqueda en bloque las devuelve a null y el fill es su única fuente. Ver
+    // lib/fillColumns.
+    const reqCols = buildFillColumns(visibleColumns || [], UNFILLABLE_COLUMNS);
     if (!reqCols.length || !needsFill(currentRows, reqCols)) {
       dbg("fill skipped: no missing visible cells");
       return;
@@ -2141,7 +2200,7 @@ export default function ExplorerView() {
   const dynamicDefs = useMemo<ColumnDef<ExplorerRow>[]>(() =>
     (Array.isArray(visibleColumns) ? visibleColumns : []).map((k) => {
       // Dentro de dynamicDefs, en el caso especial de "sf.Account.Name"
-      if (k === "sf.Account.Name") {
+      if (k === ACCOUNT_NAME_COL_ID) {
         return {
           id: k,
           header: labelByKey.get(k) ?? prettyLabelFromKeyLabel(k, "Account Name"),
@@ -2307,13 +2366,29 @@ export default function ExplorerView() {
     getPaginationRowModel: getPaginationRowModel(),
   });
 
+  // 🔑 LO QUE SE GRAFICA ES LO QUE SE VE. `viewRows` es sólo el resultado del
+  // servidor; encima de él la tabla filtra en CLIENTE (búsqueda global + filtros
+  // por columna), y de ahí salen el contador de resultados y el export TSV. Los
+  // gráficos salen del mismo sitio, o agregarían centros que el usuario acaba de
+  // filtrar fuera y la cobertura anunciaría una población que no es la de la tabla.
+  // `.original` son los mismos objetos ExplorerRow de `viewRows`: pasar por el row
+  // model no pierde ninguna columna.
+  const filteredRowModel = table.getFilteredRowModel();
+  const chartRows = useMemo<ExplorerRow[]>(
+    () => filteredRowModel.rows.map((r) => r.original),
+    [filteredRowModel]
+  );
+
   // ==== Chart State (mover hooks DENTRO del componente) ====
-  type ChartType = "bar" | "line";
   const [chartOpen, setChartOpen] = useState(false);
   const [chartType, setChartType] = useState<ChartType>("bar");
   const [chartTitle, setChartTitle] = useState<string>("Chart");
   const [chartXKey, setChartXKey] = useState<string>("sf.Account.Name");
   const [chartYKeys, setChartYKeys] = useState<string[]>([]);
+  // Stacked y legend max viven aquí, no en CustomView: la pestaña Personalizado
+  // se desmonta al cambiar de pestaña y lo elegido se perdería en cada ida y vuelta.
+  const [chartStacked, setChartStacked] = useState<boolean>(true);
+  const [chartLegendMax, setChartLegendMax] = useState<number>(DEFAULT_LEGEND_MAX);
   const [chartYCandidates, setChartYCandidates] = useState<string[]>([]);
   const [chartXCandidates, setChartXCandidates] = useState<string[]>([]);
 
@@ -2330,62 +2405,22 @@ export default function ExplorerView() {
     return seen > 0 && numeric / seen >= 0.8;
   }, []);
 
-  // Construye el dataset plano para Recharts
-  const buildChartDataset = useCallback((
-    rowsIn: ExplorerRow[],
-    xKey: string,
-    yKeys: string[]
-  ) => {
-    // If X is 'country' or 'city', aggregate values by that dimension (sum per group)
-    const wantGroup = (xKey === 'country' || xKey === 'city');
-    if (wantGroup) {
-      const buckets = new Map<string, Record<string, any>>();
-      for (const r of rowsIn) {
-        const key = String(readDataCell(r as any, xKey) ?? '').trim() || '(empty)';
-        const bucket = buckets.get(key) || { [xKey]: key, __count__: 0 };
-        bucket.__count__ = (bucket.__count__ || 0) + 1;
-        for (const y of yKeys) {
-          if (y === '__count__') continue;
-          const raw = readDataCell(r as any, y);
-          const n = Number(String(raw ?? '').replace(/,/g, ''));
-          bucket[y] = (Number.isFinite(n) ? (bucket[y] || 0) + n : (bucket[y] || 0));
-        }
-        buckets.set(key, bucket);
-      }
-      return Array.from(buckets.values()).sort((a, b) => (b.__count__ ?? 0) - (a.__count__ ?? 0));
-    }
-    // Default: row-wise dataset
-    const arr: Array<Record<string, any>> = [];
-    for (const r of rowsIn) {
-      const row: Record<string, any> = {};
-      row[xKey] = readDataCell(r as any, xKey) ?? "";
-      row.__count__ = 1;
-      for (const y of yKeys) {
-        if (y === '__count__') continue;
-        const raw = readDataCell(r as any, y);
-        const n = Number(String(raw ?? '').replace(/,/g, ''));
-        row[y] = Number.isFinite(n) ? n : null;
-      }
-      arr.push(row);
-    }
-    return arr;
-  }, []);
-
-  // chartData is derived (not stored) — auto-updates whenever rows or axis config changes
+  // chartData is derived (not stored) — auto-updates whenever rows or axis config changes.
+  // El builder vive en lib/chartDataset: es una función pura y así queda testeable.
   const chartData = useMemo(() => {
     if (!chartOpen || !chartYKeys.length) return [];
-    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
-    if (!currentRows?.length) return [];
-    return buildChartDataset(currentRows, chartXKey, chartYKeys);
-  }, [chartOpen, nearbyActive, fullNearbyRows, fullRows, chartXKey, chartYKeys, buildChartDataset]);
+    if (!chartRows.length) return [];
+    return buildChartDataset(chartRows, chartXKey, chartYKeys);
+  }, [chartOpen, chartRows, chartXKey, chartYKeys]);
 
   // Abre el modal con defaults razonables
   const openChartWizard = useCallback(() => {
-    const currentRows = nearbyActive ? fullNearbyRows : fullRows;
-    if (!currentRows?.length) {
-      alert("No hay datos para graficar.");
-      return;
-    }
+    const currentRows = chartRows;
+    // El único caller es el botón "📊 Chart", que ya va disabled con 0 filas: este
+    // guard es inalcanzable HOY y por eso no avisa a nadie (el alert que había aquí
+    // era español en una UI inglesa y no podía renderizarse jamás). Se queda como
+    // red de seguridad por si mañana entra otro caller sin el disabled.
+    if (!currentRows?.length) return;
 
     // X por defecto: Account Name si existe, si no country/city
     const defaultX =
@@ -2414,9 +2449,10 @@ export default function ExplorerView() {
     // Default to Count if no numeric columns, otherwise use the numeric ones
     setChartYKeys(suggestedY.length ? suggestedY : ["__count__"]);
     setChartType("bar");
+    setChartStacked(true);
     setChartTitle("Explorer Chart");
     setChartOpen(true); // chartData recomputes automatically via useMemo
-  }, [nearbyActive, fullNearbyRows, fullRows, visibleColumns, table, isNumericColumn, buildChartDataset]);
+  }, [chartRows, visibleColumns, table, isNumericColumn]);
 
   // ====== Export TSV (toda la tabla filtrada) ======
   const sanitizeTSV = (val: any): string => {
@@ -2740,6 +2776,7 @@ export default function ExplorerView() {
                 localStorage.removeItem(LS_KEYS.globalFilter);
                 localStorage.removeItem(LS_KEYS.pageSize);
                 localStorage.removeItem(LS_KEYS.columnOrder);
+                localStorage.removeItem(LS_KEYS.columnWidths);
                 setVisibleColumns(DEFAULT_VISIBLE_COLUMNS);
                 setSorting([{ id: "country", desc: false }]);
                 setColumnFilters([]);
@@ -2747,6 +2784,7 @@ export default function ExplorerView() {
                 setPageSize(10);
                 setPageIndex(0);
                 setColumnOrder([]);
+                setColumnWidths({});
               }}
               className="text-sm rounded-md border px-3 py-1.5 hover:bg-gray-50"
               disabled={busy || bootLoading}
@@ -3036,33 +3074,38 @@ showPresets={false}
             data-testid="explorer-btn-chart"
             className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-40 inline-flex items-center gap-1"
             onClick={openChartWizard}
-            disabled={(nearbyActive ? fullNearbyRows : fullRows).length === 0}
+            disabled={chartRows.length === 0}
             title="Visualize current filtered rows as chart — updates automatically when filters change"
           >
             📊 Chart
-            {(nearbyActive ? fullNearbyRows : fullRows).length > 0 && (
+            {chartRows.length > 0 && (
               <span className="rounded-full bg-blue-200 px-1.5 py-0.5 text-xs font-medium">
-                {(nearbyActive ? fullNearbyRows : fullRows).length}
+                {chartRows.length}
               </span>
             )}
           </button>
           {/* Ask Moby button */}
           <button
+            data-testid="explorer-btn-ask-moby"
             className="rounded-md border px-2.5 py-1.5 hover:bg-indigo-50 flex items-center gap-1.5"
             onClick={() => {
-              const activeRows = nearbyActive ? fullNearbyRows : fullRows;
+              // `chartRows` = table.getFilteredRowModel() → lo mismo que ya ven el
+              // contador de resultados, el export TSV y el modal de gráficos. Antes
+              // esto usaba `fullRows`/`fullNearbyRows` (el array de respaldo SIN los
+              // filtros de cliente): Moby razonaba sobre centros que el usuario
+              // acababa de filtrar fuera y no podía ver.
               const labelMap: Record<string, string> = {};
               (fieldDefs as any[]).forEach((f: any) => { if (f?.key) labelMap[f.key] = f.label || f.key; });
               const contextTable = {
                 columns: visibleColumns.map(k => ({ key: k, label: labelMap[k] || k })),
-                rows: activeRows.slice(0, 500),
+                rows: chartRows.slice(0, 500),
               };
               try {
                 sessionStorage.setItem("moby_last_table_v1", JSON.stringify(contextTable));
                 sessionStorage.setItem("moby_last_filters_v1", JSON.stringify(filters));
               } catch {}
               window.dispatchEvent(new CustomEvent("cts:explorer:ask-ai", {
-                detail: { table: contextTable, filters, rowCount: activeRows.length },
+                detail: { table: contextTable, filters, rowCount: chartRows.length },
               }));
               window.history.pushState({}, "", `${window.location.origin}/chat`);
               window.dispatchEvent(new Event("popstate"));
@@ -3099,7 +3142,7 @@ showPresets={false}
             </button>
           </div>
         )}
-        <table className="min-w-full text-sm">
+        <table className="w-max min-w-full text-sm">
           <thead className="bg-gray-50">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
@@ -3124,12 +3167,16 @@ showPresets={false}
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const dir = header.column.getIsSorted() as false | "asc" | "desc";
+                  const isAccountName = header.column.id === ACCOUNT_NAME_COL_ID;
+                  const fixedWidth = columnWidths[header.column.id];
                   return (
                     <th
                       key={header.id}
                       data-testid="explorer-table-header"
                       draggable
                       onDragStart={(e) => {
+                        // Un gesto que empieza en el tirador es un resize, no un reorder.
+                        if (isResizingRef.current) { e.preventDefault(); return; }
                         e.dataTransfer.setData("text/plain", header.column.id);
                         e.dataTransfer.effectAllowed = "move";
                       }}
@@ -3148,7 +3195,8 @@ showPresets={false}
                           return base;
                         });
                       }}
-                      className="px-3 py-2 text-left font-semibold text-gray-700 select-none align-bottom max-w-[180px]"
+                      className={`relative px-3 py-2 text-left font-semibold text-gray-700 select-none align-bottom ${fixedWidth || isAccountName ? "" : "max-w-[180px]"}`}
+                      style={fixedWidth ? { width: fixedWidth, minWidth: fixedWidth, maxWidth: fixedWidth } : undefined}
                       title={String(header.column.columnDef.header ?? "")}
                     >
                       <button
@@ -3163,13 +3211,27 @@ showPresets={false}
                       {header.column.getCanFilter() ? (
                         <div className="mt-1">
                           <input
-                            className="border rounded-md px-2 py-1 text-xs w-48"
+                            className="border rounded-md px-2 py-1 text-xs w-full min-w-0"
                             placeholder="filter…"
                             value={(header.column.getFilterValue() as string) ?? ""}
                             onChange={(e) => header.column.setFilterValue(e.target.value)}
                           />
                         </div>
                       ) : null}
+                      {/* Tirador de redimensionado. draggable=false para que arrastrarlo
+                          no dispare el drag-to-reorder de la cabecera. */}
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Resize ${String(header.column.columnDef.header ?? header.column.id)} column`}
+                        draggable={false}
+                        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        onMouseDown={(e) => startColumnResize(header.column.id, e)}
+                        onDoubleClick={() => resetColumnWidth(header.column.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Drag to resize — double-click to auto-fit"
+                        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-violet-400/60 active:bg-violet-500"
+                      />
                     </th>
                   );
                 })}
@@ -3220,18 +3282,26 @@ showPresets={false}
                     />
                   </td>
                   {row.getVisibleCells().map((cell) => {
+                    const isAccountName = cell.column.id === ACCOUNT_NAME_COL_ID;
+                    const fixedWidth = columnWidths[cell.column.id];
                     const raw = cell.getValue();
+                    // El title se calcula para TODA columna, incluida Account Name:
+                    // es la que más se recorta cuando el usuario estrecha su ancho,
+                    // y por tanto la que más necesita el tooltip.
                     const strVal = raw == null ? "" : String(raw);
+                    const content = flexRender(
+                      cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
+                      cell.getContext()
+                    );
+                    // Sin ancho fijado, Account Name se muestra entera (la tabla scrollea).
+                    // Con ancho fijado manda el usuario: la celda recorta.
+                    const clips = !isAccountName || Boolean(fixedWidth);
                     return (
                     <td key={cell.id} data-testid="explorer-table-cell"
-                        className="px-3 py-2 max-w-[260px]"
+                        className={`px-3 py-2 overflow-hidden ${isAccountName ? "whitespace-nowrap" : ""} ${fixedWidth || isAccountName ? "" : "max-w-[260px]"}`}
+                        style={fixedWidth ? { width: fixedWidth, minWidth: fixedWidth, maxWidth: fixedWidth } : undefined}
                         title={strVal.length > 40 ? strVal : undefined}>
-                      <div className="truncate">
-                        {flexRender(
-                          cell.column.columnDef.cell ?? ((ctx) => String(ctx.getValue() ?? "")),
-                          cell.getContext()
-                        )}
-                      </div>
+                      {clips ? <div className="truncate">{content}</div> : content}
                     </td>
                     );
                   })}
@@ -3343,21 +3413,31 @@ showPresets={false}
         open={chartOpen}
         onClose={() => setChartOpen(false)}
         title={chartTitle}
-        data={chartData}
-        xKey={chartXKey}
-        yKeys={chartYKeys}
-        type={chartType}
-        xCandidates={chartXCandidates}
-        yCandidates={chartYCandidates}
-        labelByKey={labelByKey}
         onChangeTitle={(t) => setChartTitle(t)}
-        onChangeType={(t) => setChartType(t)}
-        onChangeXKey={(x) => setChartXKey(x)}
-        onToggleYKey={(y) => {
-          setChartYKeys(prev =>
-            prev.includes(y) ? prev.filter(k => k !== y) : [...prev, y]
-          );
-        }}
+        rows={chartRows}
+        custom={
+          <CustomView
+            title={chartTitle}
+            data={chartData}
+            xKey={chartXKey}
+            yKeys={chartYKeys}
+            type={chartType}
+            xCandidates={chartXCandidates}
+            yCandidates={chartYCandidates}
+            labelByKey={labelByKey}
+            stacked={chartStacked}
+            legendMax={chartLegendMax}
+            onChangeLegendMax={(n) => setChartLegendMax(n)}
+            onChangeType={(t) => setChartType(t)}
+            onChangeXKey={(x) => setChartXKey(x)}
+            onChangeStacked={(v) => setChartStacked(v)}
+            onToggleYKey={(y) => {
+              setChartYKeys(prev =>
+                prev.includes(y) ? prev.filter(k => k !== y) : [...prev, y]
+              );
+            }}
+          />
+        }
       />
     </div>
   );
