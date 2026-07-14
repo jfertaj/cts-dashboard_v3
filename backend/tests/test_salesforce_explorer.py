@@ -480,10 +480,45 @@ class TestColumnKeyToSfField:
         assert sfx._column_key_to_sf_field("Totally_Made_Up__c") is None
 
     def test_bare_key_rejected_even_in_permissive_mode(self):
-        # En modo permisivo _exists_on_opportunity() dice True a todo; el gate del
-        # catálogo curado es lo único que impide que una clave basura llegue al SOQL.
+        # OJO: "MemberName" NO está en ALLOWED_FIELDS, así que este test NUNCA ejercitó
+        # el gate que dice pinear — pasaba igual con el bug. Se conserva como regresión
+        # de la rama "clave desconocida", pero el gate de verdad lo pinean los tests de
+        # abajo (una clave que SÍ está en ALLOWED_FIELDS y NO es campo de Opportunity).
         sfx._DESCRIBE_PERMISSIVE = True
+        assert "MemberName" not in sfx.ALLOWED_FIELDS  # el test no probaba lo que creía
         assert sfx._column_key_to_sf_field("MemberName") is None
+
+    # -- EL AGUJERO REAL: claves que SÍ están en ALLOWED_FIELDS y NO son campos de
+    #    Opportunity. ALLOWED_FIELDS es un catálogo de COLUMNAS, no de campos de
+    #    Opportunity: contiene 9 "Assignment.*" (las sirve el proxy de Assignments) y
+    #    24 "Account.*". En modo permisivo _exists_on_opportunity() dice True a todo,
+    #    así que el gate del catálogo las deja pasar → "SELECT ..., Assignment.Name,
+    #    ... FROM Opportunity" → INVALID_FIELD → 500 en TODO /api/explorer/search.
+    def test_assignment_key_rejected_in_permissive_mode(self):
+        sfx._DESCRIBE_PERMISSIVE = True
+        assert "Assignment.Name" in sfx.ALLOWED_FIELDS  # pasa el gate del catálogo
+        assert sfx._exists_on_opportunity("Assignment.Name") is True  # permisivo: True a todo
+        assert sfx._column_key_to_sf_field("Assignment.Name") is None
+
+    def test_every_dotted_allowed_field_is_rejected_as_bare_key(self):
+        # Barrido de la CLASE de bug, no del único caso que encontró el revisor.
+        # Una clave pelada con "." es por definición un path de relación (Account.X,
+        # Assignment.X, qual.x, ...), jamás un campo plano de Opportunity.
+        sfx._DESCRIBE_PERMISSIVE = True
+        dotted = sorted(k for k in sfx.ALLOWED_FIELDS if "." in k)
+        assert len(dotted) == 33, f"cambió el catálogo: {len(dotted)} claves con punto"
+        leaked = [k for k in dotted if sfx._column_key_to_sf_field(k) is not None]
+        assert leaked == [], f"claves que se cuelan en el SELECT de Opportunity: {leaked}"
+
+    def test_no_legitimate_bare_opportunity_field_is_rejected(self):
+        # La otra cara: la regla del punto no puede cargarse ninguna clave legítima.
+        # Las 80 claves peladas de ALLOWED_FIELDS son campos reales de Opportunity
+        # (verificado contra config/sf_schema_full.json: 0 ausencias).
+        sfx._DESCRIBE_PERMISSIVE = True
+        bare = sorted(k for k in sfx.ALLOWED_FIELDS if "." not in k)
+        assert len(bare) == 80
+        dropped = [k for k in bare if sfx._column_key_to_sf_field(k) != k]
+        assert dropped == [], f"campos legítimos que dejaron de entrar en el SELECT: {dropped}"
 
     # -- las otras familias las sirve su propia rama: nunca van al SELECT --
     def test_account_key_is_not_an_opportunity_field(self):

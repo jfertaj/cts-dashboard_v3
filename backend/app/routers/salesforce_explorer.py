@@ -879,10 +879,6 @@ def _exists_on_opportunity(field_name: str) -> bool:
 def _exists_on_account(field_name: str) -> bool:
     return field_name in (_ACC_FIELD_SET or set())
 
-# Namespaces que sirve su propia rama del row builder (acc_map, qual JSONB, extras
-# batch, site DB): no son campos de Opportunity y jamás deben llegar al SELECT.
-_NON_OPP_COL_PREFIXES = ("Account.", "qual.", "extra.", "site.")
-
 def _column_key_to_sf_field(key: str) -> Optional[str]:
     """Resuelve una columna pedida al campo SF que hay que meter en el SELECT.
 
@@ -894,16 +890,30 @@ def _column_key_to_sf_field(key: str) -> Optional[str]:
                                     sf.* entraba en el SOQL y la búsqueda en bloque
                                     devolvía las ~360 claves a null.
 
-    La forma pelada se valida contra ALLOWED_FIELDS (el catálogo curado que alimenta
-    /api/explorer/fields — justo lo que el frontend puede pedir). No basta con
-    _exists_on_opportunity(): en modo permisivo dice True a todo, y una columna virtual
-    del frontend ("MemberName") acabaría en el SELECT reventando el SOQL con INVALID_FIELD.
+    La forma pelada tiene que pasar DOS filtros, y hacen falta los dos:
 
-    Devuelve None si la clave no es un campo de Opportunity/Account seleccionable.
+      1. Sin puntos. Una clave pelada con "." es un path de relación (Account.Name,
+         Assignment.Name, qual.x, extra.x, site.x) que sirve otra rama del row builder
+         (acc_map, el proxy de Assignments, el JSONB, la site DB), NUNCA un campo plano
+         de Opportunity.
+      2. En ALLOWED_FIELDS, el catálogo curado que alimenta /api/explorer/fields.
+
+    El filtro 1 NO es redundante con el 2: ALLOWED_FIELDS es un catálogo de COLUMNAS,
+    no de campos de Opportunity — contiene 24 "Account.*" y 9 "Assignment.*". Y el filtro
+    2 no puede apoyarse en _exists_on_opportunity(), que en modo permisivo (describe caído
+    al arrancar, y es STICKY para toda la vida del proceso) dice True a todo. Sin el
+    filtro 1, "Assignment.Name" pasaba el catálogo + el permisivo y aterrizaba en
+    "SELECT ..., Assignment.Name, ... FROM Opportunity" → INVALID_FIELD → 500 en TODAS
+    las búsquedas del Explorer.
+
+    Las 80 claves peladas de ALLOWED_FIELDS son campos reales de Opportunity y ninguna
+    lleva punto, así que el filtro 1 no descarta nada legítimo (lo pinea un test).
+
+    Devuelve None si la clave no es un campo de Opportunity seleccionable.
     """
     if key.startswith("sf."):
         return key[3:]
-    if key.startswith(_NON_OPP_COL_PREFIXES):
+    if "." in key:
         return None
     return key if key in ALLOWED_FIELDS else None
 
