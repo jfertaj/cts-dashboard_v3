@@ -66,20 +66,41 @@ export default function CustomView({
   const COLORS = ["#0072CE", "#00A99D", "#F37021", "#8E44AD", "#E74C3C", "#3498DB", "#2ECC71", "#F39C12"];
 
   // Pie: las porciones las monta `toPieSlices` (lib/chartDataset), que deja fuera
-  // a quien no reporta ninguna serie en vez de pintarlo como porción de cero.
+  // a quien no reporta ninguna serie (en vez de pintarlo como porción de cero) y
+  // a quien tiene valor negativo (un sector de ángulo negativo no es geometría).
   // Con varias series Y la porción es el total, bajo la clave PIE_TOTAL_KEY.
   const y0 = yKeys.length > 1 ? PIE_TOTAL_KEY : (yKeys[0] ?? "value");
-  const plotData = type === "pie" ? toPieSlices(data, xKey, yKeys) : [];
+  const { slices: plotData, negativeExcluded } =
+    type === "pie" ? toPieSlices(data, xKey, yKeys) : { slices: [], negativeExcluded: 0 };
   const showLegend = plotData.length <= 25;
 
-  // Un pie sin porciones (nadie reporta la métrica) se pintaría como un lienzo en
-  // blanco sin explicación: hay que decirlo, no dejar el hueco mudo.
+  // Un pie sin porciones se pintaría como un lienzo en blanco sin explicación: hay
+  // que decirlo. Y hay que decir LA VERDAD: si el pie se quedó vacío porque todas
+  // las filas eran negativas, "ningún centro reporta esta métrica" es falso —
+  // reportaron, y lo que no se puede es dibujarlo. Confundir los dos casos es la
+  // misma mentira (ausente vs. valor) que este módulo existe para no contar.
+  const pieEmptyMessage =
+    plotData.length > 0
+      ? null
+      : negativeExcluded > 0
+        ? "Todas las filas tienen valor negativo: hay dato, pero un pie no puede representarlo. Cambia a Bar o Line."
+        : "Ningún centro reporta esta métrica: no hay porciones que pintar.";
+
   const emptyMessage =
     data.length === 0 || yKeys.length === 0
       ? "Select at least one Y series."
-      : type === "pie" && plotData.length === 0
-        ? "Ningún centro reporta esta métrica: no hay porciones que pintar."
+      : type === "pie"
+        ? pieEmptyMessage
         : null;
+
+  // Bar y line SÍ pintan los negativos (bajo el eje). El pie no puede, así que la
+  // exclusión se ANUNCIA: una fila que desaparece sin explicación es exactamente
+  // el bug que este aviso existe para no repetir. Si el pie quedó VACÍO, el aviso
+  // sobra: `pieEmptyMessage` ya lo dice y repetirlo es ruido.
+  const negativeNote =
+    type === "pie" && negativeExcluded > 0 && plotData.length > 0
+      ? `${negativeExcluded} fila(s) con valor negativo quedan fuera del pie: una porción negativa no tiene geometría. Cambia a Bar o Line para verlas.`
+      : null;
 
   const Label = ({ children }: { children: React.ReactNode }) => (
     <span className="text-xs font-medium text-gray-700 mr-2">{children}</span>
@@ -217,6 +238,15 @@ export default function CustomView({
           </button>
         </div>
       </div>
+
+      {negativeNote && (
+        <p
+          data-testid="chart-pie-negative-note"
+          className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          {negativeNote}
+        </p>
+      )}
 
       {/* Chart */}
       <div ref={chartRef} className="p-4 bg-white">
