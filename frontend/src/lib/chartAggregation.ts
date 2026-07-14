@@ -22,6 +22,15 @@ export type CountryBucket = { country: string; value: number; sites: number };
  * Devuelve null (= AUSENTE) para vacíos, no numéricos y negativos. Nunca 0:
  * un centro que no reporta NO es un centro que reclutó a cero personas, y
  * confundirlos es el bug que este rediseño existe para evitar.
+ *
+ * ⚠️ Anular los NEGATIVOS es correcto **sólo aquí**. Este parser sirve a las
+ * cuatro vistas orientadas a pregunta (Países / Ranking / Distribución /
+ * Embudo), cuyas métricas son recuentos de pacientes: "cribados = -3" es dato
+ * corrupto, no un valor. El constructor genérico ("Personalizado" y el chart de
+ * Moby) pinta columnas ARBITRARIAS, donde un negativo — una delta, una
+ * diferencia — sí es dato legítimo; por eso tiene su propio parser,
+ * `toDatasetValue` en lib/chartDataset. **NO los unifiques**: sus reglas
+ * divergen a propósito y cada una está pineada por sus tests.
  */
 export function toMetricValue(raw: unknown): number | null {
   if (raw === null || raw === undefined) return null;
