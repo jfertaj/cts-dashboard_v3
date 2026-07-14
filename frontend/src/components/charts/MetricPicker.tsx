@@ -49,8 +49,14 @@ export default function MetricPicker({
         data-testid="chart-coverage"
         className={partial ? "text-amber-700" : "text-gray-500"}
       >
-        {coverage.withData} of {coverage.total} sites report {label.toLowerCase()}
-        {partial ? ` · ${coverage.missing} with no data, excluded` : ""}
+        {metricKey === COUNT_METRIC
+          // Contar centros no es una métrica que un centro "reporte": la cobertura
+          // siempre sería 100% y decir "215 of 215 sites report number of sites"
+          // es cierto y absurdo. Aquí el dato útil es simplemente cuántos hay.
+          ? `${coverage.total} sites`
+          : `${coverage.withData} of ${coverage.total} sites report ${label.toLowerCase()}${
+              partial ? ` · ${coverage.missing} with no data, excluded` : ""
+            }`}
       </span>
     </div>
   );
