@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toFunnelSteps, formatCount, formatPct } from "./FunnelView";
+import { toFunnelSteps, formatCount, formatPct, conversionText } from "./FunnelView";
 
 /**
  * La aritmética del embudo, aparte del render: es lo único que el usuario lee
@@ -76,6 +76,40 @@ describe("toFunnelSteps", () => {
     ]);
     expect(steps[1].retentionPct).toBe(150);
     expect(steps[1].barPct).toBe(150);
+  });
+});
+
+describe("conversionText", () => {
+  const steps = toFunnelSteps([
+    { stage: "Cribados", value: 100 },
+    { stage: "Stage 1 seguidos", value: 50 },
+    { stage: "Stage 2 seguidos", value: 20 },
+  ]);
+
+  it("la primera etapa no retiene de nadie: es el punto de partida", () => {
+    expect(conversionText(steps[0], true)).toBe("punto de partida");
+  });
+
+  it("las demás dicen qué retienen de la anterior Y qué queda de la cohorte", () => {
+    expect(conversionText(steps[2], false)).toBe(
+      "40 % de la etapa anterior · 20 % de los cribados"
+    );
+  });
+
+  it("sin base lo dice con palabras, no con un porcentaje inventado", () => {
+    const zeroBase = toFunnelSteps([
+      { stage: "Cribados", value: 50 },
+      { stage: "Stage 1 seguidos", value: 0 },
+      { stage: "Stage 2 seguidos", value: 0 },
+    ]);
+    // Stage 1 cribó 50 y siguió a 0: eso es un 0 % de verdad.
+    expect(conversionText(zeroBase[1], false)).toBe(
+      "0 % de la etapa anterior · 0 % de los cribados"
+    );
+    // Stage 2 arranca de una etapa vacía: no hay fracción que calcular.
+    expect(conversionText(zeroBase[2], false)).toBe(
+      "sin base: la etapa anterior suma 0 · 0 % de los cribados"
+    );
   });
 });
 

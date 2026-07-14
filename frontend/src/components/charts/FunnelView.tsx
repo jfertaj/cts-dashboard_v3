@@ -58,6 +58,20 @@ export function formatPct(pct: number | null): string {
   return `${pct.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`;
 }
 
+/**
+ * La caída, en palabras. "sin base" no se disfraza de porcentaje: si la etapa
+ * anterior suma 0 no hay fracción que calcular, y decir "0 %" ahí sería inventar
+ * una conversión que nadie ha medido.
+ */
+export function conversionText(step: FunnelStep, isFirst: boolean): string {
+  if (isFirst) return "punto de partida";
+  const retention =
+    step.retentionPct === null
+      ? "sin base: la etapa anterior suma 0"
+      : `${formatPct(step.retentionPct)} de la etapa anterior`;
+  return `${retention} · ${formatPct(step.ofFirstPct)} de los cribados`;
+}
+
 /** La caída se lee aquí aunque la barra sea un sliver: es texto, no geometría. */
 function StepCard({ step, isFirst }: { step: FunnelStep; isFirst: boolean }) {
   return (
@@ -71,9 +85,7 @@ function StepCard({ step, isFirst }: { step: FunnelStep; isFirst: boolean }) {
         {formatCount(step.value)}
       </p>
       <p data-testid="chart-funnel-conversion" className="text-sm text-gray-600">
-        {isFirst
-          ? "punto de partida"
-          : `${formatPct(step.retentionPct)} de la etapa anterior · ${formatPct(step.ofFirstPct)} de los cribados`}
+        {conversionText(step, isFirst)}
       </p>
     </li>
   );

@@ -350,6 +350,59 @@ test.describe("Explorer — modal de gráficos", () => {
     expect(Math.min(...widths)).toBeGreaterThan(10);
   });
 
+  /**
+   * CHART-11/12 — el Embudo.
+   *
+   * En el fixture solo Madrid reporta las tres etapas: 100 → 50 → 20. Con el eje
+   * ABSOLUTO viejo esas tres barras medían 100 : 50 : 20 y, con los números de
+   * producción (22.000 → 512 → 380), las dos últimas eran slivers de un píxel.
+   * Ahora la barra mide la RETENCIÓN de la etapa anterior: 100 % : 50 % : 40 %.
+   */
+  test("CHART-11: el embudo dice la conversión entre etapas en texto, no solo en barras", async ({ page }) => {
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_FUNNEL).click();
+
+    // Los absolutos siguen ahí: un embudo sin "cuántos" no sirve clínicamente.
+    const counts = await modal.locator(S.CHART_FUNNEL_COUNT).allInnerTexts();
+    expect(counts).toEqual(["100", "50", "20"]);
+
+    const conversions = await modal.locator(S.CHART_FUNNEL_CONVERSION).allInnerTexts();
+    expect(conversions[0]).toBe("punto de partida");
+    expect(conversions[1]).toContain("50 % de la etapa anterior");
+    // 20/50 = 40 % de la anterior, pero 20/100 = 20 % de la cohorte inicial. Las
+    // DOS cifras importan y son distintas: confundirlas es leer mal el embudo.
+    expect(conversions[2]).toContain("40 % de la etapa anterior");
+    expect(conversions[2]).toContain("20 % de los cribados");
+
+    // Y la cobertura sigue en primera línea: el embudo suma 1 de los 6 centros.
+    const coverage = modal.locator(S.CHART_COVERAGE);
+    await expect(coverage).toContainText("1 centros que reportan las tres métricas");
+    await expect(coverage).toContainText("5 centros excluidos");
+  });
+
+  test("CHART-12: las barras del embudo van en escala de retención, no de absolutos", async ({ page }) => {
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_FUNNEL).click();
+
+    // Barras HORIZONTALES: lo que codifica el valor es el ancho.
+    await expect.poll(async () => (await readBarGeometry(page)).painted, { timeout: 10_000 }).toBe(3);
+    const { widths } = await readBarGeometry(page);
+    const [first, second, third] = widths;
+
+    // Retención: 100 % → 50 % (50/100) → 40 % (20/50). En la escala ABSOLUTA
+    // vieja la tercera barra medía 20/100 = un quinto de la primera y la relación
+    // Stage 1 → Stage 2 no se veía. Aquí mide 40/100: esta razón es lo que
+    // distingue los dos diseños, y con el eje viejo este test se pone rojo.
+    expect(second / first).toBeCloseTo(0.5, 1);
+    expect(third / first).toBeCloseTo(0.4, 1);
+    // La tercera barra es 4/5 de la segunda: la caída Stage 1 → Stage 2 es LEGIBLE.
+    expect(third / second).toBeGreaterThan(0.7);
+
+    // Cada barra lleva pegado su absoluto y su conversión, por si el ojo falla.
+    const labels = await modal.locator(".recharts-label-list text").allTextContents(); // SVG: innerText no existe
+    expect(labels).toEqual(["100 (100 %)", "50 (50 %)", "20 (40 %)"]);
+  });
+
   test("CHART-10c: la línea acumulada del Pareto se dibuja entera", async ({ page }) => {
     const modal = await openChartModal(page);
     await modal.locator(S.CHART_TAB_DISTRIBUTION).click();
@@ -367,5 +420,92 @@ test.describe("Explorer — modal de gráficos", () => {
     };
 
     await expect.poll(isDrawn, { timeout: 10_000 }).toBe(true);
+  });
+});
+
+/**
+ * CHART-13 — la razón de ser del rediseño: "no reportó" y "reportó cero" no son
+ * lo mismo, y el embudo tiene que enseñarlos distintos.
+ *
+ * Fixture propio: Oviedo cribó a 50 personas y no siguió a NINGUNA. Sus dos
+ * ceros son datos. Berlín no reporta nada: no entra en el embudo (lo excluye la
+ * agregación, y la línea de cobertura lo dice).
+ */
+test.describe("Explorer — el embudo y el cero legítimo", () => {
+  const ZERO_ROWS = [
+    { account_id: "z1", account_name: "Centro Oviedo", country: "ES", city: "Oviedo",
+      data: { [SCREENED]: 50, [STAGE1]: 0, [STAGE2]: 0 } },
+    { account_id: "z2", account_name: "Centro Berlin", country: "DE", city: "Berlin", data: {} },
+  ];
+
+  test.beforeEach(async ({ page }) => {
+    await page.route("**/api/salesforce/me", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
+    );
+    await page.route("**/api/salesforce/map/bootstrap", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) })
+    );
+    await page.route("**/api/explorer/fields", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ fields: [{ key: SCREENED, label: "Screened", type: "number", source: "sf" }] }),
+      })
+    );
+    await page.route("**/api/explorer/search", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ points: [], rows: ZERO_ROWS, total: ZERO_ROWS.length }),
+      })
+    );
+    await page.goto("/explorer");
+    await expect(page.locator(S.EXPLORER_BTN_CHART)).toBeEnabled();
+  });
+
+  test("CHART-13: una etapa a cero se pinta como 0, no como un hueco", async ({ page }) => {
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_FUNNEL).click();
+
+    // El cero está escrito, con todas las letras. Un embudo que se comiera las
+    // etapas vacías dejaría al usuario creyendo que "no hay dato" cuando lo que
+    // hay es una caída total — la lectura opuesta.
+    const counts = await modal.locator(S.CHART_FUNNEL_COUNT).allInnerTexts();
+    expect(counts).toEqual(["50", "0", "0"]);
+
+    const conversions = await modal.locator(S.CHART_FUNNEL_CONVERSION).allInnerTexts();
+    // 0 de 50 seguidos: un 0 % medido de verdad.
+    expect(conversions[1]).toContain("0 % de la etapa anterior");
+    // Y de una etapa vacía no se puede calcular fracción: no se inventa un 0 %.
+    expect(conversions[2]).toContain("sin base");
+
+    // Etiqueta pegada a la barra de longitud cero: existe aunque la barra no.
+    const labels = await modal.locator(".recharts-label-list text").allTextContents(); // SVG: innerText no existe
+    expect(labels).toEqual(["50 (100 %)", "0 (0 %)", "0 (sin base)"]);
+
+    // Berlín no reporta: queda FUERA del embudo y la cobertura lo declara. Es la
+    // otra mitad de la distinción — el hueco no se cuenta como un cero.
+    const coverage = modal.locator(S.CHART_COVERAGE);
+    await expect(coverage).toContainText("1 centros que reportan las tres métricas");
+    await expect(coverage).toContainText("1 centros excluidos");
+  });
+
+  test("CHART-13b: sin ningún centro completo el embudo no dibuja nada y lo dice", async ({ page }) => {
+    // "Nadie reporta las tres" no puede parecerse a "todos reportan cero".
+    await page.route("**/api/explorer/search", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ points: [], rows: [ZERO_ROWS[1]], total: 1 }),
+      })
+    );
+    await page.reload();
+    await expect(page.locator(S.EXPLORER_BTN_CHART)).toBeEnabled();
+
+    const modal = await openChartModal(page);
+    await modal.locator(S.CHART_TAB_FUNNEL).click();
+
+    await expect(modal.locator(S.CHART_EMPTY)).toBeVisible();
+    await expect(modal.locator(S.CHART_FUNNEL_STEPS)).toHaveCount(0);
   });
 });

@@ -87,6 +87,11 @@ export const S = {
   CHART_NO_ROWS:            '[data-testid="chart-no-rows"]',
   CHART_SILENT_SITES:       '[data-testid="chart-silent-sites"]',
   CHART_CUSTOM_NOTE:        '[data-testid="chart-custom-note"]',      // "el que no reporta aparece como hueco, no como cero"
+  // Embudo: la conversión entre etapas va en TEXTO (la barra puede ser un sliver).
+  CHART_FUNNEL_STEPS:       '[data-testid="chart-funnel-steps"]',
+  CHART_FUNNEL_STEP:        '[data-testid="chart-funnel-step"]',
+  CHART_FUNNEL_COUNT:       '[data-testid="chart-funnel-count"]',      // el absoluto de la etapa
+  CHART_FUNNEL_CONVERSION:  '[data-testid="chart-funnel-conversion"]', // "74,2 % de la etapa anterior · …"
   // Recharts pinta un <g class="recharts-bar-rectangle"> también para los null,
   // así que las barras NO distinguen ausente de cero: el pie sí (una porción de
   // tamaño cero existe en el DOM y en la leyenda).
