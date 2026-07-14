@@ -79,23 +79,23 @@ describe("groupByCountry", () => {
     expect(groupByCountry([], SCREENED)).toEqual([]);
   });
 
-  it("agrupa bajo \"(sin país)\" cuando el país está vacío o ausente", () => {
+  it("agrupa bajo \"(no country)\" cuando el país está vacío o ausente", () => {
     const rows: DataRow[] = [
       { account_id: "x-1", account_name: "Centro X", country: "", data: { [SCREENED]: 10 } },
       { account_id: "x-2", account_name: "Centro Y", data: { [SCREENED]: 5 } },
     ];
     const out = groupByCountry(rows, SCREENED);
-    expect(out).toEqual([{ country: "(sin país)", value: 15, sites: 2 }]);
+    expect(out).toEqual([{ country: "(no country)", value: 15, sites: 2 }]);
   });
 
   // El backend manda `country: null` (así está tipado ExplorerRow), no undefined.
   // Si DataRow no admitiera null, ExplorerRow[] no sería asignable a DataRow[] y
   // el Explorer no podría pasar sus filas al modal sin castear.
-  it("agrupa bajo \"(sin país)\" cuando el país llega como null", () => {
+  it("agrupa bajo \"(no country)\" cuando el país llega como null", () => {
     const rows: DataRow[] = [
       { account_id: "x-1", account_name: "Centro X", country: null, city: null, data: { [SCREENED]: 7 } },
     ];
-    expect(groupByCountry(rows, SCREENED)).toEqual([{ country: "(sin país)", value: 7, sites: 1 }]);
+    expect(groupByCountry(rows, SCREENED)).toEqual([{ country: "(no country)", value: 7, sites: 1 }]);
   });
 });
 
@@ -139,10 +139,10 @@ describe("topN / bottomN", () => {
     ]);
   });
 
-  it("sin account_id ni account_name, accountId es \"\" y el nombre es \"(sin nombre)\"", () => {
+  it("sin account_id ni account_name, accountId es \"\" y el nombre es \"(unnamed)\"", () => {
     const rows: DataRow[] = [{ country: "ES", data: { [SCREENED]: 3 } }];
     expect(topN(rows, SCREENED, 1)).toEqual([
-      { accountId: "", name: "(sin nombre)", value: 3 },
+      { accountId: "", name: "(unnamed)", value: 3 },
     ]);
   });
 });
@@ -190,9 +190,9 @@ describe("funnel", () => {
     const rows = [full("completo", 100, 10, 2), named("parcial", 999)];
     const out = funnel(rows);
     expect(out.stages).toEqual([
-      { stage: "Cribados", value: 100 },
-      { stage: "Stage 1 seguidos", value: 10 },
-      { stage: "Stage 2 seguidos", value: 2 },
+      { stage: "Screened", value: 100 },
+      { stage: "Stage 1 followed", value: 10 },
+      { stage: "Stage 2 followed", value: 2 },
     ]);
     expect(out.sitesIncluded).toBe(1);
     expect(out.sitesExcluded).toBe(1);
@@ -207,9 +207,9 @@ describe("funnel", () => {
     expect(out.sitesIncluded).toBe(1);
     expect(out.sitesExcluded).toBe(0);
     expect(out.stages).toEqual([
-      { stage: "Cribados", value: 50 },
-      { stage: "Stage 1 seguidos", value: 0 },
-      { stage: "Stage 2 seguidos", value: 0 },
+      { stage: "Screened", value: 50 },
+      { stage: "Stage 1 followed", value: 0 },
+      { stage: "Stage 2 followed", value: 0 },
     ]);
   });
 

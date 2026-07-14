@@ -17,9 +17,9 @@ import {
  */
 describe("toFunnelSteps", () => {
   const REAL = [
-    { stage: "Cribados", value: 22000 },
-    { stage: "Stage 1 seguidos", value: 512 },
-    { stage: "Stage 2 seguidos", value: 380 },
+    { stage: "Screened", value: 22000 },
+    { stage: "Stage 1 followed", value: 512 },
+    { stage: "Stage 2 followed", value: 380 },
   ];
 
   it("la barra mide el absoluto: el embudo encoge porque el dato encoge", () => {
@@ -51,9 +51,9 @@ describe("toFunnelSteps", () => {
 
   it("un cero legítimo es un 0 %, no un hueco", () => {
     const steps = toFunnelSteps([
-      { stage: "Cribados", value: 50 },
-      { stage: "Stage 1 seguidos", value: 0 },
-      { stage: "Stage 2 seguidos", value: 0 },
+      { stage: "Screened", value: 50 },
+      { stage: "Stage 1 followed", value: 0 },
+      { stage: "Stage 2 followed", value: 0 },
     ]);
     expect(steps[1].value).toBe(0);
     expect(steps[1].retentionPct).toBe(0);
@@ -62,9 +62,9 @@ describe("toFunnelSteps", () => {
   it("sin base (etapa anterior a 0) la retención es null, nunca NaN ni Infinity", () => {
     // 0/0 = NaN y 3/0 = Infinity: los dos pintarían basura en el eje.
     const steps = toFunnelSteps([
-      { stage: "Cribados", value: 0 },
-      { stage: "Stage 1 seguidos", value: 0 },
-      { stage: "Stage 2 seguidos", value: 3 },
+      { stage: "Screened", value: 0 },
+      { stage: "Stage 1 followed", value: 0 },
+      { stage: "Stage 2 followed", value: 3 },
     ]);
     expect(steps[0].retentionPct).toBeNull();
     expect(steps[1].retentionPct).toBeNull();
@@ -74,9 +74,9 @@ describe("toFunnelSteps", () => {
   it("una etapa que crece por encima de la anterior lo dice: pasa de 100 %", () => {
     // Dato corrupto pero real: recortarlo a 100 % lo escondería.
     const steps = toFunnelSteps([
-      { stage: "Cribados", value: 10 },
-      { stage: "Stage 1 seguidos", value: 15 },
-      { stage: "Stage 2 seguidos", value: 15 },
+      { stage: "Screened", value: 10 },
+      { stage: "Stage 1 followed", value: 15 },
+      { stage: "Stage 2 followed", value: 15 },
     ]);
     expect(steps[1].retentionPct).toBe(150);
     // Y su barra es más larga que la de la etapa anterior, porque el dato lo es.
@@ -88,17 +88,17 @@ describe("funnelAxisMax", () => {
   it("el eje llega hasta la etapa mayor: las demás se miden contra ella", () => {
     // Un eje compartido y absoluto es lo que hace comparables las tres barras.
     expect(funnelAxisMax(toFunnelSteps([
-      { stage: "Cribados", value: 22000 },
-      { stage: "Stage 1 seguidos", value: 512 },
-      { stage: "Stage 2 seguidos", value: 380 },
+      { stage: "Screened", value: 22000 },
+      { stage: "Stage 1 followed", value: 512 },
+      { stage: "Stage 2 followed", value: 380 },
     ]))).toBe(22000);
   });
 
   it("con un dato corrupto el eje lo acomoda en vez de recortarlo", () => {
     expect(funnelAxisMax(toFunnelSteps([
-      { stage: "Cribados", value: 10 },
-      { stage: "Stage 1 seguidos", value: 15 },
-      { stage: "Stage 2 seguidos", value: 15 },
+      { stage: "Screened", value: 10 },
+      { stage: "Stage 1 followed", value: 15 },
+      { stage: "Stage 2 followed", value: 15 },
     ]))).toBe(15);
   });
 
@@ -106,60 +106,60 @@ describe("funnelAxisMax", () => {
     // Recharts con dominio [0, 0] no sabe dónde poner nada. El suelo de 1 es
     // sólo para el eje: las barras siguen midiendo 0, que es la verdad.
     expect(funnelAxisMax(toFunnelSteps([
-      { stage: "Cribados", value: 0 },
-      { stage: "Stage 1 seguidos", value: 0 },
-      { stage: "Stage 2 seguidos", value: 0 },
+      { stage: "Screened", value: 0 },
+      { stage: "Stage 1 followed", value: 0 },
+      { stage: "Stage 2 followed", value: 0 },
     ]))).toBe(1);
   });
 });
 
 describe("conversionText", () => {
   const steps = toFunnelSteps([
-    { stage: "Cribados", value: 100 },
-    { stage: "Stage 1 seguidos", value: 50 },
-    { stage: "Stage 2 seguidos", value: 20 },
+    { stage: "Screened", value: 100 },
+    { stage: "Stage 1 followed", value: 50 },
+    { stage: "Stage 2 followed", value: 20 },
   ]);
 
   it("la primera etapa no retiene de nadie: es el punto de partida", () => {
-    expect(conversionText(steps[0], true)).toBe("punto de partida");
+    expect(conversionText(steps[0], true)).toBe("starting point");
   });
 
   it("las demás dicen qué retienen de la anterior Y qué queda de la cohorte", () => {
     expect(conversionText(steps[2], false)).toBe(
-      "40 % de la etapa anterior · 20 % de los cribados"
+      "40% of the previous stage · 20% of those screened"
     );
   });
 
   it("sin base lo dice con palabras, no con un porcentaje inventado", () => {
     const zeroBase = toFunnelSteps([
-      { stage: "Cribados", value: 50 },
-      { stage: "Stage 1 seguidos", value: 0 },
-      { stage: "Stage 2 seguidos", value: 0 },
+      { stage: "Screened", value: 50 },
+      { stage: "Stage 1 followed", value: 0 },
+      { stage: "Stage 2 followed", value: 0 },
     ]);
     // Stage 1 cribó 50 y siguió a 0: eso es un 0 % de verdad.
     expect(conversionText(zeroBase[1], false)).toBe(
-      "0 % de la etapa anterior · 0 % de los cribados"
+      "0% of the previous stage · 0% of those screened"
     );
     // Stage 2 arranca de una etapa vacía: no hay fracción que calcular.
     expect(conversionText(zeroBase[2], false)).toBe(
-      "sin base: la etapa anterior suma 0 · 0 % de los cribados"
+      "no baseline: the previous stage is 0 · 0% of those screened"
     );
   });
 });
 
-describe("formato es-ES", () => {
+describe("formato en-US", () => {
   it("los recuentos llevan separador de millar", () => {
-    expect(formatCount(22000)).toBe("22.000");
+    expect(formatCount(22000)).toBe("22,000");
     expect(formatCount(0)).toBe("0");
   });
 
-  it("los porcentajes llevan coma decimal y como mucho un decimal", () => {
-    expect(formatPct(2.3272)).toBe("2,3 %");
-    expect(formatPct(100)).toBe("100 %");
-    expect(formatPct(0)).toBe("0 %");
+  it("los porcentajes llevan punto decimal y como mucho un decimal", () => {
+    expect(formatPct(2.3272)).toBe("2.3%");
+    expect(formatPct(100)).toBe("100%");
+    expect(formatPct(0)).toBe("0%");
   });
 
   it("sin base no hay porcentaje que enseñar", () => {
-    expect(formatPct(null)).toBe("sin base");
+    expect(formatPct(null)).toBe("no baseline");
   });
 });

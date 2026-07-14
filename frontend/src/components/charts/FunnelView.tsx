@@ -4,6 +4,7 @@ import {
 } from "recharts";
 import type { DataRow } from "../../lib/rowAccess";
 import { funnel, type FunnelStage } from "../../lib/chartAggregation";
+import { siteCount } from "../../lib/chartText";
 import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
 /**
@@ -61,27 +62,31 @@ export function funnelAxisMax(steps: FunnelStep[]): number {
   return Math.max(1, ...steps.map((step) => step.value));
 }
 
+// Locale explícito ("en-US") y no el del navegador: con un navegador en español
+// toLocaleString() sin argumentos escribiría "74,2" y "22.000" dentro de una UI
+// inglesa, donde la coma se lee como separador de millar. El número diría otra
+// cosa según quién lo mire, que es justo lo que este módulo no puede permitirse.
 export function formatCount(value: number): string {
-  return value.toLocaleString("es-ES");
+  return value.toLocaleString("en-US");
 }
 
 export function formatPct(pct: number | null): string {
-  if (pct === null) return "sin base";
-  return `${pct.toLocaleString("es-ES", { maximumFractionDigits: 1 })} %`;
+  if (pct === null) return "no baseline";
+  return `${pct.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
 }
 
 /**
- * La caída, en palabras. "sin base" no se disfraza de porcentaje: si la etapa
- * anterior suma 0 no hay fracción que calcular, y decir "0 %" ahí sería inventar
+ * La caída, en palabras. "no baseline" no se disfraza de porcentaje: si la etapa
+ * anterior suma 0 no hay fracción que calcular, y decir "0%" ahí sería inventar
  * una conversión que nadie ha medido.
  */
 export function conversionText(step: FunnelStep, isFirst: boolean): string {
-  if (isFirst) return "punto de partida";
+  if (isFirst) return "starting point";
   const retention =
     step.retentionPct === null
-      ? "sin base: la etapa anterior suma 0"
-      : `${formatPct(step.retentionPct)} de la etapa anterior`;
-  return `${retention} · ${formatPct(step.ofFirstPct)} de los cribados`;
+      ? "no baseline: the previous stage is 0"
+      : `${formatPct(step.retentionPct)} of the previous stage`;
+  return `${retention} · ${formatPct(step.ofFirstPct)} of those screened`;
 }
 
 /**
@@ -120,8 +125,8 @@ export default function FunnelView({ rows }: { rows: DataRow[] }) {
   if (result.sitesIncluded === 0) {
     return (
       <p data-testid="chart-empty" className="py-16 text-center text-gray-500">
-        Ningún centro del resultado actual reporta las tres métricas (cribados, Stage 1 y
-        Stage 2) a la vez, que es lo que el embudo necesita para no inventarse caídas.
+        No site in the current result reports all three metrics (screened, Stage 1 and
+        Stage 2) at once, which is what the funnel needs in order not to invent drop-offs.
       </p>
     );
   }
@@ -129,9 +134,9 @@ export default function FunnelView({ rows }: { rows: DataRow[] }) {
   return (
     <div className="space-y-3">
       <p data-testid="chart-coverage" className="text-sm text-amber-700">
-        Embudo calculado sobre {result.sitesIncluded} centros que reportan las tres métricas
+        Funnel computed over {siteCount(result.sitesIncluded)} reporting all three metrics
         {result.sitesExcluded > 0
-          ? ` · ${result.sitesExcluded} centros excluidos por reportarlas de forma incompleta`
+          ? ` · ${siteCount(result.sitesExcluded)} excluded for reporting them incompletely`
           : ""}
       </p>
 
@@ -161,7 +166,7 @@ export default function FunnelView({ rows }: { rows: DataRow[] }) {
             type="number"
             domain={[0, axisMax]}
             label={{
-              value: "personas (escala absoluta y compartida)",
+              value: "individuals (absolute, shared scale)",
               position: "insideBottom",
               offset: -12,
             }}

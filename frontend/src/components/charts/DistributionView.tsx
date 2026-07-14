@@ -4,6 +4,7 @@ import {
 } from "recharts";
 import type { DataRow } from "../../lib/rowAccess";
 import { coverageFor, distribution, SCREENED } from "../../lib/chartAggregation";
+import { siteCount } from "../../lib/chartText";
 import MetricPicker, { SITE_METRIC_OPTIONS } from "./MetricPicker";
 import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
@@ -30,7 +31,7 @@ export default function DistributionView({ rows }: { rows: DataRow[] }) {
       />
       {data.length === 0 ? (
         <p data-testid="chart-empty" className="py-16 text-center text-gray-500">
-          Ningún centro del resultado actual reporta esta métrica. Prueba con otra.
+          No site in the current result reports this metric. Try another one.
         </p>
       ) : (
         <>
@@ -44,12 +45,12 @@ export default function DistributionView({ rows }: { rows: DataRow[] }) {
               <YAxis yAxisId="right" orientation="right" unit="%" domain={[0, 100]} />
               <Tooltip />
               <Legend />
-              <Bar yAxisId="left" dataKey="value" name="Valor" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
+              <Bar yAxisId="left" dataKey="value" name="Value" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
               <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey="cumulativePct"
-                name="% acumulado"
+                name="Cumulative %"
                 stroke="#f59e0b"
                 dot={false}
                 {...NO_ENTRY_ANIMATION}
@@ -57,9 +58,11 @@ export default function DistributionView({ rows }: { rows: DataRow[] }) {
             </ComposedChart>
           </ResponsiveContainer>
           <p data-testid="chart-silent-sites" className="text-sm text-amber-700">
+            {/* "with no data" y no "zero": el centro mudo no está en el gráfico, no está
+                en él con una barra a cero. Confundirlo es el bug que el rediseño arregla. */}
             {pareto.missingSites === 0
-              ? "Todos los centros del resultado actual reportan esta métrica."
-              : `${pareto.missingSites} centros no reportan esta métrica y no aparecen en el gráfico.`}
+              ? "Every site in the current result reports this metric."
+              : `${siteCount(pareto.missingSites)} with no data for this metric — not shown in the chart.`}
           </p>
         </>
       )}

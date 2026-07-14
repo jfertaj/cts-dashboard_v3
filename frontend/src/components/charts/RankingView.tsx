@@ -56,7 +56,7 @@ export default function RankingView({ rows }: { rows: DataRow[] }) {
       </div>
       {data.length === 0 ? (
         <p data-testid="chart-empty" className="py-16 text-center text-gray-500">
-          Ningún centro del resultado actual reporta esta métrica. Prueba con otra.
+          No site in the current result reports this metric. Try another one.
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={Math.max(280, data.length * 32)}>

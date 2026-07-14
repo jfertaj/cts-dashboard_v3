@@ -9,11 +9,11 @@ import ModalFrame from "./ModalFrame";
 export type ChartTab = "countries" | "ranking" | "distribution" | "funnel" | "custom";
 
 const TABS: Array<{ key: ChartTab; label: string }> = [
-  { key: "countries", label: "Países" },
+  { key: "countries", label: "Countries" },
   { key: "ranking", label: "Ranking" },
-  { key: "distribution", label: "Distribución" },
-  { key: "funnel", label: "Embudo" },
-  { key: "custom", label: "Personalizado" },
+  { key: "distribution", label: "Distribution" },
+  { key: "funnel", label: "Funnel" },
+  { key: "custom", label: "Custom" },
 ];
 
 export default function ChartModal({
@@ -66,7 +66,7 @@ export default function ChartModal({
           devolvió nada. Con rows vacío NO se renderiza ninguna vista. */}
       {rows.length === 0 ? (
         <p data-testid="chart-no-rows" className="py-16 text-center text-gray-500">
-          No hay filas en el resultado actual. Ajusta los filtros del Explorer.
+          No rows in the current result. Adjust the Explorer filters.
         </p>
       ) : (
         <>
@@ -81,9 +81,9 @@ export default function ChartModal({
                   como las otras cuatro vistas: el hueco hay que nombrarlo, o el
                   usuario lo lee como "no lo han pintado" en vez de "no hay dato". */}
               <p data-testid="chart-custom-note" className="text-sm text-gray-600">
-                El centro que no reporta una métrica aparece como hueco, no como cero: no
-                se pinta barra. A diferencia de Países, Ranking, Distribución y Embudo,
-                esta pestaña no declara cuántos centros quedan fuera.
+                A site that does not report a metric is left as a gap, not as a zero: no bar
+                is drawn for it. Unlike Countries, Ranking, Distribution and Funnel, this tab
+                does not state how many sites are left out.
               </p>
               {custom}
             </div>

@@ -33,7 +33,7 @@ const ROWS = [
     data: { [SCREENED]: 0 } },
 ];
 
-const COUNT_METRIC_LABEL = "Número de centros";
+const COUNT_METRIC_LABEL = "Number of sites";
 
 /** Despliega el modal de gráficos desde la barra de herramientas del Explorer. */
 async function openChartModal(page: Page) {
@@ -105,19 +105,19 @@ test.describe("Explorer — modal de gráficos", () => {
 
     // 4 de los 6 centros del fixture reportan cribados — Lisboa reporta un 0, que
     // es reportar. Los otros 2 quedan excluidos, no contados como cero.
-    await expect(coverage).toContainText("4 de 6 centros reportan");
-    await expect(coverage).toContainText("2 sin dato, excluidos");
+    await expect(coverage).toContainText("4 of 6 sites report");
+    await expect(coverage).toContainText("2 with no data, excluded");
     const screenedText = await coverage.innerText();
 
     // Stage 2 solo lo reporta 1 centro: la cobertura tiene que reflejarlo.
     await modal.locator(S.CHART_METRIC_SELECT).selectOption(STAGE2);
-    await expect(coverage).toContainText("1 de 6 centros reportan");
-    await expect(coverage).toContainText("5 sin dato, excluidos");
+    await expect(coverage).toContainText("1 of 6 sites report");
+    await expect(coverage).toContainText("5 with no data, excluded");
 
     // Y Stage 1, 2 centros. La línea se mueve con la métrica: si se quedara
     // clavada, el usuario leería el gráfico creyendo que cubre los 6 centros.
     await modal.locator(S.CHART_METRIC_SELECT).selectOption(STAGE1);
-    await expect(coverage).toContainText("2 de 6 centros reportan");
+    await expect(coverage).toContainText("2 of 6 sites report");
     expect(await coverage.innerText()).not.toBe(screenedText);
   });
 
@@ -182,8 +182,8 @@ test.describe("Explorer — modal de gráficos", () => {
     // dejarlo puesto sería mentir en la otra dirección.)
     const note = modal.locator(S.CHART_CUSTOM_NOTE);
     await expect(note).toBeVisible();
-    await expect(note).toContainText("hueco");
-    await expect(note).not.toContainText("aparece como cero");
+    await expect(note).toContainText("as a gap, not as a zero");
+    await expect(note).not.toContainText("appears as a zero");
 
     // Y es exclusiva de esta pestaña: las otras cuatro sí declaran su cobertura.
     await modal.locator(S.CHART_TAB_COUNTRIES).click();
@@ -235,10 +235,10 @@ test.describe("Explorer — modal de gráficos", () => {
     const modal = await openChartModal(page);
     const coverage = modal.locator(S.CHART_COVERAGE);
 
-    // Con el bug: "4 de 6 centros reportan" — los 6 del resultado del servidor.
-    await expect(coverage).toContainText("1 de 2 centros reportan");
-    await expect(coverage).toContainText("1 sin dato, excluidos");
-    await expect(coverage).not.toContainText("de 6 centros");
+    // Con el bug: "4 of 6 sites report" — los 6 del resultado del servidor.
+    await expect(coverage).toContainText("1 of 2 sites report");
+    await expect(coverage).toContainText("1 with no data, excluded");
+    await expect(coverage).not.toContainText("of 6 sites");
   });
 
   test("CHART-9: el constructor Personalizado también grafica solo las filas filtradas", async ({ page }) => {
@@ -296,14 +296,14 @@ test.describe("Explorer — modal de gráficos", () => {
   /** Cada pestaña, con las barras de valor > 0 que su fixture debe pintar. */
   const PAINTED_BARS: Array<{ tab: string; label: string; positiveMarks: number }> = [
     // ES=160, IT=40 y PT=0 (el cero de Lisboa no dibuja barra).
-    { tab: S.CHART_TAB_COUNTRIES, label: "Países", positiveMarks: 2 },
+    { tab: S.CHART_TAB_COUNTRIES, label: "Countries", positiveMarks: 2 },
     // Madrid 100, Barcelona 60, Milano 40 (Lisboa 0).
     { tab: S.CHART_TAB_RANKING, label: "Ranking", positiveMarks: 3 },
-    { tab: S.CHART_TAB_DISTRIBUTION, label: "Distribución", positiveMarks: 3 },
+    { tab: S.CHART_TAB_DISTRIBUTION, label: "Distribution", positiveMarks: 3 },
     // Solo Madrid reporta las tres etapas: 100 → 50 → 20.
-    { tab: S.CHART_TAB_FUNNEL, label: "Embudo", positiveMarks: 3 },
+    { tab: S.CHART_TAB_FUNNEL, label: "Funnel", positiveMarks: 3 },
     // Constructor fila-a-fila: una barra por centro que reporta cribados.
-    { tab: S.CHART_TAB_CUSTOM, label: "Personalizado", positiveMarks: 3 },
+    { tab: S.CHART_TAB_CUSTOM, label: "Custom", positiveMarks: 3 },
   ];
 
   test("CHART-10: las barras de las cinco pestañas se pintan con geometría real", async ({ page }) => {
@@ -375,17 +375,17 @@ test.describe("Explorer — modal de gráficos", () => {
     expect(counts).toEqual(["100", "50", "20"]);
 
     const conversions = await modal.locator(S.CHART_FUNNEL_CONVERSION).allInnerTexts();
-    expect(conversions[0]).toBe("punto de partida");
-    expect(conversions[1]).toContain("50 % de la etapa anterior");
+    expect(conversions[0]).toBe("starting point");
+    expect(conversions[1]).toContain("50% of the previous stage");
     // 20/50 = 40 % de la anterior, pero 20/100 = 20 % de la cohorte inicial. Las
     // DOS cifras importan y son distintas: confundirlas es leer mal el embudo.
-    expect(conversions[2]).toContain("40 % de la etapa anterior");
-    expect(conversions[2]).toContain("20 % de los cribados");
+    expect(conversions[2]).toContain("40% of the previous stage");
+    expect(conversions[2]).toContain("20% of those screened");
 
     // Y la cobertura sigue en primera línea: el embudo suma 1 de los 6 centros.
     const coverage = modal.locator(S.CHART_COVERAGE);
-    await expect(coverage).toContainText("1 centros que reportan las tres métricas");
-    await expect(coverage).toContainText("5 centros excluidos");
+    await expect(coverage).toContainText("1 site reporting all three metrics");
+    await expect(coverage).toContainText("5 sites excluded");
   });
 
   test("CHART-12: la barra del embudo mide el absoluto y encoge con el dato", async ({ page }) => {
@@ -457,10 +457,12 @@ test.describe("Explorer — modal de gráficos", () => {
     // Lo que el ojo no puede medir en el sliver, lo lee en la tarjeta: de los 512
     // que llegaron a Stage 1, el 74,2 % siguió a Stage 2.
     const conversions = await modal.locator(S.CHART_FUNNEL_CONVERSION).allInnerTexts();
-    expect(conversions[2]).toContain("74,2 % de la etapa anterior");
-    expect(conversions[2]).toContain("1,7 % de los cribados");
+    // Formato inglés: punto decimal y coma de millar. Con "74,2 %" un lector
+    // anglófono lee setecientos cuarenta y dos.
+    expect(conversions[2]).toContain("74.2% of the previous stage");
+    expect(conversions[2]).toContain("1.7% of those screened");
     const counts = await modal.locator(S.CHART_FUNNEL_COUNT).allInnerTexts();
-    expect(counts).toEqual(["22.000", "512", "380"]);
+    expect(counts).toEqual(["22,000", "512", "380"]);
   });
 
   test("CHART-10c: la línea acumulada del Pareto se dibuja entera", async ({ page }) => {
@@ -535,9 +537,9 @@ test.describe("Explorer — el embudo y el cero legítimo", () => {
 
     const conversions = await modal.locator(S.CHART_FUNNEL_CONVERSION).allInnerTexts();
     // 0 de 50 seguidos: un 0 % medido de verdad.
-    expect(conversions[1]).toContain("0 % de la etapa anterior");
+    expect(conversions[1]).toContain("0% of the previous stage");
     // Y de una etapa vacía no se puede calcular fracción: no se inventa un 0 %.
-    expect(conversions[2]).toContain("sin base");
+    expect(conversions[2]).toContain("no baseline");
 
     // Etiqueta pegada a la barra de longitud cero: existe aunque la barra no.
     const labels = await modal.locator(".recharts-label-list text").allTextContents(); // SVG: innerText no existe
@@ -546,8 +548,8 @@ test.describe("Explorer — el embudo y el cero legítimo", () => {
     // Berlín no reporta: queda FUERA del embudo y la cobertura lo declara. Es la
     // otra mitad de la distinción — el hueco no se cuenta como un cero.
     const coverage = modal.locator(S.CHART_COVERAGE);
-    await expect(coverage).toContainText("1 centros que reportan las tres métricas");
-    await expect(coverage).toContainText("1 centros excluidos");
+    await expect(coverage).toContainText("1 site reporting all three metrics");
+    await expect(coverage).toContainText("1 site excluded");
   });
 
   test("CHART-13b: sin ningún centro completo el embudo no dibuja nada y lo dice", async ({ page }) => {

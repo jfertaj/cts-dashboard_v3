@@ -12,7 +12,7 @@ import { SCREENED, STAGE1, STAGE2, ASSIGNMENTS } from "../../src/lib/chartAggreg
  * `POST /api/explorer/columns/fill`. Con un fixture que regala los valores, un
  * frontend que jamás pide las métricas al servidor pasa los tests en verde —
  * que es exactamente lo que ocurrió: 63 tests unitarios, 118 E2E y tres
- * revisores no vieron que Países anunciaba "0 de 215 centros reportan" contra
+ * revisores no vieron que Países anunciaba "0 of 215 sites report" contra
  * producción cuando la verdad eran 81.
  *
  * Así que aquí el contrato del fixture es el del backend real:
@@ -128,9 +128,9 @@ test.describe("Explorer — el chart pide sus métricas al servidor (fixture rea
     const coverage = modal.locator(S.CHART_COVERAGE);
 
     // 4 de los 6 centros reportan cribados (Lisboa reporta un 0, que es reportar).
-    // Con el bug: "0 de 6 centros reportan" — nadie le pidió la columna al servidor.
-    await expect(coverage).toContainText("4 de 6 centros reportan");
-    await expect(coverage).not.toContainText("0 de 6 centros reportan");
+    // Con el bug: "0 of 6 sites report" — nadie le pidió la columna al servidor.
+    await expect(coverage).toContainText("4 of 6 sites report");
+    await expect(coverage).not.toContainText("0 of 6 sites report");
 
     // Y la métrica llegó porque el código la PIDIÓ, no porque el fixture la regalara.
     expect(filledColumns.has(SCREENED)).toBe(true);
@@ -142,10 +142,10 @@ test.describe("Explorer — el chart pide sus métricas al servidor (fixture rea
     // Stage 2 sólo lo reporta Madrid: si el fill no lo hubiera pedido, el Embudo
     // no tendría un solo centro completo y no podría renderizarse jamás.
     await modal.locator(S.CHART_METRIC_SELECT).selectOption(STAGE2);
-    await expect(modal.locator(S.CHART_COVERAGE)).toContainText("1 de 6 centros reportan");
+    await expect(modal.locator(S.CHART_COVERAGE)).toContainText("1 of 6 sites report");
 
     await modal.locator(S.CHART_METRIC_SELECT).selectOption(STAGE1);
-    await expect(modal.locator(S.CHART_COVERAGE)).toContainText("2 de 6 centros reportan");
+    await expect(modal.locator(S.CHART_COVERAGE)).toContainText("2 of 6 sites report");
 
     for (const metric of [SCREENED, STAGE1, STAGE2, ASSIGNMENTS]) {
       expect(filledColumns.has(metric), `el fill nunca pidió ${metric}`).toBe(true);
@@ -161,8 +161,8 @@ test.describe("Explorer — el chart pide sus métricas al servidor (fixture rea
     // (El Embudo no lleva selector de métrica, así que su línea de cobertura
     // tiene redacción propia — no es la de MetricPicker.)
     const coverage = modal.locator(S.CHART_COVERAGE);
-    await expect(coverage).toContainText("sobre 1 centros que reportan las tres métricas");
-    await expect(coverage).toContainText("5 centros excluidos");
+    await expect(coverage).toContainText("over 1 site reporting all three metrics");
+    await expect(coverage).toContainText("5 sites excluded");
     await expect(modal.locator(S.CHART_EMPTY)).toHaveCount(0);
   });
 });

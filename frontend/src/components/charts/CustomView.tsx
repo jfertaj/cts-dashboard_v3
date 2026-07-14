@@ -84,8 +84,8 @@ export default function CustomView({
     plotData.length > 0
       ? null
       : negativeExcluded > 0
-        ? "Todas las filas tienen valor negativo: hay dato, pero un pie no puede representarlo. Cambia a Bar o Line."
-        : "Ningún centro reporta esta métrica: no hay porciones que pintar.";
+        ? "Every row has a negative value: the data is there, but a pie cannot show it. Switch to Bar or Line."
+        : "No site reports this metric: there are no slices to draw.";
 
   const emptyMessage =
     data.length === 0 || yKeys.length === 0
@@ -100,7 +100,7 @@ export default function CustomView({
   // sobra: `pieEmptyMessage` ya lo dice y repetirlo es ruido.
   const negativeNote =
     type === "pie" && negativeExcluded > 0 && plotData.length > 0
-      ? `${negativeExcluded} fila(s) con valor negativo quedan fuera del pie: una porción negativa no tiene geometría. Cambia a Bar o Line para verlas.`
+      ? `${negativeExcluded} row(s) with a negative value are left out of the pie: a negative slice has no geometry. Switch to Bar or Line to see them.`
       : null;
 
   const Label = ({ children }: { children: React.ReactNode }) => (

@@ -65,14 +65,14 @@ async function readBarGeometry(page: Page): Promise<BarGeometry> {
 /** Cada pestaña con las barras de valor > 0 que su fixture debe pintar. */
 const TABS: Array<{ tab: string; label: string; positiveMarks: number }> = [
   // ES=160, IT=40. El 0 de PT (Lisboa) no dibuja barra: alto 0.
-  { tab: S.CHART_TAB_COUNTRIES, label: "Países", positiveMarks: 2 },
+  { tab: S.CHART_TAB_COUNTRIES, label: "Countries", positiveMarks: 2 },
   // Madrid 100, Barcelona 60, Milano 40 (Lisboa 0).
   { tab: S.CHART_TAB_RANKING, label: "Ranking", positiveMarks: 3 },
-  { tab: S.CHART_TAB_DISTRIBUTION, label: "Distribución", positiveMarks: 3 },
+  { tab: S.CHART_TAB_DISTRIBUTION, label: "Distribution", positiveMarks: 3 },
   // Solo Madrid reporta las tres etapas: 100 → 50 → 20.
-  { tab: S.CHART_TAB_FUNNEL, label: "Embudo", positiveMarks: 3 },
+  { tab: S.CHART_TAB_FUNNEL, label: "Funnel", positiveMarks: 3 },
   // Constructor fila-a-fila: una barra por centro que reporta cribados.
-  { tab: S.CHART_TAB_CUSTOM, label: "Personalizado", positiveMarks: 3 },
+  { tab: S.CHART_TAB_CUSTOM, label: "Custom", positiveMarks: 3 },
 ];
 
 test.describe("Explorer — el gráfico pinta sin depender de la animación", () => {

@@ -58,7 +58,7 @@ export function groupByCountry(rows: DataRow[], metricKey: string): CountryBucke
   for (const row of rows) {
     const value = valueOf(row, metricKey);
     if (value === null) continue; // el que no reporta no entra: ni suma, ni cuenta
-    const country = String(row.country ?? "").trim() || "(sin país)";
+    const country = String(row.country ?? "").trim() || "(no country)";
     const bucket = buckets.get(country) ?? { country, value: 0, sites: 0 };
     bucket.value += value;
     bucket.sites += 1;
@@ -80,7 +80,7 @@ function sitesWithData(rows: DataRow[], metricKey: string): SiteValue[] {
     if (value === null) continue;
     out.push({
       accountId: String(row.account_id ?? row.account_name ?? ""),
-      name: String(row.account_name ?? "(sin nombre)"),
+      name: String(row.account_name ?? "(unnamed)"),
       value,
     });
   }
@@ -140,9 +140,9 @@ export function funnel(rows: DataRow[]): Funnel {
     complete.reduce((acc, site) => acc + pick(site), 0);
   return {
     stages: [
-      { stage: "Cribados", value: sum((s) => s.screened) },
-      { stage: "Stage 1 seguidos", value: sum((s) => s.stage1) },
-      { stage: "Stage 2 seguidos", value: sum((s) => s.stage2) },
+      { stage: "Screened", value: sum((s) => s.screened) },
+      { stage: "Stage 1 followed", value: sum((s) => s.stage1) },
+      { stage: "Stage 2 followed", value: sum((s) => s.stage2) },
     ],
     sitesIncluded: complete.length,
     sitesExcluded: rows.length - complete.length,

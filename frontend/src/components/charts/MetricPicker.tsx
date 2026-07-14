@@ -11,7 +11,7 @@ export const METRIC_OPTIONS: MetricOption[] = [
   { key: STAGE1, label: "Stage 1 individuals followed" },
   { key: STAGE2, label: "Stage 2 individuals followed" },
   { key: ASSIGNMENTS, label: "Assignments (count)" },
-  { key: COUNT_METRIC, label: "Número de centros" },
+  { key: COUNT_METRIC, label: "Number of sites" },
 ];
 
 // Ranking y Distribución operan centro a centro: "rankear centros por número de
@@ -33,7 +33,7 @@ export default function MetricPicker({
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <label className="flex items-center gap-2">
-        <span className="text-gray-600">Métrica</span>
+        <span className="text-gray-600">Metric</span>
         <select
           data-testid="chart-metric-select"
           className="border rounded-md px-2 py-1"
@@ -49,8 +49,8 @@ export default function MetricPicker({
         data-testid="chart-coverage"
         className={partial ? "text-amber-700" : "text-gray-500"}
       >
-        {coverage.withData} de {coverage.total} centros reportan {label.toLowerCase()}
-        {partial ? ` · ${coverage.missing} sin dato, excluidos` : ""}
+        {coverage.withData} of {coverage.total} sites report {label.toLowerCase()}
+        {partial ? ` · ${coverage.missing} with no data, excluded` : ""}
       </span>
     </div>
   );

@@ -6,6 +6,7 @@ import type { DataRow } from "../../lib/rowAccess";
 import {
   coverageFor, groupByCountry, SCREENED, type CountryBucket,
 } from "../../lib/chartAggregation";
+import { siteCount } from "../../lib/chartText";
 import MetricPicker, { METRIC_OPTIONS } from "./MetricPicker";
 import { NO_ENTRY_ANIMATION } from "./chartDefaults";
 
@@ -27,7 +28,7 @@ export default function CountriesView({ rows }: { rows: DataRow[] }) {
       />
       {data.length === 0 ? (
         <p data-testid="chart-empty" className="py-16 text-center text-gray-500">
-          Ningún centro del resultado actual reporta esta métrica. Prueba con otra.
+          No site in the current result reports this metric. Try another one.
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={420}>
@@ -41,7 +42,7 @@ export default function CountriesView({ rows }: { rows: DataRow[] }) {
                 // reportan esta métrica (groupByCountry descarta a los mudos).
                 const bucket = item?.payload as CountryBucket | undefined;
                 if (!bucket) return [String(value), "Total"];
-                return [`${value} (${bucket.sites} centros que la reportan)`, "Total"];
+                return [`${value} (${siteCount(bucket.sites)} reporting it)`, "Total"];
               }}
             />
             <Bar dataKey="value" fill="#7c3aed" {...NO_ENTRY_ANIMATION} />
