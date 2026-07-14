@@ -293,3 +293,21 @@ El POC original enganchaba `_semantic_top_matches` a `_top_matches` en `ai_chat.
 **Por qué importa**: un gráfico que agrega una población distinta de la que la tabla enseña no es un bug cosmético — la línea de cobertura ("87 de 215 centros reportan…") es una afirmación cuantitativa sobre un conjunto que el usuario no puede auditar. Y el fallo es silencioso: no hay error, solo números que no cuadran con la tabla de al lado.
 
 **Dónde aplicar**: todo `ExplorerView.tsx`. Cualquier feature nueva que diga "las filas actuales" (exportar, mandar a Moby, graficar, contar) tiene que salir de `getFilteredRowModel()`, no de `fullRows`. OJO: el botón "Ask Moby" (`activeRows = nearbyActive ? fullNearbyRows : fullRows`) sigue mandando el array de respaldo — fuera del alcance de este fix, pero es el mismo bug esperando.
+
+### [2026-07-14] [coder] — En Recharts la animación de entrada es lo que hace EXISTIR la marca, y la mueve `requestAnimationFrame`
+
+**Contexto**: `frontend/src/components/charts/*` — bug de "cambias de pestaña en el ChartModal y el gráfico sale EN BLANCO". Ejes, rejilla, leyenda y hasta el `<path>` de la línea acumulada del Pareto renderizaban; las barras, no. En el DOM: `<g class="recharts-bar-rectangle">` **sin `<path>` dentro** (20/20 vacíos), y la línea con `stroke-dasharray: 0px, 1115.33px`.
+
+**Gotcha/Patrón**: la animación de entrada de Recharts **no es decoración**. `<Bar>` dibuja interpolando su alto de 0 a su valor, y `<Rectangle>` devuelve `null` cuando el alto es 0 — así que mientras la animación esté en t=0 el grupo está **hueco**, no "pequeño". Quien mueve esa interpolación es react-smooth con `requestAnimationFrame` (`react-smooth/es6/setRafTimeout.js`). Y rAF **no entrega frames** en un tab de fondo, ocluido, o con el hilo principal saturado. Sin frames → animación clavada en t=0 → cero marcas, para siempre. React sigue pintando el resto porque su scheduler usa MessageChannel, no rAF: **por eso los ejes salen y los datos no**, que es la firma exacta del fallo.
+
+Lo que NO era (ambos descartados empíricamente, no por lectura de código): (a) montaje a 0×0 del `ResponsiveContainer` — el `.recharts-surface` medía 1120px y el `d` de la línea tenía largo real; (b) el doble montaje de `React.StrictMode` — el bug no reproduce ni contra el dev server (StrictMode activo) ni contra `dist`, con frames sanos.
+
+El contenedor con pestañas es lo que **multiplicó la exposición**: el modal viejo montaba UN gráfico siempre montado (animaba una vez, al abrir); el nuevo re-monta un gráfico en CADA cambio de pestaña, así que reabre esa ventana una y otra vez.
+
+**Cómo se testea sin escribir teatro**: contar `.recharts-bar-rectangle` da **verde contra un panel vacío** — los grupos siempre están en el DOM. Hay que medir **geometría** (`getBBox()` del hijo `path`/`rect`, ancho y alto > 0). Y aun así, con frames normales el bug **no reproduce en headless**: el test honesto tiene que **matar `requestAnimationFrame`** (`page.addInitScript` antes del `goto`) para modelar el tab sin frames. Ver `tests/e2e/charts-animation.spec.ts` (CHART-11/12), que sin el fix da `painted: 0` y `"0px, 758.906px"`.
+
+**Ojo con el poll**: `ResponsiveContainer` no pinta nada hasta que su ResizeObserver le dice cuánto mide, así que una lectura seca justo tras el click de pestaña lee un DOM legítimamente vacío. Hay que hacer `expect.poll`. Eso NO ablanda el test: una animación congelada sigue en 0 tras el timeout entero (verificado revirtiendo el fix con el poll ya puesto).
+
+**Por qué importa**: el usuario ve un panel vacío y concluye "no hay datos" — la mentira más cara que puede contar este modal, y la misma clase de fallo silencioso que el resto de `chartAggregation`. Y ningún test lo pillaba: 68 unitarios y 125 E2E en verde.
+
+**Dónde aplicar**: **todo gráfico de Recharts de este repo**. Cualquier `<Bar>`, `<Line>` o `<Pie>` nuevo lleva `{...NO_ENTRY_ANIMATION}` (`components/charts/chartDefaults.ts`), que además centraliza el porqué en un único sitio en vez de en siete comentarios que divergen. Un gráfico cuyas marcas dependan de que llegue un frame es un gráfico que puede salir vacío.
