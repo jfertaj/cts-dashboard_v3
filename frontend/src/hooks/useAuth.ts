@@ -24,10 +24,19 @@ export function useAuth() {
       if (!ok) setSessionExpired(true);
     });
 
+    // Compatibility: some Explorer/legacy flows still emit the old "sf-auth"
+    // event on a mid-use 401. Honor its expiry signal so the overlay reacts
+    // without converting every remaining call site.
+    const onLegacy = (e: Event) => {
+      if ((e as CustomEvent<{ ok?: boolean }>).detail?.ok === false) setSessionExpired(true);
+    };
+    window.addEventListener("sf-auth", onLegacy as EventListener);
+
     return () => {
       alive = false;
       window.clearInterval(poll);
       off();
+      window.removeEventListener("sf-auth", onLegacy as EventListener);
     };
   }, []);
 
