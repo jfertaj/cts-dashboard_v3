@@ -47,10 +47,6 @@ from app.models.site_qual import SiteQual
 from app.models import Questionnaire, Question, Section, QuestionnaireType
 from app.parser import qualification as qual_parser
 
-# ====== OAuth helpers ======
-from app.services.salesforce_oauth import (
-    COOKIE_NAME, unsign_value, get_salesforce_from_session_id,
-)
 from app.services.salesforce_service import get_service_sf
 
 log = logging.getLogger("cts-backend")
