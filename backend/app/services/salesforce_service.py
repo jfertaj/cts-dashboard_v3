@@ -76,6 +76,27 @@ def reset_service_sf_cache() -> None:
         _CACHE.clear()
 
 
+def service_query(soql: str, *, query_all: bool = False) -> dict:
+    """Run a SOQL query via the service account, re-minting the token once on an
+    auth failure. The client-credentials flow has no refresh token, so a service
+    token that Salesforce invalidated before our local TTL is recovered by
+    re-minting (not refreshing). Use this for any direct query so every caller
+    shares the same self-healing behaviour."""
+    from simple_salesforce.exceptions import (
+        SalesforceExpiredSession, SalesforceAuthenticationFailed,
+    )
+
+    def _run() -> dict:
+        sf = get_service_sf()
+        return sf.query_all(soql) if query_all else sf.query(soql)
+
+    try:
+        return _run()
+    except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
+        reset_service_sf_cache()
+        return _run()
+
+
 def get_service_sf() -> Salesforce:
     now = time.time()
     with _LOCK:

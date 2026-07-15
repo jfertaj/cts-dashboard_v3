@@ -35,19 +35,22 @@ def assignments_report(body: ReportRequest, request: Request) -> Dict[str, Any]:
 
 @router.get("/report/options")
 def assignments_report_options(request: Request) -> Dict[str, Any]:
-    sf = _get_sf(request)
-    studies = sf.query_all(
+    from app.services.salesforce_service import service_query
+    studies = service_query(
         "SELECT Name FROM Opportunity WHERE Id IN "
         "(SELECT C_Opportunity_Name__c FROM Assignment__c WHERE C_Contact_Name__c != null) "
-        "ORDER BY Name"
+        "ORDER BY Name",
+        query_all=True,
     ).get("records", [])
-    stages = sf.query_all(
+    stages = service_query(
         "SELECT C_Assignment_Stage__c FROM Assignment__c "
-        "WHERE C_Assignment_Stage__c != null GROUP BY C_Assignment_Stage__c"
+        "WHERE C_Assignment_Stage__c != null GROUP BY C_Assignment_Stage__c",
+        query_all=True,
     ).get("records", [])
-    roles = sf.query_all(
+    roles = service_query(
         "SELECT Role__c FROM AccountContactRelation "
-        "WHERE Role__c != null GROUP BY Role__c"
+        "WHERE Role__c != null GROUP BY Role__c",
+        query_all=True,
     ).get("records", [])
     return {
         "studies": sorted({r.get("Name") for r in studies if r.get("Name")}),
