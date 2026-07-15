@@ -47,8 +47,10 @@ class _ServiceSF:
         try:
             return getattr(self._sf, method)(soql, **kw)
         except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-            reset_service_sf_cache()
-            fresh = _new_service_client()  # raw client, one bounded retry
+            # Adopt the re-minted client on the wrapper AND the shared cache so
+            # later queries on this same wrapper reuse it instead of re-minting
+            # per call (which would slow multi-query reports / hit OAuth limits).
+            fresh = _remint_into(self)
             return getattr(fresh, method)(soql, **kw)
 
     def __getattr__(self, name):
@@ -129,9 +131,17 @@ def _build_client(cfg: Dict[str, object]) -> Salesforce:
     )
 
 
-def _new_service_client() -> Salesforce:
-    """Mint a fresh token and build a raw (unwrapped) Salesforce client."""
-    return _build_client(_cfg())
+def _remint_into(wrapper: "_ServiceSF") -> Salesforce:
+    """Mint a fresh token, point the wrapper AND the shared cache at the new raw
+    client, and return it — so a re-mint after an early token invalidation is
+    reused by every subsequent query rather than repeated per call."""
+    with _LOCK:
+        cfg = _cfg()
+        raw = _build_client(cfg)
+        wrapper._sf = raw
+        _CACHE["sf"] = wrapper
+        _CACHE["expires_at"] = time.time() + int(cfg["ttl"]) - 60
+        return raw
 
 
 def get_service_sf() -> _ServiceSF:

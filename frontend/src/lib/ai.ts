@@ -1,4 +1,13 @@
 // src/lib/ai.ts
+import { broadcastAuthChange } from "./events";
+
+/** These endpoints are on guarded routers. A 401 means the app session expired
+ * mid-use, so signal the auth gate/overlay (same channel api() uses) before the
+ * caller surfaces its inline error. */
+function signalIf401(status: number): void {
+  if (status === 401) broadcastAuthChange(false);
+}
+
 export type VizPayload = {
   type: "bar" | "line";
   xKey: string;
@@ -49,6 +58,7 @@ export async function askAI(
     credentials: "include",
     body: JSON.stringify(payload),
   });
+  signalIf401(res.status);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -90,6 +100,7 @@ export async function askAIStream(
     body: JSON.stringify(payload),
     signal,
   });
+  signalIf401(res.status);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const reader = res.body!.getReader();
@@ -137,6 +148,7 @@ export async function columnsFill(accountIds: string[], columns: string[]) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ account_ids: accountIds, columns }),
   });
+  signalIf401(res.status);
   if (!res.ok) throw new Error(`columns/fill HTTP ${res.status}`);
   return await res.json(); // { rows }
 }
@@ -146,6 +158,7 @@ let _fieldsCache: FieldDef[] | null = null;
 export async function getFieldsIndex(): Promise<FieldDef[]> {
   if (_fieldsCache) return _fieldsCache;
   const r = await fetch("/api/explorer/fields");
+  signalIf401(r.status);
   if (!r.ok) throw new Error(`fields HTTP ${r.status}`);
   const j = await r.json();
   _fieldsCache = (j?.fields ?? []) as FieldDef[];
