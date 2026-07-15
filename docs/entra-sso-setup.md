@@ -73,7 +73,7 @@ only offers **External Client Apps**, not classic Connected Apps.
 
 ---
 
-## (c) AWS Secrets Manager — the 7 new keys
+## (c) AWS Secrets Manager — the 8 new keys
 
 Add these keys to the backend Secrets Manager bundle(s) already read by
 `scripts/gen_local_env.py` (`prod/cts-dashboard/backend` and
@@ -87,6 +87,7 @@ wiring for which secret ARN backs the ECS task definition):
 | `ENTRA_TENANT_ID` | Directory (tenant) ID | step (a).6 |
 | `ENTRA_CLIENT_ID` | Application (client) ID | step (a).6 |
 | `ENTRA_CLIENT_SECRET` | client secret value | step (a).5 |
+| `ENTRA_REDIRECT_URI` | `https://cts-innodia-dashboard.org/api/auth/callback` — the exact callback registered in Entra | step (a) redirect URI |
 | `APP_SESSION_SECRET` | a fresh random secret (e.g. `openssl rand -hex 32`) — signs the app's own session cookie, unrelated to Entra/SF | new, generate it |
 | `SF_CLIENT_ID` | Consumer Key | step (b).2 |
 | `SF_CLIENT_SECRET` | Consumer Secret | step (b).2 |
@@ -97,6 +98,14 @@ wiring for which secret ARN backs the ECS task definition):
 the backend fails to boot in prod. Locally, `scripts/gen_local_env.py` also writes
 `AUTH_DISABLED=1` as a default (overridable by the secrets bundle) so local dev and
 tests bypass the Entra gate entirely without needing real Entra credentials.
+
+`ENTRA_REDIRECT_URI` is **required in prod**: the backend runs behind a TLS-terminating
+ALB, so `request.base_url` inside the container can be the internal `http://…` origin.
+The login handler sends that as the OAuth `redirect_uri`, and Entra rejects any value
+that does not byte-match the registered callback — login would fail before the callback
+is reached. Setting `ENTRA_REDIRECT_URI` to the exact public HTTPS callback pins it.
+Locally it can be omitted: the handler falls back to `request.base_url` +
+`/api/auth/callback` (frontend and API share the localhost origin in dev).
 
 After adding the keys, re-run (or have Juan re-run) `python3 scripts/gen_local_env.py`
 locally to pick them up into `backend/.env`.

@@ -41,11 +41,20 @@ def _safe_next(raw: Optional[str]) -> str:
     return raw
 
 
+def _redirect_uri(request: Request) -> str:
+    """The OAuth callback URL sent to Entra. It MUST byte-match the URI registered
+    in the Entra app. Behind a TLS-terminating ALB, `request.base_url` can be the
+    internal `http://…` origin, which would not match the public HTTPS callback and
+    would break prod login — so an explicit `ENTRA_REDIRECT_URI` wins when set, with
+    `request.base_url` as a dev-only fallback (frontend+API same origin on localhost)."""
+    configured = os.getenv("ENTRA_REDIRECT_URI", "").strip()
+    return configured or (str(request.base_url).rstrip("/") + REDIRECT_PATH)
+
+
 @router.get("/login")
 async def login(request: Request, next: Optional[str] = "/"):
     request.session["next"] = _safe_next(next)
-    redirect_uri = str(request.base_url).rstrip("/") + REDIRECT_PATH
-    return await oauth.entra.authorize_redirect(request, redirect_uri)
+    return await oauth.entra.authorize_redirect(request, _redirect_uri(request))
 
 
 @router.get("/callback")
