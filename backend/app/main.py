@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
 import anyio
 
 # --- startup / db ---
@@ -63,6 +64,9 @@ from app.routers import assignments_report
 # --- OpenAI
 from app.routers import ai_chat, explorer_bridge
 
+# --- Entra SSO auth (public: login/callback/me/logout)
+from app.routers.entra_auth import router as entra_auth_router, _secure as _cookies_secure
+
 
 # --- App ---
 app = FastAPI(title="CTS Backend", version="1.0.0")
@@ -112,6 +116,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+)
+
+# --- Session middleware (Authlib OAuth state/nonce during the Entra login flow).
+# APP_SESSION_SECRET is required (prod gets it from Secrets Manager); fail fast if missing.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ["APP_SESSION_SECRET"],
+    same_site="lax",
+    https_only=_cookies_secure(),  # Secure flag on the OAuth state/nonce cookie in prod (HTTPS)
 )
 
 
@@ -184,6 +197,9 @@ app.include_router(assignments_report.router)  # /api/assignments/...
 # OpenAI
 app.include_router(ai_chat.router)
 app.include_router(explorer_bridge.router)
+
+# Entra SSO auth (public — the require_user guard on data routers is Task 6)
+app.include_router(entra_auth_router)  # /api/auth/... (public)
 
 # --- Catch-all for SPA (if serving front from /static) ---
 @app.get("/{full_path:path}")
