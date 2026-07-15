@@ -33,7 +33,7 @@ const MOCK_ROWS = Array.from({ length: 50 }, (_, i) => ({
 
 test.describe("Performance — time budgets", () => {
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/salesforce/me", (r) =>
+    await page.route("**/api/auth/me", (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
     );
   });

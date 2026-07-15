@@ -6,10 +6,11 @@ from typing import Optional, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
 import anyio
 
 # --- startup / db ---
@@ -40,7 +41,8 @@ except Exception:
 
 # --- Classic Routers ---
 from app.api.health import router as health_router
-from app.routers.salesforce_auth import router as salesforce_auth_router
+# NOTE: salesforce_auth_router (per-user SF login) is retired — no longer imported
+# or mounted. The module app/routers/salesforce_auth.py stays dormant in the tree.
 from app.routers.qualification import router as qualification_router
 from app.routers.salesforce_accounts import router as salesforce_accounts_router
 from app.routers.salesforce_sync import router as salesforce_sync_router
@@ -62,6 +64,12 @@ from app.routers import assignments_report
 
 # --- OpenAI
 from app.routers import ai_chat, explorer_bridge
+
+# --- Entra SSO auth (public: login/callback/me/logout)
+from app.routers.entra_auth import router as entra_auth_router, _secure as _cookies_secure
+
+# --- Auth guard for data routers (require_user); AUTH_DISABLED=1 bypasses in local dev
+from app.deps.auth import require_user
 
 
 # --- App ---
@@ -114,6 +122,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Session middleware (Authlib OAuth state/nonce during the Entra login flow).
+# APP_SESSION_SECRET is required (prod gets it from Secrets Manager); fail fast if missing.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ["APP_SESSION_SECRET"],
+    same_site="lax",
+    https_only=_cookies_secure(),  # Secure flag on the OAuth state/nonce cookie in prod (HTTPS)
+)
+
 
 # --- Startup ---
 @app.on_event("startup")
@@ -163,27 +180,35 @@ if os.path.isdir(static_dir):
 
 
 # --- API Routers (Include each ONCE) ---
+# Data routers are gated by require_user (401 unless a valid session cookie or
+# AUTH_DISABLED=1). health_router and entra_auth_router stay PUBLIC.
+# The per-user Salesforce login router (salesforce_auth_router) is retired — no
+# longer mounted; the module stays dormant in the tree.
+_GUARD = [Depends(require_user)]
+
 app.include_router(health_router)
-app.include_router(salesforce_auth_router, tags=["salesforce-auth"])
-app.include_router(qualification_router, tags=["qualification"])
-app.include_router(salesforce_accounts_router, tags=["salesforce"])
-app.include_router(salesforce_sync_router, tags=["salesforce-sync"])
-app.include_router(geo_router, tags=["geo"])
+app.include_router(qualification_router, tags=["qualification"], dependencies=_GUARD)
+app.include_router(salesforce_accounts_router, tags=["salesforce"], dependencies=_GUARD)
+app.include_router(salesforce_sync_router, tags=["salesforce-sync"], dependencies=_GUARD)
+app.include_router(geo_router, tags=["geo"], dependencies=_GUARD)
 
 # 👉 New "unique" routers (explorer)
-app.include_router(salesforce_router)   # /api/salesforce/... (explorer)
-app.include_router(explorer_router)     # /api/explorer/...  (explorer)
+app.include_router(salesforce_router, dependencies=_GUARD)   # /api/salesforce/... (explorer)
+app.include_router(explorer_router, dependencies=_GUARD)     # /api/explorer/...  (explorer)
 
 # 👉 extras: member + PI + debug (Do NOT include router_explorer if it doesn't exist)
-app.include_router(salesforce_extras.router)  # /api/salesforce/...
+app.include_router(salesforce_extras.router, dependencies=_GUARD)  # /api/salesforce/...
 
 # Members view
-app.include_router(members_explorer.router)  # /api/members/...
-app.include_router(assignments_report.router)  # /api/assignments/...
+app.include_router(members_explorer.router, dependencies=_GUARD)  # /api/members/...
+app.include_router(assignments_report.router, dependencies=_GUARD)  # /api/assignments/...
 
 # OpenAI
-app.include_router(ai_chat.router)
-app.include_router(explorer_bridge.router)
+app.include_router(ai_chat.router, dependencies=_GUARD)
+app.include_router(explorer_bridge.router, dependencies=_GUARD)
+
+# Entra SSO auth (public — login/callback/me/logout)
+app.include_router(entra_auth_router)  # /api/auth/... (public)
 
 # --- Catch-all for SPA (if serving front from /static) ---
 @app.get("/{full_path:path}")

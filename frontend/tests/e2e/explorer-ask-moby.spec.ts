@@ -50,7 +50,7 @@ async function armAskMobyListener(page: Page): Promise<void> {
 
 test.describe("Explorer — Ask Moby entrega las filas filtradas", () => {
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/salesforce/me", (route) =>
+    await page.route("**/api/auth/me", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
     );
     await page.route("**/api/salesforce/map/bootstrap", (route) =>

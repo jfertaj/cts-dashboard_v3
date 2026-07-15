@@ -32,14 +32,18 @@ def _query_safe(sf, soql: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]
     """
     Igual que _query, pero nunca lanza: devuelve (resultado, error_str)
     """
+    # `sf` is accepted for signature compatibility; the service-account query helper
+    # resolves (and re-mints) the client itself so a stale token self-heals.
     try:
-        return sf.query(soql), None
+        from app.services.salesforce_service import service_query
+        return service_query(soql), None
     except Exception as e:
         return None, f"{e}"
 
 def _query(sf, soql: str) -> Dict[str, Any]:
     try:
-        return sf.query(soql)
+        from app.services.salesforce_service import service_query
+        return service_query(soql)
     except Exception as e:
         # devolvemos un error 500 limpio en vez de stacktrace
         raise HTTPException(status_code=500, detail=f"Salesforce query failed: {e}")

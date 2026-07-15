@@ -5,7 +5,6 @@ import {
   ExplorerRow,
   explorerSearch,
   explorerBootstrap,
-  salesforceMe,
   FieldDef,
   getExplorerFields,
   FilterGroup,
@@ -34,8 +33,8 @@ import {
 
 import useSWR, { useSWRConfig } from "swr";
 import { EXPLORER_BOOT_KEY } from "../lib/cacheKeys";
-import { listenExplorerChange } from "../lib/events";
-import { sfLoginRedirect } from "../lib/salesforce";
+import { listenExplorerChange, broadcastAuthChange } from "../lib/events";
+import { authMe, loginRedirect } from "../lib/auth";
 import { askAI, ChatResponse } from "../lib/ai";
 import { readDataCell } from "../lib/rowAccess";
 import { buildFillColumns } from "../lib/fillColumns";
@@ -1530,20 +1529,20 @@ export default function ExplorerView() {
   const { data: bootData, isLoading: bootIsLoading } = useSWR(
     EXPLORER_BOOT_KEY,
     async () => {
-      // 0) Comprobar sesión SF antes de bootstrap
+      // 0) Comprobar sesión (Entra SSO) antes de bootstrap
       try {
-        const me = await salesforceMe();
+        const me = await authMe();
         if (!me || me.authenticated === false) {
           // ❌ NO redirigir automáticamente
           setSfAuthOk(false);
-          window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
+          broadcastAuthChange(false);  // same channel useAuth listens on (app-auth)
           // Forzamos un error controlado para que entre al onError con 401
           const err: any = new Error("HTTP 401");
           err.status = 401;
           throw err;
         }
       } catch (e) {
-        // si salesforceMe() lanza error → tratamos igual
+        // si authMe() lanza error → tratamos igual
         const err: any = new Error("HTTP 401");
         err.status = 401;
         throw err;
@@ -2683,7 +2682,7 @@ export default function ExplorerView() {
     const url = new URL(window.location.href);
     if (!url.searchParams.get("tab")) url.searchParams.set("tab", "explorer");
     const next = url.pathname + url.search;
-    sfLoginRedirect(next || "/");
+    loginRedirect(next || "/");
   };
 
   // ===== onShowDetails handler (NEW) =====

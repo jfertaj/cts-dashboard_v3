@@ -47,10 +47,7 @@ from app.models.site_qual import SiteQual
 from app.models import Questionnaire, Question, Section, QuestionnaireType
 from app.parser import qualification as qual_parser
 
-# ====== OAuth helpers ======
-from app.services.salesforce_oauth import (
-    COOKIE_NAME, unsign_value, get_salesforce_from_session_id,
-)
+from app.services.salesforce_service import get_service_sf
 
 log = logging.getLogger("cts-backend")
 
@@ -818,7 +815,11 @@ def _sf_query_all(sf, soql: str):
         res = sf.query_all(soql)
         return res.get("records", [])
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-        raise HTTPException(status_code=401, detail="Salesforce session expired")
+        # The service-account client already re-mints once on an auth failure
+        # (salesforce_service._ServiceSF); reaching here means it persists. Return
+        # 503 (transient upstream), never 401 — a backend-token blip must not log
+        # the user out of a still-valid app session.
+        raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
     except SalesforceMalformedRequest as e:
         # Invalid SOQL (field doesn't exist, syntax error, etc.) — log detail internally
         log.error("SF malformed request: %s | soql snippet: %.200s", e, soql)
@@ -833,17 +834,9 @@ def _sf_query_all(sf, soql: str):
         log.exception("SF query unexpected failure | soql snippet: %.200s", soql)
         raise HTTPException(status_code=500, detail="Salesforce query failed. Please try again.")
 
-def _get_sf(request: Request):
-    signed = request.cookies.get(COOKIE_NAME)
-    if not signed:
-        raise HTTPException(401, "Not logged in to Salesforce. Please connect via the Salesforce menu.")
-    session_id = unsign_value(signed)
-    if not session_id:
-        raise HTTPException(401, "Salesforce session invalid or expired. Please log in again.")
-    sf = get_salesforce_from_session_id(session_id)
-    if not sf:
-        raise HTTPException(401, "Salesforce session expired. Please log in again.")
-    return sf
+def _get_sf(request: Request = None):  # request kept for call-site compatibility
+    """Return the shared service-account Salesforce client (user session no longer used)."""
+    return get_service_sf()
 
 
 # -------- describe() cache para validar campos ----------

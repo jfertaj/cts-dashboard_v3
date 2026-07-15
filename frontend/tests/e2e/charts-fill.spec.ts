@@ -61,7 +61,7 @@ test.describe("Explorer — el chart pide sus métricas al servidor (fixture rea
   test.beforeEach(async ({ page }) => {
     filledColumns = new Set<string>();
 
-    await page.route("**/api/salesforce/me", (route) =>
+    await page.route("**/api/auth/me", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
     );
     await page.route("**/api/salesforce/map/bootstrap", (route) =>

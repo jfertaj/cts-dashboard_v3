@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { sfLogout } from "../lib/salesforce";
+import { endSession } from "../lib/auth";
 
 export function useIdleTimer(
     isExpired: boolean,
@@ -26,9 +26,7 @@ export function useIdleTimer(
             if (isExpired) return; // already expired
             const diff = Date.now() - last;
             if (diff >= idleLimitMs) {
-                try {
-                    await sfLogout();
-                } catch { }
+                await endSession();
                 setExpired(true);
             }
         }, 60 * 1000); // check every minute

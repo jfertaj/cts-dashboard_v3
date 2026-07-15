@@ -1,6 +1,7 @@
 // src/components/Header.tsx
 import React, { useEffect, useState } from "react";
-import { sfLoginRedirect, sfMe, sfLogout } from "../lib/salesforce";
+import { authMe, loginRedirect, logout } from "../lib/auth";
+import { listenAuthChange } from "../lib/events";
 import Moby from "../assets/Moby.png";
 
 type Props = {
@@ -9,20 +10,20 @@ type Props = {
 };
 
 export default function Header({ active, onTab }: Props) {
-  // Guardamos la info de /me principalmente para el instance_url
-  const [sfAuth, setSfAuth] = useState<{ authenticated: boolean; instance_url?: string } | null>(null);
-  // Bandera de conexión derivada que puede forzarse con el evento "sf-auth"
+  // Signed-in user's email (from /api/auth/me), shown next to Logout.
+  const [email, setEmail] = useState<string | null>(null);
+  // Connection flag, refreshable via the "app-auth" event.
   const [isConnected, setIsConnected] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
     try {
-      const me = (await sfMe()) as any;
-      setSfAuth(me);
-      setIsConnected(!!me?.authenticated);
+      const me = await authMe();
+      setIsConnected(me.authenticated);
+      setEmail(me.authenticated ? me.email ?? null : null);
     } catch {
-      setSfAuth({ authenticated: false });
       setIsConnected(false);
+      setEmail(null);
     }
   };
 
@@ -33,20 +34,16 @@ export default function Header({ active, onTab }: Props) {
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
 
-    // Escuchamos los cambios de auth que emite ExplorerView
-    const onSfAuth = (e: Event) => {
-      const detail = (e as CustomEvent<{ ok: boolean }>).detail;
-      if (typeof detail?.ok === "boolean") {
-        setIsConnected(detail.ok);
-        // Si volvemos a estar conectados, refrescamos para recuperar instance_url
-        if (detail.ok) void refresh();
-      }
-    };
-    window.addEventListener("sf-auth", onSfAuth as EventListener);
+    // Escuchamos los cambios de auth globales (401 → app-auth)
+    const off = listenAuthChange((ok) => {
+      setIsConnected(ok);
+      if (ok) void refresh();
+      else setEmail(null);
+    });
 
     return () => {
       window.removeEventListener("focus", onFocus);
-      window.removeEventListener("sf-auth", onSfAuth as EventListener);
+      off();
     };
   }, []);
 
@@ -55,22 +52,17 @@ export default function Header({ active, onTab }: Props) {
     const url = new URL(window.location.href);
     url.searchParams.set("tab", active); // "upload" o "explorer"
     const next = url.pathname + url.search; // p.ej. "/?tab=explorer"
-    sfLoginRedirect(next || "/");
+    loginRedirect(next || "/");
   };
 
   const onLogout = async () => {
     setBusy(true);
     try {
-      await sfLogout();
+      await logout();
     } finally {
-      await refresh();
       setBusy(false);
     }
   };
-
-  // Texto de estado
-  const connectedHost =
-    sfAuth?.instance_url?.replace?.(/^https?:\/\//, "") || "salesforce.com";
 
   return (
     <header className="sticky top-0 z-40 border-b shadow-sm bg-gradient-to-r from-[#003f7d] to-[#00a0a3] text-white">
@@ -139,7 +131,7 @@ export default function Header({ active, onTab }: Props) {
           {isConnected ? (
             <>
               <span className="text-sm opacity-90 hidden md:inline">
-                Connected to <strong>{connectedHost}</strong>
+                Signed in as <strong>{email ?? "innodia.org"}</strong>
               </span>
               <button
                 data-testid="btn-logout"
@@ -152,14 +144,14 @@ export default function Header({ active, onTab }: Props) {
             </>
           ) : (
             <>
-              <span className="text-sm opacity-90 hidden md:inline">Not connected</span>
+              <span className="text-sm opacity-90 hidden md:inline">Not signed in</span>
               <button
                 data-testid="btn-login"
                 onClick={onLogin}
                 className="px-3 py-1.5 rounded-md bg-white/95 text-[#003f7d] hover:bg-white shadow"
-                title="Login a Salesforce"
+                title="Sign in with innodia.org"
               >
-                Login Salesforce
+                Sign in with innodia.org
               </button>
             </>
           )}

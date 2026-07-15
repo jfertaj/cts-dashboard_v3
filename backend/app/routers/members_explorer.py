@@ -27,10 +27,9 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 # SF session helpers (same pattern as salesforce_explorer.py)
 # ---------------------------------------------------------------------------
 
-def _get_sf(request: Request):
-    signed = request.cookies.get(COOKIE_NAME)
-    session_id = unsign_value(signed) if signed else None
-    sf = get_salesforce_from_session_id(session_id) if session_id else None
+def _get_sf(request: Request = None):
+    from app.services.salesforce_service import get_service_sf
+    sf = get_service_sf()
     if not sf:
         raise HTTPException(403, "No autenticado en Salesforce")
     return sf
@@ -41,7 +40,10 @@ def _sf_query(sf, soql: str) -> List[Dict]:
         res = sf.query_all(soql)
         return res.get("records", [])
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-        raise HTTPException(status_code=401, detail="Salesforce session expired")
+        # The service-account client already re-mints once on an auth failure
+        # (salesforce_service._ServiceSF); a persistent failure is a transient
+        # upstream issue → 503, never 401 (do not log the user out).
+        raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
     except SalesforceMalformedRequest as e:
         raise HTTPException(status_code=400, detail=f"Invalid query: {e}")
     except Exception as e:

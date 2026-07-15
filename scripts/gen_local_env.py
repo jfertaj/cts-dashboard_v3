@@ -25,7 +25,12 @@ def get_secret(arn: str) -> dict:
 backend = get_secret(BACKEND_SECRET)
 sf      = get_secret(SF_SECRET)
 
-merged = {**backend, **sf}
+# Entra SSO gate bypass, local-dev default — bypasses the Entra login flow so
+# local dev + tests don't need a real Entra session. Set AUTH_DISABLED in the
+# secrets bundle (e.g. "0") to exercise the real Entra flow locally instead.
+defaults = {"AUTH_DISABLED": "1"}
+
+merged = {**defaults, **backend, **sf}
 
 # Local overrides
 merged.update({

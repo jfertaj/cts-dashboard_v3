@@ -8,12 +8,57 @@ Legend:
 
 ## What Is Complete
 
-### Salesforce Authentication — CONFIRMED
+### Auth model — Entra ID SSO gate + Salesforce service account — CONFIRMED (2026-07-15)
+The whole app is now gated by Entra ID (Azure AD) OIDC login instead of per-user Salesforce
+OAuth; Salesforce data access is now served by a single service account via the OAuth 2.0
+Client Credentials Flow, decoupled from any individual user's session.
+
+- **Entra login gate**: `backend/app/services/entra_oauth.py` registers the Authlib OIDC
+  client (`ENTRA_TENANT_ID`/`ENTRA_CLIENT_ID`/`ENTRA_CLIENT_SECRET`, scope
+  `openid profile email`, `REDIRECT_PATH = "/api/auth/callback"`). `backend/app/routers/entra_auth.py`
+  exposes `GET /api/auth/login` (redirect to Entra), `GET /api/auth/callback`, `GET /api/auth/me`,
+  `GET /api/auth/logout` — prefix `/api/auth`.
+- **App-level session store**: `backend/app/services/app_session.py` + a new `app_sessions`
+  PostgreSQL table (Alembic migration, replaces the old `sf_sessions` mechanism for gating
+  purposes). `SessionMiddleware` in `main.py` is configured with `secret_key=os.environ["APP_SESSION_SECRET"]`
+  — no default; the backend fails to boot without this secret in prod.
+- **`require_user` dependency**: `backend/app/deps/auth.py` gates all data routers. Set
+  `AUTH_DISABLED=1` to bypass with a fixed dev user (local dev + tests only —
+  `scripts/gen_local_env.py` writes this as the local default, overridable by the secrets
+  bundle). `health_router` and `entra_auth_router` stay public.
+- **Salesforce service account**: `backend/app/services/salesforce_service.py` mints a
+  Client Credentials token from `SF_CLIENT_ID`/`SF_CLIENT_SECRET` against
+  `{SF_MY_DOMAIN}/services/oauth2/token`, caches it in-process per uvicorn worker until near
+  expiry, re-mints on expiry or a reported 401. No end-user Salesforce session is involved —
+  `salesforce_explorer.py`, `members_explorer.py`, `ai_chat.py`, and `qualification.py` all
+  read/write through this single service account now.
+- **Per-user Salesforce OAuth retired (dormant, not deleted)**: `salesforce_auth.py` and
+  `services/salesforce_oauth.py` (the old Authorization Code Flow + `sf_sessions` table)
+  are no longer mounted/used by the frontend gate — `GET /api/salesforce/me` is retired;
+  `Header.tsx` / `useAuth.ts` / `ExplorerView.tsx` now call `/api/auth/me` (`lib/auth.ts`:
+  `authMe()`, `loginRedirect()`, `logout()`). The old files, the `sf_sessions` table, and the
+  frontend SF-login UI are intentionally left in place as dead code — deletion is a tracked
+  follow-up (see `docs/next-steps.md`), not done in this pass.
+- **Manual setup runbook**: `docs/entra-sso-setup.md` — Entra app registration, Salesforce
+  External Client App (Client Credentials Flow, Run As `juan.f.tajes@innodia.org`), the 7
+  Secrets Manager keys, migration, and cutover verification steps.
+- **Frontend gate**: `App.tsx` renders a full-page innodia.org sign-in gate
+  (`data-testid="signin-innodia"`) when unauthenticated; global 401 handling in `api.ts`
+  broadcasts `app-auth` (via `lib/events.ts`) to flip the session-expired overlay. E2E:
+  `auth-gate.spec.ts`.
+- **Tests**: backend unit tests cover `entra_oauth`, `app_session`, `require_user`,
+  `salesforce_service` (mocked token mint); frontend Vitest 88/88; Playwright E2E 134
+  passed / 4 skipped (pre-existing env-gated smoke skips) after the repoint.
+
+### ~~Salesforce Authentication (per-user OAuth) — CONFIRMED~~ — RETIRED (2026-07-15), see above
 - OAuth2 Authorization Code Flow: `salesforce_auth.py` + `services/salesforce_oauth.py`
 - Sessions stored in `sf_sessions` PostgreSQL table (persists across ECS restarts)
 - `Header.tsx` polls `/api/salesforce/me` and shows login/logout button
 - `useSalesforceAuth` hook drives app-level auth state; idle-timer triggers session-expired overlay
 - Covered by E2E: `dashboard.spec.ts` mocks `/api/salesforce/me`
+- **Status as of 2026-07-15**: code still present (dormant, not deleted) but no longer the
+  active auth path — the frontend gate now calls `/api/auth/me`, not `/api/salesforce/me`.
+  `useSalesforceAuth.ts` was deleted (no importers left). See the new section above.
 
 ### Explorer View (Filter + Table + Map) — CONFIRMED
 - `POST /api/explorer/search` returns rows + map points

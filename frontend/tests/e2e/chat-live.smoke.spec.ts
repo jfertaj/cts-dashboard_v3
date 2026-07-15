@@ -30,13 +30,13 @@ async function waitForNewAssistantMsg(page: any, beforeCount: number, timeoutMs 
 }
 
 /**
- * Mock /api/salesforce/me to return authenticated=true for the rest of the page lifetime.
+ * Mock /api/auth/me to return authenticated=true for the rest of the page lifetime.
  * Call this after the first turn completes to prevent the session-expired overlay from
  * blocking pointer events on subsequent turns.
  * The Moby queries still go to the real backend — only the auth-check polling is mocked.
  */
 async function lockAuthCheck(page: any) {
-  await page.route("**/api/salesforce/me", async (route: any) => {
+  await page.route("**/api/auth/me", async (route: any) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
