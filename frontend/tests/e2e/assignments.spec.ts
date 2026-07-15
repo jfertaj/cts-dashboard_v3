@@ -2,9 +2,9 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Referral DB tab", () => {
   test.beforeEach(async ({ page }) => {
-    // Auth gate: GET /api/salesforce/me — return the full real shape so the
+    // Auth gate: GET /api/auth/me — return the full real shape so the
     // app treats the session as authenticated and renders the header/tabs.
-    await page.route("**/api/salesforce/me", (route) =>
+    await page.route("**/api/auth/me", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",

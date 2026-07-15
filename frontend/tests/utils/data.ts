@@ -100,8 +100,8 @@ export async function mockExplorerBootstrap(
   rows: Record<string, any>[] = [],
   points: any[] = []
 ) {
-  await page.route("**/api/salesforce/me", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
+  await page.route("**/api/auth/me", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true, email: "dev@innodia.org" }) })
   );
   await page.route("**/api/explorer/bootstrap", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ points, rows, fields: [] }) })

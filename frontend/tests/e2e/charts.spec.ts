@@ -46,7 +46,7 @@ async function openChartModal(page: Page) {
 test.describe("Explorer — modal de gráficos", () => {
   test.beforeEach(async ({ page }) => {
     // Evita el overlay de sesión caducada, que se come los clicks.
-    await page.route("**/api/salesforce/me", (route) =>
+    await page.route("**/api/auth/me", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
     );
     await page.route("**/api/salesforce/map/bootstrap", (route) =>
@@ -501,7 +501,7 @@ test.describe("Explorer — el embudo y el cero legítimo", () => {
   ];
 
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/salesforce/me", (route) =>
+    await page.route("**/api/auth/me", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
     );
     await page.route("**/api/salesforce/map/bootstrap", (route) =>

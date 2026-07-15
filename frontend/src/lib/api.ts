@@ -1,4 +1,5 @@
 // src/lib/api.ts
+import { broadcastAuthChange } from "./events";
 
 // ------------------------------ Base URL -----------------------------------
 const API_BASE =
@@ -76,6 +77,9 @@ async function api<T>(path: string, init?: RequestInit & { timeoutMs?: number; r
     while (true) {
       attempt++;
       const res = await doFetch();
+      if (res.status === 401) {
+        broadcastAuthChange(false);
+      }
       if (res.ok) {
         clearTimeout(to);
         if (res.status === 204 || res.text == null) return undefined as unknown as T;

@@ -5,8 +5,8 @@ import ChatView from "./pages/ChatView";
 import ExplorerView from "./pages/ExplorerView";
 import MembersView from "./pages/MembersView";
 import AssignmentsView from "./pages/AssignmentsView";
-import { sfLoginRedirect } from "./lib/salesforce";
-import { useSalesforceAuth } from "./hooks/useSalesforceAuth";
+import { loginRedirect } from "./lib/auth";
+import { useAuth } from "./hooks/useAuth";
 import { useIdleTimer } from "./hooks/useIdleTimer";
 import { Tab } from "./types";
 
@@ -29,7 +29,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>(getTabFromURL());
 
   // Custom hooks for Auth & Idle
-  const { authed, sessionExpired, setSessionExpired } = useSalesforceAuth();
+  const { authed, sessionExpired, setSessionExpired } = useAuth();
   useIdleTimer(sessionExpired, setSessionExpired);
 
   // Pre-fetch Members + warm Explorer cache as soon as auth is confirmed
@@ -73,6 +73,27 @@ export default function App() {
   }, [tab]);
 
 
+  // Unauthenticated gate: no active innodia.org session and not merely expired.
+  if (authed === false && !sessionExpired) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f6f9fb]">
+        <div className="max-w-md w-full rounded-xl bg-white shadow-2xl border p-6 text-center">
+          <h1 className="text-lg font-semibold text-gray-900">CTS Dashboard</h1>
+          <p className="mt-2 text-sm text-gray-700">
+            Sign in with your innodia.org account to continue.
+          </p>
+          <button
+            data-testid="signin-innodia"
+            className="mt-4 rounded-md bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90"
+            onClick={() => loginRedirect()}
+          >
+            Sign in with innodia.org
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen relative bg-[#f6f9fb] text-[#0f172a]">
       {/* Blur overlay when expired */}
@@ -83,14 +104,14 @@ export default function App() {
             <div className="max-w-md w-full rounded-xl bg-white shadow-2xl border p-5 text-center">
               <h2 className="text-lg font-semibold text-gray-900">Session Expired</h2>
               <p className="mt-2 text-sm text-gray-700">
-                Your Salesforce session has expired due to inactivity or disconnection. Please log in again to continue.
+                Your session has expired due to inactivity. Please sign in again with your innodia.org account to continue.
               </p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
                   className="rounded-md bg-[#0072CE] text-white px-4 py-2 text-sm font-medium hover:opacity-90"
-                  onClick={() => sfLoginRedirect()}
+                  onClick={() => loginRedirect()}
                 >
-                  Log In Again
+                  Sign in with innodia.org
                 </button>
               </div>
             </div>
@@ -101,11 +122,6 @@ export default function App() {
       {/* Main content (dimmed visually by overlay above) */}
       <Header active={tab} onTab={goTab} />
       <main data-testid="app-main" className="w-full max-w-[90rem] mx-auto px-6 py-6 space-y-6" aria-hidden={sessionExpired}>
-        {authed === false && (
-          <div className="p-3 rounded bg-amber-50 border border-amber-200 text-sm">
-            You are not connected to Salesforce. Some views may show limited data.
-          </div>
-        )}
         {tab === "upload" && <LinkAuthView />}
         {tab === "explorer" && <ExplorerView />}
         {tab === "members" && <MembersView prefetchedRows={membersPrefetch} />}

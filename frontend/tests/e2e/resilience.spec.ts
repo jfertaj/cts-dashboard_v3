@@ -5,7 +5,7 @@ test.describe("Resilience — network errors and edge cases", () => {
   test.beforeEach(async ({ page }) => {
     // Default: prevent session-expired overlay from blocking pointer events
     // Individual tests can override this (e.g. RESIL-5 tests the 401 case explicitly)
-    await page.route("**/api/salesforce/me", async (route) => {
+    await page.route("**/api/auth/me", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -100,15 +100,15 @@ test.describe("Resilience — network errors and edge cases", () => {
     await expect(page.locator(S.CHAT_CONTAINER)).toBeVisible();
   });
 
-  test("RESIL-5: app loads even when SF /me returns 401", async ({ page }) => {
-    await page.route("**/api/salesforce/me", async (route) => {
+  test("RESIL-5: app shows the sign-in gate (no crash) when /api/auth/me returns 401", async ({ page }) => {
+    await page.route("**/api/auth/me", async (route) => {
       await route.fulfill({ status: 401, body: "Unauthorized" });
     });
     await page.goto("/");
 
-    // Header should still render
-    await expect(page.locator(S.TAB_UPLOAD)).toBeVisible();
-    await expect(page.locator(S.TAB_EXPLORER)).toBeVisible();
-    await expect(page.locator(S.TAB_CHAT)).toBeVisible();
+    // With the Entra SSO gate, an unauthenticated response renders the
+    // innodia.org sign-in gate (Header is intentionally not rendered).
+    // The app must not crash — the gate button is the proof of a clean render.
+    await expect(page.getByTestId("signin-innodia")).toBeVisible();
   });
 });

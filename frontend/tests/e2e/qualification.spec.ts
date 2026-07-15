@@ -17,7 +17,7 @@ const FIXTURES = chatFixtures.prompts;
 
 // Standard auth mock
 const mockAuth = (page: Parameters<typeof mockExplorerBootstrap>[0]) =>
-  page.route("**/api/salesforce/me", (r) =>
+  page.route("**/api/auth/me", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
   );
 

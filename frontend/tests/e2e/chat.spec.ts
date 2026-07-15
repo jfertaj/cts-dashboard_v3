@@ -36,7 +36,7 @@ async function sendMessage(page: any, text: string) {
 test.describe("Chat — deterministic (mocked SSE)", () => {
   test.beforeEach(async ({ page }) => {
     // Prevent session-expired overlay from blocking pointer events
-    await page.route("**/api/salesforce/me", async (route) => {
+    await page.route("**/api/auth/me", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",

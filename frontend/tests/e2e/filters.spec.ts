@@ -4,7 +4,7 @@ import { S } from "../utils/selectors";
 test.describe("Explorer — filter panel", () => {
   test.beforeEach(async ({ page }) => {
     // Prevent session-expired overlay from blocking pointer events
-    await page.route("**/api/salesforce/me", async (route) => {
+    await page.route("**/api/auth/me", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -91,7 +91,7 @@ test.describe("Explorer — filter panel", () => {
 
 test.describe("Explorer — filter logic expression UI", () => {
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/salesforce/me", async (route) => {
+    await page.route("**/api/auth/me", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) });
     });
     await page.route("**/api/salesforce/map/bootstrap", async (route) => {

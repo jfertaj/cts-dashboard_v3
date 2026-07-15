@@ -77,7 +77,7 @@ const TABS: Array<{ tab: string; label: string; positiveMarks: number }> = [
 
 test.describe("Explorer — el gráfico pinta sin depender de la animación", () => {
   test.beforeEach(async ({ page }) => {
-    await page.route("**/api/salesforce/me", (route) =>
+    await page.route("**/api/auth/me", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true }) })
     );
     await page.route("**/api/salesforce/map/bootstrap", (route) =>
