@@ -24,7 +24,9 @@ export async function authMe(): Promise<AuthMe> {
   }
 }
 
-export function loginRedirect(next: string = window.location.pathname): void {
+export function loginRedirect(
+  next: string = window.location.pathname + window.location.search,
+): void {
   window.location.href = `${API_BASE}/api/auth/login?next=${encodeURIComponent(next)}`;
 }
 

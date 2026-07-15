@@ -33,7 +33,7 @@ import {
 
 import useSWR, { useSWRConfig } from "swr";
 import { EXPLORER_BOOT_KEY } from "../lib/cacheKeys";
-import { listenExplorerChange } from "../lib/events";
+import { listenExplorerChange, broadcastAuthChange } from "../lib/events";
 import { authMe, loginRedirect } from "../lib/auth";
 import { askAI, ChatResponse } from "../lib/ai";
 import { readDataCell } from "../lib/rowAccess";
@@ -1535,7 +1535,7 @@ export default function ExplorerView() {
         if (!me || me.authenticated === false) {
           // ❌ NO redirigir automáticamente
           setSfAuthOk(false);
-          window.dispatchEvent(new CustomEvent("sf-auth", { detail: { ok: false } }));
+          broadcastAuthChange(false);  // same channel useAuth listens on (app-auth)
           // Forzamos un error controlado para que entre al onError con 401
           const err: any = new Error("HTTP 401");
           err.status = 401;
