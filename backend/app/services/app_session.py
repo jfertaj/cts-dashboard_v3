@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -10,6 +12,8 @@ from sqlalchemy import text
 
 from app.database import engine
 
+log = logging.getLogger("app_session")
+
 COOKIE_NAME = "cts_session"
 STATE_COOKIE = "cts_oauth_state"
 
@@ -17,8 +21,19 @@ _serializer: Optional[URLSafeSerializer] = None
 
 
 def _reload_signer() -> None:
+    """(Re)build the cookie signer from APP_SESSION_SECRET.
+
+    Production must supply APP_SESSION_SECRET (main.py fails fast without it). If
+    it is missing here we fall back to a random per-process secret rather than an
+    empty key — an empty key is publicly known and would make session cookies
+    trivially forgeable. The random fallback keeps dev/test safe (cookies just do
+    not survive a restart, which is fine when Entra auth is bypassed locally).
+    """
     global _serializer
     secret = os.getenv("APP_SESSION_SECRET", "")
+    if not secret:
+        secret = secrets.token_hex(32)
+        log.warning("APP_SESSION_SECRET not set; using a random per-process signing key")
     _serializer = URLSafeSerializer(secret, salt="cts-app-session")
 
 

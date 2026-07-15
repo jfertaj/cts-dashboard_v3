@@ -58,7 +58,8 @@ async def callback(request: Request):
             return RedirectResponse(f"{FRONTEND_BASE}/?auth_error=not_innodia")
         sid = create_session(ident["email"], ident["name"] or "", ident["oid"] or "")
     except Exception as exc:  # bad state/nonce, exchange failure, or session store error
-        log.warning("Auth callback failed: %s", exc)
+        # Log only the exception type — the message can embed provider detail/codes.
+        log.warning("Auth callback failed: %s", type(exc).__name__)
         return RedirectResponse(f"{FRONTEND_BASE}/?auth_error=login_failed")
 
     next_url = _safe_next(request.session.pop("next", "/"))

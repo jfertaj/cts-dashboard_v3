@@ -21,18 +21,40 @@ _LOCK = threading.Lock()
 _CACHE: Dict[str, object] = {}  # {"sf": Salesforce, "expires_at": float}
 
 
-def _cfg() -> Dict[str, str]:
+def _cfg() -> Dict[str, object]:
+    """Read + validate the client-credentials config, failing fast with a clear
+    message rather than letting a misconfig surface as an opaque HTTP error."""
     my_domain = os.getenv("SF_MY_DOMAIN", "").rstrip("/")
+    client_id = os.getenv("SF_CLIENT_ID", "").strip()
+    client_secret = os.getenv("SF_CLIENT_SECRET", "").strip()
+
+    missing = [
+        name for name, val in (
+            ("SF_MY_DOMAIN", my_domain),
+            ("SF_CLIENT_ID", client_id),
+            ("SF_CLIENT_SECRET", client_secret),
+        ) if not val
+    ]
+    if missing:
+        raise RuntimeError(
+            "Salesforce service account not configured: missing " + ", ".join(missing)
+        )
+
+    try:
+        ttl = int(os.getenv("SF_TOKEN_TTL_SECONDS", "3600"))
+    except ValueError:
+        ttl = 3600
+    ttl = max(ttl, 60)  # never cache for less than the mint-safety margin
+
     return {
         "token_url": f"{my_domain}/services/oauth2/token",
-        "client_id": os.getenv("SF_CLIENT_ID", ""),
-        "client_secret": os.getenv("SF_CLIENT_SECRET", ""),
-        "ttl": int(os.getenv("SF_TOKEN_TTL_SECONDS", "3600")),
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "ttl": ttl,
     }
 
 
-def _mint_token() -> dict:
-    cfg = _cfg()
+def _mint_token(cfg: Dict[str, object]) -> dict:
     resp = httpx.post(
         cfg["token_url"],
         data={
@@ -61,11 +83,12 @@ def get_service_sf() -> Salesforce:
         exp = _CACHE.get("expires_at", 0)
         if sf is not None and isinstance(exp, (int, float)) and now < exp:
             return sf  # type: ignore[return-value]
-        payload = _mint_token()
+        cfg = _cfg()
+        payload = _mint_token(cfg)
         sf = Salesforce(
             instance_url=payload["instance_url"],
             session_id=payload["access_token"],
         )
         _CACHE["sf"] = sf
-        _CACHE["expires_at"] = now + _cfg()["ttl"] - 60  # 60s safety margin
+        _CACHE["expires_at"] = now + int(cfg["ttl"]) - 60  # 60s safety margin
         return sf
