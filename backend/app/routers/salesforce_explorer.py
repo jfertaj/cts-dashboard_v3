@@ -47,7 +47,7 @@ from app.models.site_qual import SiteQual
 from app.models import Questionnaire, Question, Section, QuestionnaireType
 from app.parser import qualification as qual_parser
 
-from app.services.salesforce_service import get_service_sf
+from app.services.salesforce_service import get_service_sf, reset_service_sf_cache
 
 log = logging.getLogger("cts-backend")
 
@@ -815,7 +815,14 @@ def _sf_query_all(sf, soql: str):
         res = sf.query_all(soql)
         return res.get("records", [])
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-        raise HTTPException(status_code=401, detail="Salesforce session expired")
+        # The shared service-account token went stale before its local TTL.
+        # Re-mint once and retry; a service-token blip must NOT 401 the user
+        # (that would log them out of a still-valid app session).
+        reset_service_sf_cache()
+        try:
+            return get_service_sf().query_all(soql).get("records", [])
+        except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
+            raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
     except SalesforceMalformedRequest as e:
         # Invalid SOQL (field doesn't exist, syntax error, etc.) — log detail internally
         log.error("SF malformed request: %s | soql snippet: %.200s", e, soql)
