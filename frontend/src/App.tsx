@@ -73,8 +73,21 @@ export default function App() {
   }, [tab]);
 
 
-  // Unauthenticated gate: no active innodia.org session and not merely expired.
-  if (authed === false && !sessionExpired) {
+  // Auth still unknown: block the protected views until /api/auth/me resolves.
+  // Rendering them early would fire guarded API calls, whose 401s would flip
+  // sessionExpired and wrongly show the "expired" overlay to a first-time visitor.
+  if (authed === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f6f9fb]" data-testid="auth-loading">
+        <p className="text-sm text-slate-500">Loading…</p>
+      </div>
+    );
+  }
+
+  // Unauthenticated gate: no active innodia.org session. An unauthenticated user
+  // must sign in (gate), never the mid-session "expired" overlay — so this wins
+  // even if a stray 401 already set sessionExpired.
+  if (authed === false) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f6f9fb]">
         <div className="max-w-md w-full rounded-xl bg-white shadow-2xl border p-6 text-center">
