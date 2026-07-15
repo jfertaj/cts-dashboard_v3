@@ -40,14 +40,10 @@ def _sf_query(sf, soql: str) -> List[Dict]:
         res = sf.query_all(soql)
         return res.get("records", [])
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-        # Service-account token went stale before its local TTL: re-mint + retry
-        # once so a backend-token blip does not 401 (and log out) the user.
-        from app.services.salesforce_service import get_service_sf, reset_service_sf_cache
-        reset_service_sf_cache()
-        try:
-            return get_service_sf().query_all(soql).get("records", [])
-        except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-            raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
+        # The service-account client already re-mints once on an auth failure
+        # (salesforce_service._ServiceSF); a persistent failure is a transient
+        # upstream issue → 503, never 401 (do not log the user out).
+        raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
     except SalesforceMalformedRequest as e:
         raise HTTPException(status_code=400, detail=f"Invalid query: {e}")
     except Exception as e:

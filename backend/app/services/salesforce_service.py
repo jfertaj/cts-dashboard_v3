@@ -14,11 +14,47 @@ from typing import Dict
 
 import httpx
 from simple_salesforce import Salesforce
+from simple_salesforce.exceptions import (
+    SalesforceExpiredSession, SalesforceAuthenticationFailed,
+)
 
 log = logging.getLogger("salesforce_service")
 
 _LOCK = threading.Lock()
-_CACHE: Dict[str, object] = {}  # {"sf": Salesforce, "expires_at": float}
+_CACHE: Dict[str, object] = {}  # {"sf": _ServiceSF, "expires_at": float}
+
+
+class _ServiceSF:
+    """Thin wrapper over a service-account Salesforce client that re-mints the
+    token once and retries on an auth failure. The client-credentials flow has no
+    refresh token, so a token Salesforce invalidated before our local TTL is
+    recovered by re-minting. Wrapping `query`/`query_all` here means EVERY direct
+    caller (Moby, sync, reports, extras) self-heals without threading retry logic
+    through each call site; all other attributes pass through unchanged."""
+
+    __slots__ = ("_sf",)
+
+    def __init__(self, sf: Salesforce):
+        self._sf = sf
+
+    def query(self, soql: str, **kw):
+        return self._retry("query", soql, **kw)
+
+    def query_all(self, soql: str, **kw):
+        return self._retry("query_all", soql, **kw)
+
+    def _retry(self, method: str, soql: str, **kw):
+        try:
+            return getattr(self._sf, method)(soql, **kw)
+        except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
+            reset_service_sf_cache()
+            fresh = _new_service_client()  # raw client, one bounded retry
+            return getattr(fresh, method)(soql, **kw)
+
+    def __getattr__(self, name):
+        # query/query_all/_sf are resolved directly; everything else (describe,
+        # restful, SObject accessors, bulk, …) passes through to the real client.
+        return getattr(self._sf, name)
 
 
 def _cfg() -> Dict[str, object]:
@@ -77,27 +113,28 @@ def reset_service_sf_cache() -> None:
 
 
 def service_query(soql: str, *, query_all: bool = False) -> dict:
-    """Run a SOQL query via the service account, re-minting the token once on an
-    auth failure. The client-credentials flow has no refresh token, so a service
-    token that Salesforce invalidated before our local TTL is recovered by
-    re-minting (not refreshing). Use this for any direct query so every caller
-    shares the same self-healing behaviour."""
-    from simple_salesforce.exceptions import (
-        SalesforceExpiredSession, SalesforceAuthenticationFailed,
+    """Convenience for a one-off SOQL query via the service account. Retry on an
+    invalidated token is handled by the client wrapper (`_ServiceSF`), so this is
+    just a thin call through it."""
+    sf = get_service_sf()
+    return sf.query_all(soql) if query_all else sf.query(soql)
+
+
+def _build_client(cfg: Dict[str, object]) -> Salesforce:
+    """Mint a token from the given config and build a raw Salesforce client."""
+    payload = _mint_token(cfg)
+    return Salesforce(
+        instance_url=payload["instance_url"],
+        session_id=payload["access_token"],
     )
 
-    def _run() -> dict:
-        sf = get_service_sf()
-        return sf.query_all(soql) if query_all else sf.query(soql)
 
-    try:
-        return _run()
-    except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-        reset_service_sf_cache()
-        return _run()
+def _new_service_client() -> Salesforce:
+    """Mint a fresh token and build a raw (unwrapped) Salesforce client."""
+    return _build_client(_cfg())
 
 
-def get_service_sf() -> Salesforce:
+def get_service_sf() -> _ServiceSF:
     now = time.time()
     with _LOCK:
         sf = _CACHE.get("sf")
@@ -105,11 +142,7 @@ def get_service_sf() -> Salesforce:
         if sf is not None and isinstance(exp, (int, float)) and now < exp:
             return sf  # type: ignore[return-value]
         cfg = _cfg()
-        payload = _mint_token(cfg)
-        sf = Salesforce(
-            instance_url=payload["instance_url"],
-            session_id=payload["access_token"],
-        )
-        _CACHE["sf"] = sf
+        client = _ServiceSF(_build_client(cfg))
+        _CACHE["sf"] = client
         _CACHE["expires_at"] = now + int(cfg["ttl"]) - 60  # 60s safety margin
-        return sf
+        return client

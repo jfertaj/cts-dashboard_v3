@@ -563,15 +563,10 @@ def _require_sf_ok(request: Request, acc_id: str):
         res = sf.query_all(f"SELECT Id FROM Account WHERE Id = '{acc_id}' LIMIT 1")
         exists = bool(res.get("records"))
     except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-        # Service-account token went stale before its local TTL: re-mint + retry
-        # once so a backend-token blip does not 401 (and log out) the user.
-        from app.services.salesforce_service import reset_service_sf_cache
-        reset_service_sf_cache()
-        try:
-            res = _get_sf(request).query_all(f"SELECT Id FROM Account WHERE Id = '{acc_id}' LIMIT 1")
-            exists = bool(res.get("records"))
-        except (SalesforceExpiredSession, SalesforceAuthenticationFailed):
-            raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
+        # The service-account client already re-mints once on an auth failure
+        # (salesforce_service._ServiceSF); a persistent failure is a transient
+        # upstream issue → 503, never 401 (do not log the user out).
+        raise HTTPException(status_code=503, detail="Salesforce authentication temporarily unavailable. Please retry.")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Error consultando Salesforce: {e}")
     if not exists:
