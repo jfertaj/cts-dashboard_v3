@@ -18,9 +18,8 @@ def get_salesforce_session(request: Request | None = None) -> Salesforce:
         if signed:
             sid = unsign_value(signed)
             if sid:
-                sf = get_salesforce_from_session_id(sid)
-                if sf:
-                    return sf
+                from app.services.salesforce_service import get_service_sf
+                return get_service_sf()
 
     # 2) Fallback a credenciales de entorno
     if SF_USERNAME and SF_PASSWORD and SF_SECURITY_TOKEN:

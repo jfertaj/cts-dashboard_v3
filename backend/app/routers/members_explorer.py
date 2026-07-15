@@ -27,10 +27,9 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 # SF session helpers (same pattern as salesforce_explorer.py)
 # ---------------------------------------------------------------------------
 
-def _get_sf(request: Request):
-    signed = request.cookies.get(COOKIE_NAME)
-    session_id = unsign_value(signed) if signed else None
-    sf = get_salesforce_from_session_id(session_id) if session_id else None
+def _get_sf(request: Request = None):
+    from app.services.salesforce_service import get_service_sf
+    sf = get_service_sf()
     if not sf:
         raise HTTPException(403, "No autenticado en Salesforce")
     return sf
