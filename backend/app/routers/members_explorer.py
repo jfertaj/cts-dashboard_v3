@@ -15,9 +15,6 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from simple_salesforce.exceptions import SalesforceExpiredSession, SalesforceAuthenticationFailed, SalesforceMalformedRequest
 
-from app.services.salesforce_oauth import (
-    COOKIE_NAME, unsign_value, get_salesforce_from_session_id,
-)
 from app.utils.country_norms import norm_to_iso2, iso2_to_display
 
 log = logging.getLogger("cts-backend")
