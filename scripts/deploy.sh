@@ -155,16 +155,27 @@ if $RUN_MIGRATE; then
       --query 'taskDefinition.taskDefinitionArn' --output text \
       --region "$AWS_REGION" --profile "$AWS_PROFILE")
   fi
-  SUBNET1="subnet-0e345d0d0c88c38ac"
-  SUBNET2="subnet-0966b624cffd8a716"
-  SG="sg-039384ad98327e408"
+  # Derive the network config from the LIVE backend service so it never goes
+  # stale. The old hardcoded subnets/SG were deleted from the VPC and broke
+  # --migrate on 2026-07-15 (InvalidSubnetID.NotFound); reading the running
+  # service keeps this correct across any future VPC/subnet change.
+  NETCFG=$(aws ecs describe-services --cluster "$CLUSTER" --services backend \
+    --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json \
+    --region "$AWS_REGION" --profile "$AWS_PROFILE")
+  SUBNETS=$(echo "$NETCFG" | jq -r '.subnets | join(",")')
+  SGS=$(echo "$NETCFG" | jq -r '.securityGroups | join(",")')
+  ASSIGN_IP=$(echo "$NETCFG" | jq -r '.assignPublicIp')
+  if [ -z "$SUBNETS" ] || [ "$SUBNETS" = "null" ]; then
+    echo "❌  Could not read backend service network config for the migration." >&2
+    exit 1
+  fi
   DATABASE_URL=$(grep '^DATABASE_URL=' "$BACKEND_DIR/.env" | head -1 | cut -d= -f2)
 
   log "Run Alembic migration"
   TASK_ARN=$(aws ecs run-task \
     --cluster "$CLUSTER" --launch-type FARGATE \
     --task-definition "$BACKEND_ARN" \
-    --network-configuration "awsvpcConfiguration={subnets=[$SUBNET1,$SUBNET2],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+    --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=$ASSIGN_IP}" \
     --overrides "{\"containerOverrides\":[{\"name\":\"backend\",\"command\":[\"alembic\",\"upgrade\",\"head\"],\"environment\":[{\"name\":\"DATABASE_URL\",\"value\":\"$DATABASE_URL\"}]}]}" \
     --query 'tasks[0].taskArn' --output text \
     --region "$AWS_REGION" --profile "$AWS_PROFILE")
