@@ -27,13 +27,6 @@ from app.models.site_qual import SiteQual  # 👈 JSONB con aplanado qual por si
 from app.parser.qualification import parse_qualification_checklist
 from app.services.geocoding import geocode_with_fallback
 
-# === Helpers SF session (usamos la misma infraestructura del módulo OAuth) ===
-from app.services.salesforce_oauth import (
-    COOKIE_NAME,
-    unsign_value,
-    get_salesforce_from_session_id,
-)
-
 router = APIRouter(prefix="/api/qualification", tags=["qualification"])
 
 # --------------------------------------------------------------------------------------
