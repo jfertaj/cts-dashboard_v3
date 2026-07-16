@@ -445,24 +445,6 @@ export async function explorerBootstrap(): Promise<{ points: ExplorerPoint[]; ro
   return { points, rows };
 }
 
-/* ------------------------------ Salesforce session ------------------------ */
-export async function salesforceMe() {
-  try {
-    const res = await fetch(`${API_BASE}/api/salesforce/me`, { credentials: "include" });
-    if (!res.ok) return { authenticated: false };
-    return res.json();
-  } catch {
-    return { authenticated: false };
-  }
-}
-export function salesforceLoginRedirect(next: string = "/") {
-  const url = `${API_BASE}/api/salesforce/oauth/login?next=${encodeURIComponent(next)}`;
-  window.location.href = url;
-}
-export async function salesforceLogout() {
-  await fetch(`${API_BASE}/api/salesforce/logout`, { method: "POST", credentials: "include" });
-}
-
 /* ------------------------ Helpers qualification (tu BD) ------------------- */
 export async function searchAccounts(query: string) {
   return api<any>("/api/explorer/accounts/search", {
