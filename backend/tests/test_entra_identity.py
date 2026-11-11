@@ -1,18 +1,29 @@
+import pytest
+
 from app.services import entra_oauth as e
 
 
-def test_extract_prefers_email_then_preferred_username():
-    ui = {"email": "a@innodia.org", "preferred_username": "b@innodia.org",
-          "name": "A", "oid": "oid-1"}
-    assert e.extract_identity(ui) == {"email": "a@innodia.org", "name": "A", "oid": "oid-1"}
+def test_member_is_identified_by_sign_in_name():
+    ui = {"preferred_username": "Ana.Perez@INNODIA.org", "email": "other@example.com",
+          "name": "Ana", "oid": "oid-1"}
+    assert e.member_identity(ui) == {"email": "ana.perez@innodia.org", "name": "Ana", "oid": "oid-1"}
 
 
-def test_extract_falls_back_to_preferred_username():
-    ui = {"preferred_username": "b@innodia.org", "name": "B", "oid": "oid-2"}
-    out = e.extract_identity(ui)
-    assert out["email"] == "b@innodia.org"
+def test_guest_with_innodia_email_claim_is_refused():
+    ui = {"preferred_username": "someone_gmail.com#EXT#@innodiavzw.onmicrosoft.com",
+          "email": "someone@innodia.org", "name": "G", "oid": "o"}
+    assert e.member_identity(ui) is None
+    assert e.member_identity({"preferred_username": "x_evil.com#EXT#@innodia.org"}) is None
 
 
-def test_is_innodia():
-    assert e.is_innodia("x@innodia.org") is True
-    assert e.is_innodia("x@gmail.com") is False
+def test_email_claim_alone_never_grants_access():
+    assert e.member_identity({"email": "boss@innodia.org", "name": "B", "oid": "o"}) is None
+    assert e.member_identity({}) is None
+
+
+@pytest.mark.parametrize("name", [
+    "a@innodia.eu", "a@innodia.org.evil.com", "a@evil.com@innodia.org", "@innodia.org",
+    "a b@innodia.org", "x@gmail.com", "", 42, None,
+])
+def test_other_domains_and_malformed_names_are_refused(name):
+    assert e.member_identity({"preferred_username": name}) is None

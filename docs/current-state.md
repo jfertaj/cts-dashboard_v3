@@ -39,6 +39,11 @@ Client Credentials Flow, decoupled from any individual user's session.
   `authMe()`, `loginRedirect()`, `logout()`). The old files, the `sf_sessions` table, and the
   frontend SF-login UI are intentionally left in place as dead code — deletion is a tracked
   follow-up (see `docs/next-steps.md`), not done in this pass.
+- **Who is let in (2026-11-11)**: `member_identity()` admits an account only when its sign-in name
+  (`preferred_username`, the UPN) is an `@innodia.org` name without the guest marker `#EXT#`. The
+  `email` claim is ignored (mutable, unverified). Guests are refused with `auth_error=not_innodia`.
+  Sessions created before a deploy are not re-checked: purge `app_sessions` when deploying a
+  stricter rule. See `docs/entra-sso-setup.md` → "Who is let in".
 - **Manual setup runbook**: `docs/entra-sso-setup.md` — Entra app registration, Salesforce
   External Client App (Client Credentials Flow, Run As `juan.f.tajes@innodia.org`), the 7
   Secrets Manager keys, migration, and cutover verification steps.
