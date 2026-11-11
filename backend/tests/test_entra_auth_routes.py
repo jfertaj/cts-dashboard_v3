@@ -66,7 +66,7 @@ def test_logout_clears_cookie_and_returns_ok(monkeypatch):
 
 def test_callback_innodia_sets_session_cookie_and_redirects(monkeypatch):
     monkeypatch.delenv("AUTH_DISABLED", raising=False)
-    token = {"userinfo": {"email": "user@innodia.org", "name": "User", "oid": "oid-1"}}
+    token = {"userinfo": {"preferred_username": "user@innodia.org", "name": "User", "oid": "oid-1"}}
     with patch.object(ea.oauth.entra, "authorize_access_token", new=AsyncMock(return_value=token)), \
          patch.object(ea, "create_session", return_value="sid-123"):
         resp = client.get("/api/auth/callback?code=x&state=y", follow_redirects=False)
@@ -77,7 +77,9 @@ def test_callback_innodia_sets_session_cookie_and_redirects(monkeypatch):
 
 def test_callback_non_innodia_redirects_with_error_and_no_cookie(monkeypatch):
     monkeypatch.delenv("AUTH_DISABLED", raising=False)
-    token = {"userinfo": {"email": "user@gmail.com", "name": "U", "oid": "o"}}
+    # A tenant guest: the email claim looks like INNODIA, the sign-in name does not.
+    token = {"userinfo": {"email": "user@innodia.org", "name": "U", "oid": "o",
+                          "preferred_username": "user_gmail.com#EXT#@innodiavzw.onmicrosoft.com"}}
     with patch.object(ea.oauth.entra, "authorize_access_token", new=AsyncMock(return_value=token)), \
          patch.object(ea, "create_session", return_value="sid-x") as mk_sess:
         resp = client.get("/api/auth/callback?code=x&state=y", follow_redirects=False)

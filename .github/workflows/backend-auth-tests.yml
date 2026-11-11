@@ -1,0 +1,30 @@
+name: Backend sign-in tests
+
+# The Entra sign-in gate decides who gets into the dashboard. These tests ran only on
+# developer machines; a change to the gate must not merge without them.
+on:
+  push:
+    paths:
+      - 'backend/app/services/entra_oauth.py'
+      - 'backend/app/routers/entra_auth.py'
+      - 'backend/tests/test_entra_identity.py'
+      - 'backend/tests/test_entra_auth_routes.py'
+      - 'backend/requirements.lock'
+      - '.github/workflows/backend-auth-tests.yml'
+  pull_request:
+
+jobs:
+  sign-in:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.lock pytest
+      - name: Sign-in identity and route tests
+        working-directory: backend
+        run: python -m pytest tests/test_entra_identity.py tests/test_entra_auth_routes.py -q

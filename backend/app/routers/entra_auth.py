@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.services.entra_oauth import oauth, REDIRECT_PATH, FRONTEND_BASE, extract_identity, is_innodia
+from app.services.entra_oauth import oauth, REDIRECT_PATH, FRONTEND_BASE, member_identity
 from app.services.app_session import (
     COOKIE_NAME, sign_value, unsign_value, create_session, get_session, destroy_session,
 )
@@ -62,8 +62,8 @@ async def callback(request: Request):
     try:
         token = await oauth.entra.authorize_access_token(request)  # validates id_token + nonce
         userinfo = token.get("userinfo") or {}
-        ident = extract_identity(userinfo)
-        if not ident["email"] or not is_innodia(ident["email"]):
+        ident = member_identity(userinfo)
+        if ident is None:
             return RedirectResponse(f"{FRONTEND_BASE}/?auth_error=not_innodia")
         sid = create_session(ident["email"], ident["name"] or "", ident["oid"] or "")
     except Exception as exc:  # bad state/nonce, exchange failure, or session store error
