@@ -64,6 +64,11 @@ async def callback(request: Request):
         userinfo = token.get("userinfo") or {}
         ident = member_identity(userinfo)
         if ident is None:
+            # Say WHY without logging any claim value. A missing sign-in name on every
+            # login means the token shape changed (scope / claims configuration), not
+            # that a guest tried to get in.
+            reason = "no sign-in name in the token" if not userinfo.get("preferred_username") else "not an innodia.org member"
+            log.warning("Sign-in refused: %s", reason)
             return RedirectResponse(f"{FRONTEND_BASE}/?auth_error=not_innodia")
         sid = create_session(ident["email"], ident["name"] or "", ident["oid"] or "")
     except Exception as exc:  # bad state/nonce, exchange failure, or session store error

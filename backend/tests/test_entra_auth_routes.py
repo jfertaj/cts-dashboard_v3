@@ -95,3 +95,14 @@ def test_callback_exchange_failure_redirects_login_failed(monkeypatch):
         resp = client.get("/api/auth/callback?code=x&state=y", follow_redirects=False)
     assert "auth_error=login_failed" in resp.headers["location"]
     assert "cts_session" not in resp.headers.get("set-cookie", "")
+
+
+def test_callback_refusal_logs_the_reason_without_claim_values(monkeypatch, caplog):
+    monkeypatch.delenv("AUTH_DISABLED", raising=False)
+    token = {"userinfo": {"email": "user@innodia.org", "name": "U", "oid": "o"}}  # no sign-in name
+    with patch.object(ea.oauth.entra, "authorize_access_token", new=AsyncMock(return_value=token)):
+        with caplog.at_level("WARNING"):
+            resp = client.get("/api/auth/callback", follow_redirects=False)
+    assert "auth_error=not_innodia" in resp.headers["location"]
+    assert "no sign-in name in the token" in caplog.text
+    assert "user@innodia.org" not in caplog.text

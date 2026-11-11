@@ -161,3 +161,12 @@ the UPN) is an `@innodia.org` name and does not carry the guest marker `#EXT#`
 ignored: Microsoft documents it as mutable and unverified ("Never use it for
 authorization"), and the tenant holds guest accounts. A guest is refused with
 `auth_error=not_innodia` whatever its mail attribute says.
+
+Two limits of this rule, stated so nobody assumes more:
+
+- A directory administrator can rename a guest's sign-in name onto `innodia.org`; such an
+  account would then pass. Stricter options are the optional claim `acct` (0 = member,
+  1 = guest) or **Assignment required** on the enterprise application, as the INPACT
+  dashboard uses.
+- The rule runs at sign-in. A session created under an older rule stays valid until it
+  expires (12 h). When deploying a stricter rule, purge the `app_sessions` table.
